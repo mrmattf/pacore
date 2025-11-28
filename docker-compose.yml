@@ -1,0 +1,103 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database with pgvector extension
+  postgres:
+    image: pgvector/pgvector:pg15
+    container_name: pacore-postgres
+    environment:
+      POSTGRES_DB: pacore
+      POSTGRES_USER: pacore
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-pacore123}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./packages/cloud/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pacore"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching and sessions
+  redis:
+    image: redis:7-alpine
+    container_name: pacore-redis
+    command: redis-server --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Cloud API Service
+  api:
+    build:
+      context: .
+      dockerfile: packages/cloud/Dockerfile
+    container_name: pacore-api
+    environment:
+      NODE_ENV: ${NODE_ENV:-development}
+      DATABASE_URL: postgresql://pacore:${DB_PASSWORD:-pacore123}@postgres:5432/pacore
+      REDIS_URL: redis://redis:6379
+      VECTOR_STORE: ${VECTOR_STORE:-pgvector}
+      PINECONE_API_KEY: ${PINECONE_API_KEY}
+      PINECONE_INDEX_NAME: ${PINECONE_INDEX_NAME:-pacore-conversations}
+      JWT_SECRET: ${JWT_SECRET:-change-this-secret-in-production}
+      PORT: 3000
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3001}
+    ports:
+      - "3000:3000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    # For development with hot reload, uncomment the volumes below and use dev command
+    # volumes:
+    #   - ./packages/cloud:/app/packages/cloud
+    #   - /app/node_modules
+    # command: pnpm run dev --filter=@pacore/cloud
+
+  # On-premise Agent (optional, for testing)
+  agent:
+    build:
+      context: .
+      dockerfile: packages/agent/Dockerfile
+    container_name: pacore-agent
+    environment:
+      AGENT_TOKEN: ${AGENT_TOKEN}
+      CLOUD_URL: ${CLOUD_URL:-http://api:3000}
+      AGENT_ID: ${AGENT_ID:-agent-docker-1}
+      OLLAMA_HOST: ${OLLAMA_HOST:-http://ollama:11434}
+    depends_on:
+      - api
+      - ollama
+    restart: unless-stopped
+    profiles:
+      - with-agent
+
+  # Ollama for local LLM (optional)
+  ollama:
+    image: ollama/ollama:latest
+    container_name: pacore-ollama
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    profiles:
+      - with-ollama
+
+volumes:
+  postgres_data:
+  redis_data:
+  ollama_data:
+
+networks:
+  default:
+    name: pacore-network

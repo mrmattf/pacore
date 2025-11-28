@@ -1,0 +1,23 @@
+{
+  "name": "@pacore/adapters",
+  "version": "1.0.0",
+  "description": "LLM provider adapters for PA Core AI Orchestrator",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc --build",
+    "dev": "tsc --watch",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pacore/core": "workspace:*",
+    "@anthropic-ai/sdk": "^0.18.0",
+    "openai": "^4.24.0",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.10.5",
+    "typescript": "^5.3.3"
+  }
+}

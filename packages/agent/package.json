@@ -1,0 +1,31 @@
+{
+  "name": "@pacore/agent",
+  "version": "1.0.0",
+  "description": "On-premise agent for PA Core AI Orchestrator",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "bin": {
+    "pacore-agent": "./dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc --build",
+    "dev": "tsx watch src/index.ts",
+    "start": "node dist/index.js",
+    "clean": "rm -rf dist",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@pacore/core": "workspace:*",
+    "@pacore/adapters": "workspace:*",
+    "ws": "^8.16.0",
+    "dotenv": "^16.3.1",
+    "commander": "^11.1.0",
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/ws": "^8.5.10",
+    "@types/node": "^20.10.5",
+    "tsx": "^4.7.0",
+    "typescript": "^5.3.3"
+  }
+}
