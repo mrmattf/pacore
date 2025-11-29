@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { LLMProviderRegistry } from '@pacore/core';
-import { AnthropicProvider, OpenAIProvider, CustomEndpointProvider } from '@pacore/adapters';
+import { AnthropicProvider, OpenAIProvider, OllamaProvider, CustomEndpointProvider } from '@pacore/adapters';
 import { VectorMemoryStore, PgVectorStore, MemoryManager } from './memory';
 import { Orchestrator, UserSettings } from './orchestration';
 import { APIGateway } from './api';
@@ -18,6 +18,7 @@ async function main() {
   // Register default providers
   registry.registerProvider(new AnthropicProvider());
   registry.registerProvider(new OpenAIProvider());
+  registry.registerProvider(new OllamaProvider());
   registry.registerProvider(new CustomEndpointProvider());
 
   console.log('Registered LLM providers:', registry.getProviders().map(p => p.id));
