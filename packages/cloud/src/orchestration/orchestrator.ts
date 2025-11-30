@@ -2,11 +2,23 @@ import { nanoid } from 'nanoid';
 import { LLMProviderRegistry, Message, CompletionOptions, CompletionResponse } from '@pacore/core';
 import { MemoryManager } from '../memory';
 
+export interface ContextSearchConfig {
+  enabled?: boolean;
+  limit?: number;
+  minRelevance?: number;
+  dateRange?: {
+    from?: Date;
+    to?: Date;
+  };
+  providers?: string[];
+  tags?: string[];
+}
+
 export interface RequestOptions extends CompletionOptions {
   providerId?: string;
   agentId?: string;
   saveToMemory?: boolean;
-  contextSearch?: boolean;
+  contextSearch?: boolean | ContextSearchConfig;
 }
 
 export interface OrchestrationResponse {
@@ -56,29 +68,42 @@ export class Orchestrator {
     input: string,
     options: RequestOptions = {},
   ): Promise<OrchestrationResponse> {
-    // 1. Retrieve relevant context from memory
+    // 1. Determine context search configuration
+    let contextConfig: ContextSearchConfig;
+    if (typeof options.contextSearch === 'object') {
+      contextConfig = options.contextSearch;
+    } else if (options.contextSearch === false) {
+      contextConfig = { enabled: false };
+    } else {
+      contextConfig = { enabled: true };
+    }
+
+    // 2. Retrieve relevant context from memory
     let context: any[] = [];
-    if (options.contextSearch !== false) {
+    if (contextConfig.enabled !== false) {
       context = await this.memory.searchContext(userId, input, {
-        limit: 5,
-        minRelevance: 0.7,
+        limit: contextConfig.limit ?? 5,
+        minRelevance: contextConfig.minRelevance ?? 0.7,
+        dateRange: contextConfig.dateRange,
+        providers: contextConfig.providers,
+        tags: contextConfig.tags,
       });
     }
 
-    // 2. Determine routing strategy
+    // 3. Determine routing strategy
     const routing = await this.determineRouting(userId, input, options);
 
-    // 3. Prepare messages with context
+    // 4. Prepare messages with context
     const messages = this.prepareMessages(input, context, routing);
 
-    // 4. Execute request based on routing
+    // 5. Execute request based on routing
     let response: CompletionResponse;
 
     // For now, always use cloud provider (agent support will be added separately)
     const provider = await this.registry.getLLMForUser(userId, routing.providerId);
     response = await provider.complete(messages, options);
 
-    // 5. Store conversation in memory
+    // 6. Store conversation in memory
     if (options.saveToMemory !== false) {
       const conversationId = nanoid();
       await this.memory.storeConversation(userId, {
