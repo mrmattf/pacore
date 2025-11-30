@@ -99,7 +99,7 @@ export class APIGateway {
     });
     this.app.use('/v1/auth', authRoutes);
 
-    // Complete endpoint
+    // Complete endpoint with SSE streaming support
     this.app.post('/v1/complete', async (req: AuthenticatedRequest, res: Response) => {
       try {
         const { messages, options } = req.body;
@@ -111,13 +111,34 @@ export class APIGateway {
           return res.status(400).json({ error: 'Invalid messages format' });
         }
 
-        const response = await this.orchestrator.processRequest(
-          userId,
-          lastMessage.content,
-          options,
-        );
+        // Check if streaming is requested
+        if (options?.stream === true) {
+          // Set SSE headers
+          res.setHeader('Content-Type', 'text/event-stream');
+          res.setHeader('Cache-Control', 'no-cache');
+          res.setHeader('Connection', 'keep-alive');
+          res.setHeader('X-Accel-Buffering', 'no'); // Disable nginx buffering
 
-        res.json(response);
+          // Stream chunks
+          for await (const chunk of this.orchestrator.processStreamingRequest(
+            userId,
+            lastMessage.content,
+            options,
+          )) {
+            res.write(`data: ${JSON.stringify(chunk)}\n\n`);
+          }
+
+          res.end();
+        } else {
+          // Non-streaming request
+          const response = await this.orchestrator.processRequest(
+            userId,
+            lastMessage.content,
+            options,
+          );
+
+          res.json(response);
+        }
       } catch (error: any) {
         console.error('Complete error:', error);
         res.status(500).json({ error: error.message });
@@ -215,6 +236,109 @@ export class APIGateway {
         res.json({ success: true });
       } catch (error: any) {
         console.error('Delete conversation error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Get conversation by ID
+    this.app.get('/v1/conversations/:id', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { id } = req.params;
+        const conversation = await this.orchestrator.memory.getConversation(id);
+        if (!conversation) {
+          return res.status(404).json({ error: 'Conversation not found' });
+        }
+        res.json(conversation);
+      } catch (error: any) {
+        console.error('Get conversation error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Update conversation tags
+    this.app.put('/v1/conversations/:id/tags', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { id } = req.params;
+        const { tags } = req.body;
+
+        if (!Array.isArray(tags)) {
+          return res.status(400).json({ error: 'Tags must be an array' });
+        }
+
+        await this.orchestrator.memory.updateConversationTags(id, tags);
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error('Update tags error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Add tags to conversation
+    this.app.post('/v1/conversations/:id/tags', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { id } = req.params;
+        const { tags } = req.body;
+
+        if (!Array.isArray(tags)) {
+          return res.status(400).json({ error: 'Tags must be an array' });
+        }
+
+        await this.orchestrator.memory.addConversationTags(id, tags);
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error('Add tags error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Remove tags from conversation
+    this.app.delete('/v1/conversations/:id/tags', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { id } = req.params;
+        const { tags } = req.body;
+
+        if (!Array.isArray(tags)) {
+          return res.status(400).json({ error: 'Tags must be an array' });
+        }
+
+        await this.orchestrator.memory.removeConversationTags(id, tags);
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error('Remove tags error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Get conversations by tag
+    this.app.get('/v1/conversations/by-tag/:tag', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { tag } = req.params;
+        const userId = req.user!.id;
+        const limit = parseInt(req.query.limit as string) || 20;
+        const offset = parseInt(req.query.offset as string) || 0;
+
+        const conversations = await this.orchestrator.memory.getConversationsByTag(
+          userId,
+          tag,
+          limit,
+          offset
+        );
+
+        res.json(conversations);
+      } catch (error: any) {
+        console.error('Get conversations by tag error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Get user's tags with counts
+    this.app.get('/v1/tags', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const tags = await this.orchestrator.memory.getUserTags(userId);
+        res.json(tags);
+      } catch (error: any) {
+        console.error('Get user tags error:', error);
         res.status(500).json({ error: error.message });
       }
     });

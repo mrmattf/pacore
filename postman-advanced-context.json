@@ -1,0 +1,367 @@
+{
+  "info": {
+    "name": "PA Core - Advanced Context Search",
+    "description": "Test advanced context search with time decay, tags, and hybrid scoring",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Setup",
+      "item": [
+        {
+          "name": "1. Register User",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"context-test@example.com\",\n  \"password\": \"SecurePassword123!\",\n  \"name\": \"Context Test User\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3000/v1/auth/register",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["v1", "auth", "register"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "pm.collectionVariables.set(\"auth_token\", response.token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Configure Ollama",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"endpoint\": \"http://host.docker.internal:11434\",\n  \"model\": \"llama3.2\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3000/v1/providers/ollama/configure",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["v1", "providers", "ollama", "configure"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Create Test Conversations",
+      "item": [
+        {
+          "name": "3. Ask About JavaScript (save for later)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [{\"role\": \"user\", \"content\": \"Explain async/await in JavaScript\"}],\n  \"options\": {\n    \"providerId\": \"ollama\",\n    \"contextSearch\": false,\n    \"saveToMemory\": true\n  }\n}"
+            },
+            "url": "http://localhost:3000/v1/complete"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "pm.collectionVariables.set(\"conversation1_id\", response.contextUsed ? response.contextUsed[0] : null);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "4. Ask About Python",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [{\"role\": \"user\", \"content\": \"What are Python decorators?\"}],\n  \"options\": {\n    \"providerId\": \"ollama\",\n    \"contextSearch\": false,\n    \"saveToMemory\": true\n  }\n}"
+            },
+            "url": "http://localhost:3000/v1/complete"
+          }
+        },
+        {
+          "name": "5. Ask About Docker",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [{\"role\": \"user\", \"content\": \"How does Docker networking work?\"}],\n  \"options\": {\n    \"providerId\": \"ollama\",\n    \"contextSearch\": false,\n    \"saveToMemory\": true\n  }\n}"
+            },
+            "url": "http://localhost:3000/v1/complete"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Tag Management",
+      "item": [
+        {
+          "name": "6. Get All Conversations",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{auth_token}}"}],
+            "url": {
+              "raw": "http://localhost:3000/v1/conversations?limit=10",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["v1", "conversations"],
+              "query": [{"key": "limit", "value": "10"}]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const conversations = pm.response.json();",
+                  "if (conversations.length > 0) {",
+                  "  pm.collectionVariables.set(\"test_conversation_id\", conversations[0].id);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "7. Add Tags to Conversation",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tags\": [\"javascript\", \"programming\", \"async\"]\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3000/v1/conversations/{{test_conversation_id}}/tags",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["v1", "conversations", "{{test_conversation_id}}", "tags"]
+            }
+          }
+        },
+        {
+          "name": "8. Get User Tags",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{auth_token}}"}],
+            "url": "http://localhost:3000/v1/tags"
+          }
+        },
+        {
+          "name": "9. Get Conversations by Tag",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{auth_token}}"}],
+            "url": {
+              "raw": "http://localhost:3000/v1/conversations/by-tag/javascript",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["v1", "conversations", "by-tag", "javascript"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Advanced Context Search",
+      "item": [
+        {
+          "name": "10. Default Search (with time decay)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [{\"role\": \"user\", \"content\": \"Tell me more about async programming\"}],\n  \"options\": {\n    \"providerId\": \"ollama\",\n    \"contextSearch\": {\n      \"enabled\": true,\n      \"limit\": 3\n    }\n  }\n}"
+            },
+            "url": "http://localhost:3000/v1/complete"
+          }
+        },
+        {
+          "name": "11. Time Decay OFF (no aging)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [{\"role\": \"user\", \"content\": \"Tell me about programming concepts\"}],\n  \"options\": {\n    \"providerId\": \"ollama\",\n    \"contextSearch\": {\n      \"enabled\": true,\n      \"limit\": 3,\n      \"timeDecay\": false\n    }\n  }\n}"
+            },
+            "url": "http://localhost:3000/v1/complete"
+          }
+        },
+        {
+          "name": "12. Fast Time Decay (3 day half-life)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [{\"role\": \"user\", \"content\": \"What did we discuss about code?\"}],\n  \"options\": {\n    \"providerId\": \"ollama\",\n    \"contextSearch\": {\n      \"enabled\": true,\n      \"limit\": 3,\n      \"timeDecay\": true,\n      \"decayHalfLife\": 3\n    }\n  }\n}"
+            },
+            "url": "http://localhost:3000/v1/complete"
+          }
+        },
+        {
+          "name": "13. Boost Recent (last 24h)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [{\"role\": \"user\", \"content\": \"Summarize our recent talks\"}],\n  \"options\": {\n    \"providerId\": \"ollama\",\n    \"contextSearch\": {\n      \"enabled\": true,\n      \"limit\": 5,\n      \"boostRecent\": true\n    }\n  }\n}"
+            },
+            "url": "http://localhost:3000/v1/complete"
+          }
+        },
+        {
+          "name": "14. Sort by Recency Only",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [{\"role\": \"user\", \"content\": \"What were my latest questions?\"}],\n  \"options\": {\n    \"providerId\": \"ollama\",\n    \"contextSearch\": {\n      \"enabled\": true,\n      \"limit\": 3,\n      \"sortBy\": \"recency\"\n    }\n  }\n}"
+            },
+            "url": "http://localhost:3000/v1/complete"
+          }
+        },
+        {
+          "name": "15. Hybrid Scoring (relevance + recency)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [{\"role\": \"user\", \"content\": \"Remind me about JavaScript topics\"}],\n  \"options\": {\n    \"providerId\": \"ollama\",\n    \"contextSearch\": {\n      \"enabled\": true,\n      \"limit\": 3,\n      \"sortBy\": \"hybrid\"\n    }\n  }\n}"
+            },
+            "url": "http://localhost:3000/v1/complete"
+          }
+        },
+        {
+          "name": "16. Filter by Tags",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [{\"role\": \"user\", \"content\": \"Tell me about what we discussed\"}],\n  \"options\": {\n    \"providerId\": \"ollama\",\n    \"contextSearch\": {\n      \"enabled\": true,\n      \"limit\": 5,\n      \"tags\": [\"javascript\", \"programming\"]\n    }\n  }\n}"
+            },
+            "url": "http://localhost:3000/v1/complete"
+          }
+        },
+        {
+          "name": "17. High Relevance Threshold",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [{\"role\": \"user\", \"content\": \"Async patterns in code\"}],\n  \"options\": {\n    \"providerId\": \"ollama\",\n    \"contextSearch\": {\n      \"enabled\": true,\n      \"limit\": 3,\n      \"minRelevance\": 0.85\n    }\n  }\n}"
+            },
+            "url": "http://localhost:3000/v1/complete"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Advanced Context Search + Streaming",
+      "item": [
+        {
+          "name": "18. Streaming with Hybrid Context",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"},
+              {"key": "Accept", "value": "text/event-stream"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [{\"role\": \"user\", \"content\": \"Based on our conversation history, what programming topics should I focus on?\"}],\n  \"options\": {\n    \"providerId\": \"ollama\",\n    \"stream\": true,\n    \"contextSearch\": {\n      \"enabled\": true,\n      \"limit\": 5,\n      \"sortBy\": \"hybrid\",\n      \"boostRecent\": true,\n      \"minRelevance\": 0.6\n    }\n  }\n}"
+            },
+            "url": "http://localhost:3000/v1/complete"
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "auth_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "test_conversation_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "conversation1_id",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

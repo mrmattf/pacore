@@ -68,19 +68,16 @@ export class MemoryManager {
     query: string,
     options: MemorySearchOptions = {}
   ): Promise<ContextResult[]> {
-    // Search using vector similarity
+    // Search using vector similarity (fetch more initially for better filtering)
+    const fetchLimit = Math.max((options.limit || 5) * 3, 15);
     const results = await this.vectorStore.searchContext(
       userId,
       query,
-      options.limit || 5
+      fetchLimit
     );
 
     // Filter by additional criteria
     let filtered = results;
-
-    if (options.minRelevance) {
-      filtered = filtered.filter(r => r.relevanceScore >= options.minRelevance!);
-    }
 
     if (options.dateRange) {
       filtered = filtered.filter(r => {
@@ -104,7 +101,49 @@ export class MemoryManager {
       });
     }
 
-    return filtered.slice(0, options.limit || 5);
+    // Apply advanced scoring
+    const scored = filtered.map(r => {
+      let finalScore = r.relevanceScore;
+      const ageInMs = Date.now() - r.timestamp.getTime();
+      const ageInDays = ageInMs / (1000 * 60 * 60 * 24);
+
+      // Apply time decay if enabled
+      if (options.timeDecay !== false) { // Default to true
+        const halfLife = options.decayHalfLife || 7; // Default 7 days
+        const decayFactor = Math.pow(0.5, ageInDays / halfLife);
+        finalScore *= decayFactor;
+      }
+
+      // Boost recent conversations (last 24 hours)
+      if (options.boostRecent !== false && ageInDays < 1) {
+        const recentBoost = 1 + (1 - ageInDays) * 0.3; // Up to 30% boost
+        finalScore *= recentBoost;
+      }
+
+      // Hybrid scoring considers both relevance and recency
+      if (options.sortBy === 'hybrid') {
+        const recencyScore = 1 / (1 + ageInDays); // Decay with age
+        finalScore = 0.7 * finalScore + 0.3 * recencyScore;
+      }
+
+      return { ...r, relevanceScore: finalScore };
+    });
+
+    // Sort based on strategy
+    let sorted = scored;
+    if (options.sortBy === 'recency') {
+      sorted = scored.sort((a, b) => b.timestamp.getTime() - a.timestamp.getTime());
+    } else {
+      // Default to relevance or hybrid
+      sorted = scored.sort((a, b) => b.relevanceScore - a.relevanceScore);
+    }
+
+    // Apply minimum relevance filter after scoring
+    if (options.minRelevance) {
+      sorted = sorted.filter(r => r.relevanceScore >= options.minRelevance!);
+    }
+
+    return sorted.slice(0, options.limit || 5);
   }
 
   async getConversation(conversationId: string): Promise<Conversation | null> {
@@ -169,6 +208,89 @@ export class MemoryManager {
     for (const row of result.rows) {
       await this.vectorStore.deleteConversation(row.id);
     }
+  }
+
+  async updateConversationTags(
+    conversationId: string,
+    tags: string[]
+  ): Promise<void> {
+    await this.db.query(
+      `UPDATE conversations
+       SET metadata = jsonb_set(metadata, '{tags}', $1::jsonb),
+           updated_at = NOW()
+       WHERE id = $2`,
+      [JSON.stringify(tags), conversationId]
+    );
+  }
+
+  async addConversationTags(
+    conversationId: string,
+    tagsToAdd: string[]
+  ): Promise<void> {
+    const conversation = await this.getConversation(conversationId);
+    if (!conversation) {
+      throw new Error('Conversation not found');
+    }
+
+    const existingTags = conversation.metadata.tags || [];
+    const uniqueTags = [...new Set([...existingTags, ...tagsToAdd])];
+
+    await this.updateConversationTags(conversationId, uniqueTags);
+  }
+
+  async removeConversationTags(
+    conversationId: string,
+    tagsToRemove: string[]
+  ): Promise<void> {
+    const conversation = await this.getConversation(conversationId);
+    if (!conversation) {
+      throw new Error('Conversation not found');
+    }
+
+    const existingTags = conversation.metadata.tags || [];
+    const filteredTags = existingTags.filter(tag => !tagsToRemove.includes(tag));
+
+    await this.updateConversationTags(conversationId, filteredTags);
+  }
+
+  async getConversationsByTag(
+    userId: string,
+    tag: string,
+    limit: number = 20,
+    offset: number = 0
+  ): Promise<Conversation[]> {
+    const result = await this.db.query(
+      `SELECT * FROM conversations
+       WHERE user_id = $1
+       AND metadata->'tags' ? $2
+       ORDER BY timestamp DESC
+       LIMIT $3 OFFSET $4`,
+      [userId, tag, limit, offset]
+    );
+
+    return result.rows.map(row => ({
+      id: row.id,
+      userId: row.user_id,
+      messages: row.messages,
+      timestamp: row.timestamp,
+      metadata: row.metadata,
+    }));
+  }
+
+  async getUserTags(userId: string): Promise<{ tag: string; count: number }[]> {
+    const result = await this.db.query(
+      `SELECT jsonb_array_elements_text(metadata->'tags') as tag, COUNT(*) as count
+       FROM conversations
+       WHERE user_id = $1
+       GROUP BY tag
+       ORDER BY count DESC`,
+      [userId]
+    );
+
+    return result.rows.map(row => ({
+      tag: row.tag,
+      count: parseInt(row.count),
+    }));
   }
 
   async close(): Promise<void> {

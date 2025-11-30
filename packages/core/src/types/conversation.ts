@@ -39,4 +39,8 @@ export interface MemorySearchOptions {
   };
   providers?: string[];
   tags?: string[];
+  timeDecay?: boolean; // Apply time-based decay to relevance scores
+  decayHalfLife?: number; // Days for score to decay by 50% (default: 7)
+  boostRecent?: boolean; // Boost conversations from last 24 hours
+  sortBy?: 'relevance' | 'recency' | 'hybrid'; // Sorting strategy
 }
