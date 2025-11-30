@@ -5,6 +5,8 @@ import { VectorMemoryStore, PgVectorStore, MemoryManager } from './memory';
 import { Orchestrator, UserSettings } from './orchestration';
 import { APIGateway } from './api';
 import { Pool } from 'pg';
+import { MCPRegistry } from './mcp';
+import { WorkflowManager, WorkflowExecutor } from './workflow';
 
 /**
  * Main entry point for the cloud service
@@ -52,6 +54,20 @@ async function main() {
   await memoryManager.initialize();
   console.log('Memory manager initialized');
 
+  // Initialize MCP Registry
+  const mcpRegistry = new MCPRegistry(dbPool);
+  await mcpRegistry.initialize();
+  console.log('MCP registry initialized');
+
+  // Initialize Workflow Manager
+  const workflowManager = new WorkflowManager(dbPool);
+  await workflowManager.initialize();
+  console.log('Workflow manager initialized');
+
+  // Initialize Workflow Executor
+  const workflowExecutor = new WorkflowExecutor(mcpRegistry, registry);
+  console.log('Workflow executor initialized');
+
   // User settings getter (simplified - would normally come from database)
   const getUserSettings = async (userId: string): Promise<UserSettings> => {
     // TODO: Load from database
@@ -74,6 +90,9 @@ async function main() {
     jwtSecret: process.env.JWT_SECRET || 'your-secret-key-change-in-production',
     corsOrigins: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:3001'],
     db: dbPool,
+    mcpRegistry,
+    workflowManager,
+    workflowExecutor,
   });
 
   await gateway.start();
@@ -105,3 +124,5 @@ main().catch((error) => {
 export * from './memory';
 export * from './orchestration';
 export * from './api';
+export * from './mcp';
+export * from './workflow';

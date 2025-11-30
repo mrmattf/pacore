@@ -5,12 +5,18 @@ import jwt from 'jsonwebtoken';
 import { Pool } from 'pg';
 import { Orchestrator } from '../orchestration';
 import { createAuthRoutes } from './auth-routes';
+import { MCPRegistry } from '../mcp';
+import { MCPClient } from '../mcp';
+import { WorkflowManager, WorkflowExecutor } from '../workflow';
 
 export interface GatewayConfig {
   port: number;
   jwtSecret: string;
   corsOrigins?: string[];
   db: Pool;
+  mcpRegistry: MCPRegistry;
+  workflowManager: WorkflowManager;
+  workflowExecutor: WorkflowExecutor;
 }
 
 interface AuthenticatedRequest extends Request {
@@ -423,6 +429,376 @@ export class APIGateway {
         res.json({ success: true });
       } catch (error: any) {
         console.error('Accept category error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // MCP Server Management
+    // Register a new MCP server
+    this.app.post('/v1/mcp/servers', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const { name, serverType, protocol, connectionConfig, categories } = req.body;
+
+        if (!name || !serverType || !protocol || !connectionConfig) {
+          return res.status(400).json({
+            error: 'Missing required fields: name, serverType, protocol, connectionConfig'
+          });
+        }
+
+        const server = await this.config.mcpRegistry.registerServer({
+          userId,
+          name,
+          serverType,
+          protocol,
+          connectionConfig,
+          categories,
+        });
+
+        res.json(server);
+      } catch (error: any) {
+        console.error('Register MCP server error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // List user's MCP servers
+    this.app.get('/v1/mcp/servers', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const category = req.query.category as string | undefined;
+
+        const servers = await this.config.mcpRegistry.listUserServers(userId, category);
+        res.json(servers);
+      } catch (error: any) {
+        console.error('List MCP servers error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Get MCP server details
+    this.app.get('/v1/mcp/servers/:id', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { id } = req.params;
+        const server = await this.config.mcpRegistry.getServer(id);
+
+        if (!server) {
+          return res.status(404).json({ error: 'MCP server not found' });
+        }
+
+        // Verify user owns this server
+        if (server.userId !== req.user!.id) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+
+        res.json(server);
+      } catch (error: any) {
+        console.error('Get MCP server error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Delete MCP server
+    this.app.delete('/v1/mcp/servers/:id', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { id } = req.params;
+        const server = await this.config.mcpRegistry.getServer(id);
+
+        if (!server) {
+          return res.status(404).json({ error: 'MCP server not found' });
+        }
+
+        // Verify user owns this server
+        if (server.userId !== req.user!.id) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+
+        await this.config.mcpRegistry.deleteServer(id);
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error('Delete MCP server error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Test MCP server connection
+    this.app.post('/v1/mcp/servers/:id/test', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { id } = req.params;
+        const server = await this.config.mcpRegistry.getServer(id);
+
+        if (!server) {
+          return res.status(404).json({ error: 'MCP server not found' });
+        }
+
+        // Verify user owns this server
+        if (server.userId !== req.user!.id) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+
+        const isConnected = await this.config.mcpRegistry.testServerConnection(id);
+        res.json({ connected: isConnected });
+      } catch (error: any) {
+        console.error('Test MCP connection error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // List MCP server tools
+    this.app.get('/v1/mcp/servers/:id/tools', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { id } = req.params;
+        const server = await this.config.mcpRegistry.getServer(id);
+
+        if (!server) {
+          return res.status(404).json({ error: 'MCP server not found' });
+        }
+
+        // Verify user owns this server
+        if (server.userId !== req.user!.id) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+
+        const client = new MCPClient(server);
+        const capabilities = await client.listCapabilities();
+        res.json(capabilities);
+      } catch (error: any) {
+        console.error('List MCP tools error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Call MCP server tool
+    this.app.post('/v1/mcp/servers/:id/call', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { id } = req.params;
+        const { toolName, parameters } = req.body;
+
+        if (!toolName) {
+          return res.status(400).json({ error: 'toolName is required' });
+        }
+
+        const server = await this.config.mcpRegistry.getServer(id);
+
+        if (!server) {
+          return res.status(404).json({ error: 'MCP server not found' });
+        }
+
+        // Verify user owns this server
+        if (server.userId !== req.user!.id) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+
+        const client = new MCPClient(server);
+        const result = await client.callTool({
+          serverId: id,
+          toolName,
+          parameters: parameters || {},
+        });
+
+        res.json(result);
+      } catch (error: any) {
+        console.error('Call MCP tool error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Workflow Management
+    // Create a new workflow
+    this.app.post('/v1/workflows', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const { name, description, category, nodes } = req.body;
+
+        if (!name || !nodes) {
+          return res.status(400).json({
+            error: 'Missing required fields: name, nodes'
+          });
+        }
+
+        const workflow = await this.config.workflowManager.createWorkflow({
+          userId,
+          name,
+          description,
+          category,
+          nodes,
+        });
+
+        res.json(workflow);
+      } catch (error: any) {
+        console.error('Create workflow error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // List user's workflows
+    this.app.get('/v1/workflows', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const category = req.query.category as string | undefined;
+
+        const workflows = await this.config.workflowManager.listUserWorkflows(userId, category);
+        res.json(workflows);
+      } catch (error: any) {
+        console.error('List workflows error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Get workflow by ID
+    this.app.get('/v1/workflows/:id', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { id } = req.params;
+        const workflow = await this.config.workflowManager.getWorkflow(id);
+
+        if (!workflow) {
+          return res.status(404).json({ error: 'Workflow not found' });
+        }
+
+        // Verify user owns this workflow
+        if (workflow.userId !== req.user!.id) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+
+        res.json(workflow);
+      } catch (error: any) {
+        console.error('Get workflow error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Update workflow
+    this.app.put('/v1/workflows/:id', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { id } = req.params;
+        const workflow = await this.config.workflowManager.getWorkflow(id);
+
+        if (!workflow) {
+          return res.status(404).json({ error: 'Workflow not found' });
+        }
+
+        // Verify user owns this workflow
+        if (workflow.userId !== req.user!.id) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+
+        const updated = await this.config.workflowManager.updateWorkflow(id, req.body);
+        res.json(updated);
+      } catch (error: any) {
+        console.error('Update workflow error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Delete workflow
+    this.app.delete('/v1/workflows/:id', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { id } = req.params;
+        const workflow = await this.config.workflowManager.getWorkflow(id);
+
+        if (!workflow) {
+          return res.status(404).json({ error: 'Workflow not found' });
+        }
+
+        // Verify user owns this workflow
+        if (workflow.userId !== req.user!.id) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+
+        await this.config.workflowManager.deleteWorkflow(id);
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error('Delete workflow error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Execute a workflow
+    this.app.post('/v1/workflows/:id/execute', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { id } = req.params;
+        const userId = req.user!.id;
+        const workflow = await this.config.workflowManager.getWorkflow(id);
+
+        if (!workflow) {
+          return res.status(404).json({ error: 'Workflow not found' });
+        }
+
+        // Verify user owns this workflow
+        if (workflow.userId !== userId) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+
+        // Execute workflow
+        const execution = await this.config.workflowExecutor.execute(workflow, userId);
+
+        // Save execution
+        await this.config.workflowManager.saveExecution(execution);
+
+        res.json(execution);
+      } catch (error: any) {
+        console.error('Execute workflow error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Get workflow execution
+    this.app.get('/v1/executions/:id', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { id } = req.params;
+        const execution = await this.config.workflowManager.getExecution(id);
+
+        if (!execution) {
+          return res.status(404).json({ error: 'Execution not found' });
+        }
+
+        // Verify user owns this execution
+        if (execution.userId !== req.user!.id) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+
+        res.json(execution);
+      } catch (error: any) {
+        console.error('Get execution error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // List workflow executions
+    this.app.get('/v1/workflows/:id/executions', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { id } = req.params;
+        const workflow = await this.config.workflowManager.getWorkflow(id);
+
+        if (!workflow) {
+          return res.status(404).json({ error: 'Workflow not found' });
+        }
+
+        // Verify user owns this workflow
+        if (workflow.userId !== req.user!.id) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+
+        const limit = parseInt(req.query.limit as string) || 20;
+        const executions = await this.config.workflowManager.listWorkflowExecutions(id, limit);
+
+        res.json(executions);
+      } catch (error: any) {
+        console.error('List workflow executions error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // List user's executions
+    this.app.get('/v1/executions', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const limit = parseInt(req.query.limit as string) || 20;
+
+        const executions = await this.config.workflowManager.listUserExecutions(userId, limit);
+        res.json(executions);
+      } catch (error: any) {
+        console.error('List executions error:', error);
         res.status(500).json({ error: error.message });
       }
     });
