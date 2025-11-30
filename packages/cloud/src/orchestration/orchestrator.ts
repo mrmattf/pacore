@@ -1,6 +1,7 @@
 import { nanoid } from 'nanoid';
 import { LLMProviderRegistry, Message, CompletionOptions, CompletionResponse, StreamChunk } from '@pacore/core';
 import { MemoryManager } from '../memory';
+import { ConversationClassifier } from '../services/conversation-classifier';
 
 export interface ContextSearchConfig {
   enabled?: boolean;
@@ -19,6 +20,8 @@ export interface RequestOptions extends CompletionOptions {
   agentId?: string;
   saveToMemory?: boolean;
   contextSearch?: boolean | ContextSearchConfig;
+  autoTag?: boolean; // Auto-generate tags and title (default: true)
+  autoClassify?: boolean; // Auto-classify conversation category (default: true)
 }
 
 export interface OrchestrationResponse {
@@ -52,6 +55,7 @@ export class Orchestrator {
   public registry: LLMProviderRegistry;
   public memory: MemoryManager;
   private getUserSettings: (userId: string) => Promise<UserSettings>;
+  private classifier?: ConversationClassifier;
 
   constructor(
     registry: LLMProviderRegistry,
@@ -106,18 +110,61 @@ export class Orchestrator {
     // 6. Store conversation in memory
     if (options.saveToMemory !== false) {
       const conversationId = nanoid();
+      const conversationMessages: Message[] = [
+        ...messages,
+        { role: 'assistant' as const, content: response.content },
+      ];
+
+      // Auto-tag and classify if enabled (default: true)
+      const metadata: any = {
+        provider: routing.providerId,
+        context: context.map(c => c.id),
+      };
+
+      if (options.autoTag !== false || options.autoClassify !== false) {
+        try {
+          // Initialize classifier if not already done
+          if (!this.classifier) {
+            this.classifier = new ConversationClassifier(provider);
+          }
+
+          if (options.autoClassify !== false) {
+            // Get user's categories for classification
+            const userCategories = await this.memory.getUserCategories(userId);
+
+            // Full classification (tags + title + category)
+            const classification = await this.classifier.classifyConversation(
+              conversationMessages,
+              userCategories
+            );
+            metadata.tags = classification.tags;
+            metadata.title = classification.title;
+            metadata.category = classification.category;
+            metadata.autoClassified = true;
+            metadata.classificationConfidence = classification.confidence;
+
+            // If a category suggestion exists, include it in metadata
+            if (classification.suggestedCategory) {
+              metadata.suggestedCategory = classification.suggestedCategory;
+            }
+          } else if (options.autoTag !== false) {
+            // Just tags
+            const tags = await this.classifier.generateTags(conversationMessages);
+            metadata.tags = tags;
+            metadata.autoTagged = true;
+          }
+        } catch (error) {
+          console.error('Auto-tagging error:', error);
+          // Continue without tags if classification fails
+        }
+      }
+
       await this.memory.storeConversation(userId, {
         id: conversationId,
         userId,
-        messages: [
-          ...messages,
-          { role: 'assistant', content: response.content },
-        ],
+        messages: conversationMessages,
         timestamp: new Date(),
-        metadata: {
-          provider: routing.providerId,
-          context: context.map(c => c.id),
-        },
+        metadata,
       });
     }
 
@@ -180,19 +227,62 @@ export class Orchestrator {
     // 7. Store conversation in memory after streaming completes
     if (options.saveToMemory !== false) {
       const conversationId = nanoid();
+      const conversationMessages: Message[] = [
+        ...allMessages,
+        { role: 'assistant' as const, content: fullResponse },
+      ];
+
+      // Auto-tag and classify if enabled (default: true)
+      const metadata: any = {
+        provider: routing.providerId,
+        context: context.map(c => c.id),
+        streaming: true,
+      };
+
+      if (options.autoTag !== false || options.autoClassify !== false) {
+        try {
+          // Initialize classifier if not already done
+          if (!this.classifier) {
+            this.classifier = new ConversationClassifier(provider);
+          }
+
+          if (options.autoClassify !== false) {
+            // Get user's categories for classification
+            const userCategories = await this.memory.getUserCategories(userId);
+
+            // Full classification (tags + title + category)
+            const classification = await this.classifier.classifyConversation(
+              conversationMessages,
+              userCategories
+            );
+            metadata.tags = classification.tags;
+            metadata.title = classification.title;
+            metadata.category = classification.category;
+            metadata.autoClassified = true;
+            metadata.classificationConfidence = classification.confidence;
+
+            // If a category suggestion exists, include it in metadata
+            if (classification.suggestedCategory) {
+              metadata.suggestedCategory = classification.suggestedCategory;
+            }
+          } else if (options.autoTag !== false) {
+            // Just tags
+            const tags = await this.classifier.generateTags(conversationMessages);
+            metadata.tags = tags;
+            metadata.autoTagged = true;
+          }
+        } catch (error) {
+          console.error('Auto-tagging error:', error);
+          // Continue without tags if classification fails
+        }
+      }
+
       await this.memory.storeConversation(userId, {
         id: conversationId,
         userId,
-        messages: [
-          ...allMessages,
-          { role: 'assistant', content: fullResponse },
-        ],
+        messages: conversationMessages,
         timestamp: new Date(),
-        metadata: {
-          provider: routing.providerId,
-          context: context.map(c => c.id),
-          streaming: true,
-        },
+        metadata,
       });
     }
   }

@@ -1,0 +1,440 @@
+{
+  "info": {
+    "name": "PA Core - User-Defined Categories",
+    "description": "Test user-defined categories with auto-classification and suggestions",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Setup",
+      "item": [
+        {
+          "name": "1. Register User",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"category-test@example.com\",\n  \"password\": \"SecurePassword123!\",\n  \"name\": \"Category Test User\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3000/v1/auth/register",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["v1", "auth", "register"]
+            }
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "pm.collectionVariables.set(\"auth_token\", response.token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "2. Configure Ollama",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"endpoint\": \"http://host.docker.internal:11434\",\n  \"model\": \"llama3.2\"\n}"
+            },
+            "url": {
+              "raw": "http://localhost:3000/v1/providers/ollama/configure",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["v1", "providers", "ollama", "configure"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Category Management",
+      "item": [
+        {
+          "name": "3. Get User Categories (should be empty initially)",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{auth_token}}"}],
+            "url": "http://localhost:3000/v1/categories"
+          }
+        },
+        {
+          "name": "4. Add Category - Work",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"work\",\n  \"description\": \"Work-related conversations\"\n}"
+            },
+            "url": "http://localhost:3000/v1/categories"
+          }
+        },
+        {
+          "name": "5. Add Category - Personal",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"personal\",\n  \"description\": \"Personal topics and hobbies\"\n}"
+            },
+            "url": "http://localhost:3000/v1/categories"
+          }
+        },
+        {
+          "name": "6. Get User Categories (should show work and personal)",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{auth_token}}"}],
+            "url": "http://localhost:3000/v1/categories"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Auto-Classification with Existing Categories",
+      "item": [
+        {
+          "name": "7. Ask Work Question (should match 'work' category)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [{\"role\": \"user\", \"content\": \"Help me write a professional email to my boss about the quarterly report\"}],\n  \"options\": {\n    \"providerId\": \"ollama\",\n    \"contextSearch\": false,\n    \"saveToMemory\": true,\n    \"autoClassify\": true\n  }\n}"
+            },
+            "url": "http://localhost:3000/v1/complete"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "if (response.contextUsed && response.contextUsed.length > 0) {",
+                  "  pm.collectionVariables.set(\"work_conversation_id\", response.contextUsed[0]);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "8. Get Work Conversation (check metadata)",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{auth_token}}"}],
+            "url": "http://localhost:3000/v1/conversations/{{work_conversation_id}}"
+          }
+        },
+        {
+          "name": "9. Ask Personal Question (should match 'personal' category)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [{\"role\": \"user\", \"content\": \"What are some good beginner-friendly hiking trails?\"}],\n  \"options\": {\n    \"providerId\": \"ollama\",\n    \"contextSearch\": false,\n    \"saveToMemory\": true,\n    \"autoClassify\": true\n  }\n}"
+            },
+            "url": "http://localhost:3000/v1/complete"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Category Suggestions (No Match)",
+      "item": [
+        {
+          "name": "10. Ask Coding Question (no matching category)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [{\"role\": \"user\", \"content\": \"Explain how async/await works in JavaScript\"}],\n  \"options\": {\n    \"providerId\": \"ollama\",\n    \"contextSearch\": false,\n    \"saveToMemory\": true,\n    \"autoClassify\": true\n  }\n}"
+            },
+            "url": "http://localhost:3000/v1/complete"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "if (response.contextUsed && response.contextUsed.length > 0) {",
+                  "  pm.collectionVariables.set(\"coding_conversation_id\", response.contextUsed[0]);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "11. Get Coding Conversation (should have null category)",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{auth_token}}"}],
+            "url": "http://localhost:3000/v1/conversations/{{coding_conversation_id}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "First-Time User (Category Suggestions)",
+      "item": [
+        {
+          "name": "12. Register New User (no categories)",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"email\": \"newuser@example.com\",\n  \"password\": \"SecurePassword123!\",\n  \"name\": \"New User\"\n}"
+            },
+            "url": "http://localhost:3000/v1/auth/register"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "pm.collectionVariables.set(\"new_user_token\", response.token);"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "13. Configure Ollama for New User",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{new_user_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"endpoint\": \"http://host.docker.internal:11434\",\n  \"model\": \"llama3.2\"\n}"
+            },
+            "url": "http://localhost:3000/v1/providers/ollama/configure"
+          }
+        },
+        {
+          "name": "14. First Question (should get category suggestion)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{new_user_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [{\"role\": \"user\", \"content\": \"How do I make sourdough bread?\"}],\n  \"options\": {\n    \"providerId\": \"ollama\",\n    \"contextSearch\": false,\n    \"saveToMemory\": true,\n    \"autoClassify\": true\n  }\n}"
+            },
+            "url": "http://localhost:3000/v1/complete"
+          },
+          "event": [
+            {
+              "listen": "test",
+              "script": {
+                "exec": [
+                  "const response = pm.response.json();",
+                  "if (response.contextUsed && response.contextUsed.length > 0) {",
+                  "  pm.collectionVariables.set(\"first_conversation_id\", response.contextUsed[0]);",
+                  "}"
+                ],
+                "type": "text/javascript"
+              }
+            }
+          ]
+        },
+        {
+          "name": "15. Get First Conversation (check suggestedCategory)",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{new_user_token}}"}],
+            "url": "http://localhost:3000/v1/conversations/{{first_conversation_id}}"
+          }
+        },
+        {
+          "name": "16. Accept Category Suggestion",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{new_user_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"cooking\"\n}"
+            },
+            "url": "http://localhost:3000/v1/conversations/{{first_conversation_id}}/accept-category"
+          }
+        },
+        {
+          "name": "17. Get Categories (should show 'cooking')",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{new_user_token}}"}],
+            "url": "http://localhost:3000/v1/categories"
+          }
+        },
+        {
+          "name": "18. Get Conversation After Accepting (category should be set)",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{new_user_token}}"}],
+            "url": "http://localhost:3000/v1/conversations/{{first_conversation_id}}"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Category Lifecycle",
+      "item": [
+        {
+          "name": "19. Get All Conversations",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{auth_token}}"}],
+            "url": {
+              "raw": "http://localhost:3000/v1/conversations?limit=20",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "3000",
+              "path": ["v1", "conversations"],
+              "query": [{"key": "limit", "value": "20"}]
+            }
+          }
+        },
+        {
+          "name": "20. Delete Category",
+          "request": {
+            "method": "DELETE",
+            "header": [{"key": "Authorization", "value": "Bearer {{auth_token}}"}],
+            "url": "http://localhost:3000/v1/categories/work"
+          }
+        },
+        {
+          "name": "21. Get Categories After Deletion",
+          "request": {
+            "method": "GET",
+            "header": [{"key": "Authorization", "value": "Bearer {{auth_token}}"}],
+            "url": "http://localhost:3000/v1/categories"
+          }
+        }
+      ]
+    },
+    {
+      "name": "Advanced Scenarios",
+      "item": [
+        {
+          "name": "22. Create Custom Category Manually",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"category\": \"learning\",\n  \"description\": \"Educational content and tutorials\"\n}"
+            },
+            "url": "http://localhost:3000/v1/categories"
+          }
+        },
+        {
+          "name": "23. Ask Learning Question (should match 'learning')",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [{\"role\": \"user\", \"content\": \"Teach me the basics of quantum computing\"}],\n  \"options\": {\n    \"providerId\": \"ollama\",\n    \"contextSearch\": false,\n    \"saveToMemory\": true,\n    \"autoClassify\": true\n  }\n}"
+            },
+            "url": "http://localhost:3000/v1/complete"
+          }
+        },
+        {
+          "name": "24. Disable Auto-Classify",
+          "request": {
+            "method": "POST",
+            "header": [
+              {"key": "Content-Type", "value": "application/json"},
+              {"key": "Authorization", "value": "Bearer {{auth_token}}"}
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"messages\": [{\"role\": \"user\", \"content\": \"What's the weather like?\"}],\n  \"options\": {\n    \"providerId\": \"ollama\",\n    \"contextSearch\": false,\n    \"saveToMemory\": true,\n    \"autoClassify\": false\n  }\n}"
+            },
+            "url": "http://localhost:3000/v1/complete"
+          }
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "auth_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "new_user_token",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "work_conversation_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "coding_conversation_id",
+      "value": "",
+      "type": "string"
+    },
+    {
+      "key": "first_conversation_id",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

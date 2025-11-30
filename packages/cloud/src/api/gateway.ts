@@ -342,6 +342,90 @@ export class APIGateway {
         res.status(500).json({ error: error.message });
       }
     });
+
+    // Category Management
+    // Get user's categories
+    this.app.get('/v1/categories', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const categories = await this.orchestrator.memory.getUserCategories(userId);
+        res.json(categories);
+      } catch (error: any) {
+        console.error('Get categories error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Add a new category
+    this.app.post('/v1/categories', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const { category, description } = req.body;
+
+        if (!category || typeof category !== 'string') {
+          return res.status(400).json({ error: 'Category name is required' });
+        }
+
+        await this.orchestrator.memory.addUserCategory(userId, category, description);
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error('Add category error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Delete a category
+    this.app.delete('/v1/categories/:category', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const { category } = req.params;
+
+        await this.orchestrator.memory.removeUserCategory(userId, category);
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error('Delete category error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Accept a category suggestion for a conversation
+    this.app.post('/v1/conversations/:id/accept-category', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const { id } = req.params;
+        const { category } = req.body;
+
+        if (!category || typeof category !== 'string') {
+          return res.status(400).json({ error: 'Category is required' });
+        }
+
+        // Add category to user's categories
+        await this.orchestrator.memory.addUserCategory(userId, category);
+
+        // Update conversation with the accepted category
+        const conversation = await this.orchestrator.memory.getConversation(id);
+        if (!conversation) {
+          return res.status(404).json({ error: 'Conversation not found' });
+        }
+
+        // Update metadata to set category and remove suggestion
+        const updatedMetadata = {
+          ...conversation.metadata,
+          category: category.toLowerCase(),
+          suggestedCategory: undefined,
+        };
+
+        await this.orchestrator.memory.storeConversation(userId, {
+          ...conversation,
+          metadata: updatedMetadata,
+        });
+
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error('Accept category error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
   }
 
   private setupWebSocket(): void {

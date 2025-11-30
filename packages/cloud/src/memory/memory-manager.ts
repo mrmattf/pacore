@@ -37,6 +37,16 @@ export class MemoryManager {
 
       CREATE INDEX IF NOT EXISTS idx_conversations_user_id ON conversations(user_id);
       CREATE INDEX IF NOT EXISTS idx_conversations_timestamp ON conversations(timestamp);
+
+      CREATE TABLE IF NOT EXISTS user_categories (
+        user_id VARCHAR(255) NOT NULL,
+        category VARCHAR(255) NOT NULL,
+        description TEXT,
+        created_at TIMESTAMP DEFAULT NOW(),
+        PRIMARY KEY (user_id, category)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_user_categories_user_id ON user_categories(user_id);
     `);
   }
 
@@ -291,6 +301,47 @@ export class MemoryManager {
       tag: row.tag,
       count: parseInt(row.count),
     }));
+  }
+
+  // Category Management
+  async getUserCategories(userId: string): Promise<string[]> {
+    const result = await this.db.query(
+      'SELECT category FROM user_categories WHERE user_id = $1 ORDER BY created_at ASC',
+      [userId]
+    );
+    return result.rows.map(row => row.category);
+  }
+
+  async addUserCategory(
+    userId: string,
+    category: string,
+    description?: string
+  ): Promise<void> {
+    await this.db.query(
+      `INSERT INTO user_categories (user_id, category, description)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, category) DO UPDATE
+       SET description = $3`,
+      [userId, category.toLowerCase(), description]
+    );
+  }
+
+  async removeUserCategory(userId: string, category: string): Promise<void> {
+    await this.db.query(
+      'DELETE FROM user_categories WHERE user_id = $1 AND category = $2',
+      [userId, category.toLowerCase()]
+    );
+  }
+
+  async getCategoryDescription(
+    userId: string,
+    category: string
+  ): Promise<string | null> {
+    const result = await this.db.query(
+      'SELECT description FROM user_categories WHERE user_id = $1 AND category = $2',
+      [userId, category.toLowerCase()]
+    );
+    return result.rows.length > 0 ? result.rows[0].description : null;
   }
 
   async close(): Promise<void> {
