@@ -266,21 +266,46 @@ export class APIGateway {
         const message = JSON.parse(data.toString());
 
         if (message.type === 'complete') {
-          // Stream completion
           const { input, options } = message.data;
 
-          // For streaming, we'd need to modify orchestrator to support streaming
-          // For now, send a regular response
-          const response = await this.orchestrator.processRequest(
-            userInfo.id,
-            input,
-            options,
-          );
+          // Check if streaming is requested
+          if (options?.stream === true) {
+            // Use streaming orchestrator method
+            try {
+              for await (const chunk of this.orchestrator.processStreamingRequest(
+                userInfo.id,
+                input,
+                options,
+              )) {
+                ws.send(JSON.stringify({
+                  type: 'stream',
+                  data: chunk,
+                }));
+              }
 
-          ws.send(JSON.stringify({
-            type: 'complete',
-            data: response,
-          }));
+              // Send stream end signal
+              ws.send(JSON.stringify({
+                type: 'stream_end',
+              }));
+            } catch (streamError: any) {
+              ws.send(JSON.stringify({
+                type: 'error',
+                error: streamError.message,
+              }));
+            }
+          } else {
+            // Non-streaming request
+            const response = await this.orchestrator.processRequest(
+              userInfo.id,
+              input,
+              options,
+            );
+
+            ws.send(JSON.stringify({
+              type: 'complete',
+              data: response,
+            }));
+          }
         }
       } catch (error: any) {
         ws.send(JSON.stringify({

@@ -1,5 +1,5 @@
 import { nanoid } from 'nanoid';
-import { LLMProviderRegistry, Message, CompletionOptions, CompletionResponse } from '@pacore/core';
+import { LLMProviderRegistry, Message, CompletionOptions, CompletionResponse, StreamChunk } from '@pacore/core';
 import { MemoryManager } from '../memory';
 
 export interface ContextSearchConfig {
@@ -127,6 +127,74 @@ export class Orchestrator {
       usage: response.usage,
       contextUsed: context.map(c => c.id),
     };
+  }
+
+  async *processStreamingRequest(
+    userId: string,
+    input: string,
+    options: RequestOptions = {},
+  ): AsyncIterableIterator<StreamChunk> {
+    // 1. Determine context search configuration
+    let contextConfig: ContextSearchConfig;
+    if (typeof options.contextSearch === 'object') {
+      contextConfig = options.contextSearch;
+    } else if (options.contextSearch === false) {
+      contextConfig = { enabled: false };
+    } else {
+      contextConfig = { enabled: true };
+    }
+
+    // 2. Retrieve relevant context from memory
+    let context: any[] = [];
+    if (contextConfig.enabled !== false) {
+      context = await this.memory.searchContext(userId, input, {
+        limit: contextConfig.limit ?? 5,
+        minRelevance: contextConfig.minRelevance ?? 0.7,
+        dateRange: contextConfig.dateRange,
+        providers: contextConfig.providers,
+        tags: contextConfig.tags,
+      });
+    }
+
+    // 3. Determine routing strategy
+    const routing = await this.determineRouting(userId, input, options);
+
+    // 4. Prepare messages with context
+    const messages = this.prepareMessages(input, context, routing);
+
+    // 5. Get provider and stream response
+    const provider = await this.registry.getLLMForUser(userId, routing.providerId);
+
+    // Collect all chunks for storage
+    const allMessages = [...messages];
+    let fullResponse = '';
+
+    // 6. Stream chunks from provider
+    for await (const chunk of provider.streamComplete(messages, options)) {
+      if (chunk.type === 'content' && chunk.content) {
+        fullResponse += chunk.content;
+      }
+      yield chunk;
+    }
+
+    // 7. Store conversation in memory after streaming completes
+    if (options.saveToMemory !== false) {
+      const conversationId = nanoid();
+      await this.memory.storeConversation(userId, {
+        id: conversationId,
+        userId,
+        messages: [
+          ...allMessages,
+          { role: 'assistant', content: fullResponse },
+        ],
+        timestamp: new Date(),
+        metadata: {
+          provider: routing.providerId,
+          context: context.map(c => c.id),
+          streaming: true,
+        },
+      });
+    }
   }
 
   private async determineRouting(
