@@ -2,6 +2,7 @@ import { nanoid } from 'nanoid';
 import { LLMProviderRegistry, Message, CompletionOptions, CompletionResponse, StreamChunk } from '@pacore/core';
 import { MemoryManager } from '../memory';
 import { ConversationClassifier } from '../services/conversation-classifier';
+import { WorkflowBuilder, WorkflowManager, WorkflowExecutor } from '../workflow';
 
 export interface ContextSearchConfig {
   enabled?: boolean;
@@ -22,6 +23,7 @@ export interface RequestOptions extends CompletionOptions {
   contextSearch?: boolean | ContextSearchConfig;
   autoTag?: boolean; // Auto-generate tags and title (default: true)
   autoClassify?: boolean; // Auto-classify conversation category (default: true)
+  detectWorkflowIntent?: boolean; // Detect and offer workflow generation (default: true)
 }
 
 export interface OrchestrationResponse {
@@ -33,6 +35,13 @@ export interface OrchestrationResponse {
     totalTokens?: number;
   };
   contextUsed?: string[];
+  workflowIntent?: {
+    detected: boolean;
+    confidence: number;
+    description: string;
+    workflowId?: string;
+    executionId?: string;
+  };
 }
 
 export interface RoutingDecision {
@@ -49,22 +58,31 @@ export interface UserSettings {
 }
 
 /**
- * Main orchestrator that coordinates LLM requests, memory, and routing
+ * Main orchestrator that coordinates LLM requests, memory, routing, and workflows
  */
 export class Orchestrator {
   public registry: LLMProviderRegistry;
   public memory: MemoryManager;
   private getUserSettings: (userId: string) => Promise<UserSettings>;
   private classifier?: ConversationClassifier;
+  private workflowBuilder?: WorkflowBuilder;
+  private workflowManager?: WorkflowManager;
+  private workflowExecutor?: WorkflowExecutor;
 
   constructor(
     registry: LLMProviderRegistry,
     memory: MemoryManager,
     getUserSettings: (userId: string) => Promise<UserSettings>,
+    workflowBuilder?: WorkflowBuilder,
+    workflowManager?: WorkflowManager,
+    workflowExecutor?: WorkflowExecutor,
   ) {
     this.registry = registry;
     this.memory = memory;
     this.getUserSettings = getUserSettings;
+    this.workflowBuilder = workflowBuilder;
+    this.workflowManager = workflowManager;
+    this.workflowExecutor = workflowExecutor;
   }
 
   async processRequest(
@@ -106,6 +124,31 @@ export class Orchestrator {
     // For now, always use cloud provider (agent support will be added separately)
     const provider = await this.registry.getLLMForUser(userId, routing.providerId);
     response = await provider.complete(messages, options);
+
+    // 5.5. Check for workflow intent (if enabled and workflow system available)
+    let workflowIntentResult;
+    if (
+      options.detectWorkflowIntent !== false &&
+      this.workflowBuilder &&
+      this.workflowManager &&
+      this.workflowExecutor
+    ) {
+      try {
+        const intent = await this.workflowBuilder.detectIntent(userId, input);
+
+        if (intent.detected && intent.confidence > 0.7) {
+          // High confidence workflow intent detected
+          workflowIntentResult = {
+            detected: true,
+            confidence: intent.confidence,
+            description: intent.description || 'Workflow automation opportunity detected',
+          };
+        }
+      } catch (error) {
+        console.error('Workflow intent detection error:', error);
+        // Continue without workflow detection if it fails
+      }
+    }
 
     // 6. Store conversation in memory
     if (options.saveToMemory !== false) {
@@ -168,12 +211,18 @@ export class Orchestrator {
       });
     }
 
-    return {
+    const result: OrchestrationResponse = {
       response: response.content,
       provider: routing.providerId,
       usage: response.usage,
       contextUsed: context.map(c => c.id),
     };
+
+    if (workflowIntentResult) {
+      result.workflowIntent = workflowIntentResult;
+    }
+
+    return result;
   }
 
   async *processStreamingRequest(

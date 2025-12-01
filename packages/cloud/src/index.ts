@@ -81,11 +81,14 @@ async function main() {
     };
   };
 
-  // Initialize Orchestrator
+  // Initialize Orchestrator with workflow integration
   const orchestrator = new Orchestrator(
     registry,
     memoryManager,
     getUserSettings,
+    workflowBuilder,
+    workflowManager,
+    workflowExecutor,
   );
 
   // Initialize API Gateway
