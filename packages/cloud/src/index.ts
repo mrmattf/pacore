@@ -6,7 +6,7 @@ import { Orchestrator, UserSettings } from './orchestration';
 import { APIGateway } from './api';
 import { Pool } from 'pg';
 import { MCPRegistry } from './mcp';
-import { WorkflowManager, WorkflowExecutor } from './workflow';
+import { WorkflowManager, WorkflowExecutor, WorkflowBuilder } from './workflow';
 
 /**
  * Main entry point for the cloud service
@@ -68,6 +68,10 @@ async function main() {
   const workflowExecutor = new WorkflowExecutor(mcpRegistry, registry);
   console.log('Workflow executor initialized');
 
+  // Initialize Workflow Builder
+  const workflowBuilder = new WorkflowBuilder(registry, mcpRegistry, workflowManager);
+  console.log('Workflow builder initialized');
+
   // User settings getter (simplified - would normally come from database)
   const getUserSettings = async (userId: string): Promise<UserSettings> => {
     // TODO: Load from database
@@ -93,6 +97,7 @@ async function main() {
     mcpRegistry,
     workflowManager,
     workflowExecutor,
+    workflowBuilder,
   });
 
   await gateway.start();

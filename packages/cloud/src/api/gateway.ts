@@ -7,7 +7,7 @@ import { Orchestrator } from '../orchestration';
 import { createAuthRoutes } from './auth-routes';
 import { MCPRegistry } from '../mcp';
 import { MCPClient } from '../mcp';
-import { WorkflowManager, WorkflowExecutor } from '../workflow';
+import { WorkflowManager, WorkflowExecutor, WorkflowBuilder } from '../workflow';
 
 export interface GatewayConfig {
   port: number;
@@ -17,6 +17,7 @@ export interface GatewayConfig {
   mcpRegistry: MCPRegistry;
   workflowManager: WorkflowManager;
   workflowExecutor: WorkflowExecutor;
+  workflowBuilder: WorkflowBuilder;
 }
 
 interface AuthenticatedRequest extends Request {
@@ -799,6 +800,153 @@ export class APIGateway {
         res.json(executions);
       } catch (error: any) {
         console.error('List executions error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // AI Workflow Builder
+    // Detect workflow intent from user message
+    this.app.post('/v1/workflows/detect-intent', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const { message, conversationHistory } = req.body;
+
+        if (!message) {
+          return res.status(400).json({ error: 'message is required' });
+        }
+
+        const intent = await this.config.workflowBuilder.detectIntent(
+          userId,
+          message,
+          conversationHistory
+        );
+
+        res.json(intent);
+      } catch (error: any) {
+        console.error('Detect intent error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Suggest similar workflows
+    this.app.post('/v1/workflows/suggest', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const { message, category } = req.body;
+
+        if (!message) {
+          return res.status(400).json({ error: 'message is required' });
+        }
+
+        const suggestions = await this.config.workflowBuilder.suggestWorkflows(
+          userId,
+          message,
+          category
+        );
+
+        res.json(suggestions);
+      } catch (error: any) {
+        console.error('Suggest workflows error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Build workflow from natural language
+    this.app.post('/v1/workflows/build', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const { message, category, execute } = req.body;
+
+        if (!message) {
+          return res.status(400).json({ error: 'message is required' });
+        }
+
+        // Build the workflow
+        const workflow = await this.config.workflowBuilder.buildWorkflow(
+          userId,
+          message,
+          category
+        );
+
+        // Optionally execute immediately
+        if (execute) {
+          const execution = await this.config.workflowExecutor.execute(workflow, userId);
+          await this.config.workflowManager.saveExecution(execution);
+
+          res.json({
+            workflow,
+            execution,
+          });
+        } else {
+          res.json({ workflow });
+        }
+      } catch (error: any) {
+        console.error('Build workflow error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Build, execute, and optionally save workflow
+    this.app.post('/v1/workflows/generate', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const { message, category, save } = req.body;
+
+        if (!message) {
+          return res.status(400).json({ error: 'message is required' });
+        }
+
+        // Generate workflow
+        const { workflow, shouldSave } = await this.config.workflowBuilder.generateAndExecute(
+          userId,
+          message,
+          category
+        );
+
+        // Execute workflow
+        const execution = await this.config.workflowExecutor.execute(workflow, userId);
+        await this.config.workflowManager.saveExecution(execution);
+
+        // Save workflow if requested or suggested
+        let savedWorkflow;
+        if (save || shouldSave) {
+          savedWorkflow = await this.config.workflowManager.createWorkflow(workflow);
+        }
+
+        res.json({
+          workflow: savedWorkflow || workflow,
+          execution,
+          saved: !!savedWorkflow,
+        });
+      } catch (error: any) {
+        console.error('Generate workflow error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Refine existing workflow based on feedback
+    this.app.post('/v1/workflows/:id/refine', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { id } = req.params;
+        const userId = req.user!.id;
+        const { feedback } = req.body;
+
+        if (!feedback) {
+          return res.status(400).json({ error: 'feedback is required' });
+        }
+
+        const refinedWorkflow = await this.config.workflowBuilder.refineWorkflow(
+          id,
+          feedback,
+          userId
+        );
+
+        // Update the workflow
+        const updated = await this.config.workflowManager.updateWorkflow(id, refinedWorkflow);
+
+        res.json(updated);
+      } catch (error: any) {
+        console.error('Refine workflow error:', error);
         res.status(500).json({ error: error.message });
       }
     });
