@@ -99,12 +99,18 @@ export class MCPClient {
       throw new Error(`HTTP ${response.status}: ${response.statusText}`);
     }
 
-    const data = (await response.json()) as MCPResponse;
+    const data = (await response.json()) as any;
 
-    if (data.error) {
-      throw new Error(`MCP Error: ${data.error.message}`);
+    // Handle standard MCP protocol response
+    if (data.result !== undefined) {
+      if (data.error) {
+        throw new Error(`MCP Error: ${data.error.message}`);
+      }
+      return data.result;
     }
 
-    return data.result;
+    // Handle non-MCP responses (for demo/testing with mock endpoints)
+    // Return the entire response as-is
+    return data;
   }
 }

@@ -34,7 +34,7 @@ export class WorkflowBuilder {
       return {
         detected: false,
         confidence: 0,
-        description: 'No LLM provider available',
+        description: 'AI provider not configured',
       };
     }
 
@@ -81,8 +81,18 @@ Respond with JSON:
         description: result.description || '',
         suggestedNodes: undefined,
       };
-    } catch (error) {
+    } catch (error: any) {
       console.error('Intent detection error:', error);
+
+      // Provide helpful error for provider initialization issues
+      if (error.message && error.message.includes('Provider not initialized')) {
+        return {
+          detected: false,
+          confidence: 0,
+          description: 'AI provider not configured - please add API key',
+        };
+      }
+
       return {
         detected: false,
         confidence: 0,
@@ -328,7 +338,7 @@ Design principles:
 
     const provider = this.llmRegistry.getProvider('anthropic');
     if (!provider) {
-      throw new Error('No LLM provider available');
+      throw new Error('No LLM provider available. Please configure an API key for Anthropic or OpenAI.');
     }
 
     const prompt = `Refine this workflow based on user feedback.
@@ -375,6 +385,12 @@ Only modify what the user requested.`;
       return refinedWorkflow;
     } catch (error: any) {
       console.error('Workflow refinement error:', error);
+
+      // Provide helpful error message for provider initialization issues
+      if (error.message.includes('Provider not initialized')) {
+        throw new Error('AI provider not configured. Please configure an API key for Anthropic or OpenAI to use workflow refinement.');
+      }
+
       throw new Error(`Failed to refine workflow: ${error.message}`);
     }
   }
