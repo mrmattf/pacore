@@ -9,8 +9,9 @@ PA Core is designed as a hybrid cloud-native AI orchestration platform that allo
 1. **Provider Agnostic**: Users can bring their own LLM API keys or use platform-provided services
 2. **Hybrid Architecture**: Cloud-first with on-premise agent support for firewall environments
 3. **Memory-First**: All conversations are stored with semantic search capabilities
-4. **Extensible**: Easy to add new LLM providers and capabilities
-5. **Secure**: API keys encrypted, tokens signed, data isolated per user
+4. **AI-Driven Automation**: Workflows emerge naturally from conversations
+5. **Extensible**: Easy to add new LLM providers, data sources, and capabilities
+6. **Secure**: API keys encrypted, tokens signed, data isolated per user
 
 ## System Components
 
@@ -72,6 +73,8 @@ The main orchestration service running in the cloud.
 - Retrieves relevant context from memory
 - Handles conversation storage
 - Implements intelligent routing logic
+- **NEW: Detects workflow automation opportunities during conversations**
+- **NEW: Integrates with workflow builder for automatic workflow generation**
 
 **Routing Strategy:**
 1. User-specified provider (highest priority)
@@ -79,10 +82,19 @@ The main orchestration service running in the cloud.
 3. Query type analysis (code, analytical, general)
 4. User's default provider
 
+**Workflow Intent Detection:**
+1. Analyzes user messages for automation opportunities
+2. Uses LLM to detect workflow patterns (multi-step, data fetching, scheduled tasks)
+3. Returns confidence score and description
+4. Only triggers on high confidence (>0.7)
+5. Can be disabled via `detectWorkflowIntent: false`
+
 **Design Decisions:**
 - Context injection is automatic unless disabled
 - Routing can be overridden per request
-- Future: ML-based routing for optimal provider selection
+- Workflow detection runs AFTER LLM response to avoid interference
+- Graceful degradation if workflow system unavailable
+- Intent detection is optional and enabled by default
 
 #### 3.3 API Gateway
 
@@ -103,6 +115,89 @@ The main orchestration service running in the cloud.
 - WebSocket for real-time streaming
 - Authentication middleware separates concerns
 - Error handling with meaningful messages
+
+#### 3.4 MCP Integration Layer
+
+**MCP (Model Context Protocol):**
+- Connects to external data sources and tools
+- Supports HTTP protocol (WebSocket/stdio planned)
+- Manages server registration and capabilities
+- Handles tool invocation and responses
+
+**MCPRegistry:**
+- Central registry for user's MCP servers
+- Stores connection configurations securely
+- Category-based organization (work, family, hobby, etc.)
+- Capability discovery and caching
+
+**MCPClient:**
+- HTTP-based communication with MCP servers
+- Standard protocol: tools/list, tools/call
+- Connection testing and validation
+- Error handling for unreachable servers
+
+**Design Decisions:**
+- Protocol-agnostic design (HTTP now, WebSocket/stdio later)
+- Per-user server isolation
+- Category filtering for context-specific workflows
+- Graceful handling of server failures
+
+#### 3.5 Workflow System
+
+**WorkflowManager:**
+- CRUD operations for workflows
+- DAG validation (no cycles, valid node references)
+- Category-based organization
+- Execution history tracking
+
+**WorkflowExecutor:**
+- Topological sort for execution order
+- Node-by-node execution with dependency resolution
+- Support for multiple node types:
+  - `mcp_fetch`: Fetch data from MCP servers
+  - `transform`: AI-powered or code-based data transformation
+  - `filter`: Array filtering with conditions
+  - `merge`: Combine multiple data sources
+  - `action`: Save, notify, webhook, email
+  - `conditional`: Branch based on conditions
+- Execution logging and error handling
+
+**WorkflowBuilder (AI-Driven):**
+- Intent detection from natural language
+- Workflow generation using LLM
+- Tool catalog building from available MCP servers
+- Workflow refinement based on feedback
+- Similarity matching for existing workflows
+
+**Workflow DAG Structure:**
+```typescript
+{
+  id: string,
+  userId: string,
+  name: string,
+  description: string,
+  category: string,
+  nodes: [
+    {
+      id: string,
+      type: 'mcp_fetch' | 'transform' | 'filter' | 'merge' | 'action' | 'conditional',
+      description: string,
+      config: {...},  // Node-specific configuration
+      inputs: string[]  // IDs of dependent nodes
+    }
+  ],
+  createdAt: Date,
+  updatedAt: Date
+}
+```
+
+**Design Decisions:**
+- DAG structure ensures no infinite loops
+- Node IDs are descriptive (e.g., "fetch_legal_cases")
+- Workflow validation happens before save
+- AI generates workflows from user intent
+- Workflows can be refined iteratively
+- Execution state tracked for debugging
 
 ### 4. On-Premise Agent Package (`@pacore/agent`)
 
@@ -160,6 +255,56 @@ Client library for application integration.
 7. Response → Client
 ```
 
+### Request Flow with Workflow Intent Detection
+
+```
+1. Client → SDK → API Gateway
+2. API Gateway → Orchestrator
+3. Orchestrator → Memory Manager (context search)
+4. Orchestrator → LLM Provider (with context)
+5. LLM Provider → External API
+6. Orchestrator → WorkflowBuilder.detectIntent() [if enabled]
+7. WorkflowBuilder → LLM (analyze for workflow patterns)
+8. If intent detected (confidence > 0.7):
+   - Return workflowIntent in response
+9. Response → Memory Manager (store)
+10. Response (with workflowIntent) → Client
+```
+
+### Workflow Execution Flow
+
+```
+1. Client → POST /v1/workflows/:id/execute
+2. API Gateway → WorkflowExecutor
+3. WorkflowExecutor → Load workflow DAG
+4. WorkflowExecutor → Topological sort (determine execution order)
+5. For each node in order:
+   a. If mcp_fetch:
+      - WorkflowExecutor → MCPClient → External MCP Server
+   b. If transform:
+      - WorkflowExecutor → LLM Provider (for AI transform)
+   c. If filter/merge:
+      - WorkflowExecutor → Execute locally
+   d. If action:
+      - WorkflowExecutor → Perform action (save/notify/webhook)
+6. WorkflowExecutor → Store execution log
+7. Response (with result) → Client
+```
+
+### AI Workflow Generation Flow
+
+```
+1. Client → POST /v1/workflows/build
+2. API Gateway → WorkflowBuilder
+3. WorkflowBuilder → MCPRegistry.listUserServers() (get available tools)
+4. WorkflowBuilder → Build tool catalog from MCP capabilities
+5. WorkflowBuilder → LLM (generate workflow from natural language + tools)
+6. LLM → Returns workflow DAG
+7. WorkflowBuilder → WorkflowManager.validateWorkflow()
+8. If valid → Return workflow to client
+9. If execute flag set → WorkflowExecutor → Execute immediately
+```
+
 ### On-Premise Request Flow
 
 ```
@@ -184,6 +329,10 @@ Client library for application integration.
 **agents**: Registered on-premise agents
 **api_tokens**: User API tokens
 **usage_logs**: Token usage tracking
+**mcp_servers**: MCP server registrations with connection configs
+**workflows**: Workflow DAGs with nodes and configurations
+**workflow_executions**: Execution history with logs and results
+**categories**: User-defined categories for organization
 
 ### Pinecone Index
 
@@ -314,13 +463,26 @@ Global: Pinecone (distributed)
 | Cache | Redis | Fast, versatile, mature |
 | Monorepo | npm workspaces + Turbo | Simple, built-in, fast builds |
 
+## Recent Enhancements (Completed)
+
+1. ✅ **MCP Integration**: Model Context Protocol for external data sources
+2. ✅ **Workflow Engine**: DAG-based workflow execution system
+3. ✅ **AI Workflow Builder**: Generate workflows from natural language
+4. ✅ **Workflow Intent Detection**: Automatic detection during conversations
+5. ✅ **Category-Based Organization**: Tag and organize workflows/servers
+6. ✅ **Auto-Classification**: AI-powered conversation tagging and categorization
+
 ## Future Enhancements
 
-1. **Multi-tenancy**: Organization-level accounts
-2. **Advanced Analytics**: Usage dashboards, cost tracking
-3. **Tool Calling**: Function execution framework
-4. **Fine-tuning**: Custom model training integration
-5. **Prompt Management**: Versioned prompt templates
-6. **Workflow Engine**: Chain multiple LLM calls
-7. **Caching**: Smart response caching
-8. **Embeddings**: Self-hosted embedding generation
+1. **Workflow Scheduling**: Cron-based recurring workflow execution
+2. **MCP Protocol Extensions**: WebSocket and stdio support
+3. **Credential Encryption**: Secure storage for MCP API keys
+4. **Multi-tenancy**: Organization-level accounts
+5. **Advanced Analytics**: Usage dashboards, cost tracking, workflow metrics
+6. **Fine-tuning**: Custom model training integration
+7. **Prompt Management**: Versioned prompt templates
+8. **Caching**: Smart response caching
+9. **Embeddings**: Self-hosted embedding generation
+10. **Workflow Templates**: Pre-built workflow library
+11. **Parallel Execution**: Run independent workflow nodes concurrently
+12. **Conditional Branching**: Advanced workflow logic with loops

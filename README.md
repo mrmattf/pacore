@@ -4,40 +4,55 @@ A unified AI integration platform with persistent conversation memory that enabl
 
 ## Features
 
+### Core AI Capabilities
 - **Multi-LLM Support**: Integrate Claude, OpenAI, custom endpoints, and local models (Ollama)
 - **Persistent Memory**: Vector-based semantic search across all conversations
-- **Hybrid Architecture**: Cloud-based with optional on-premise agent for firewall environments
-- **Flexible Configuration**: Users can bring their own LLM API keys or use provided services
-- **Conversation History**: Full conversation tracking and context-aware responses
 - **Streaming Support**: Real-time streaming responses for all providers
+- **Smart Routing**: Intelligent provider selection based on query type and user preferences
+
+### Workflow Automation (NEW)
+- **AI-Driven Workflow Generation**: Automatically detect workflow intent from conversations
+- **MCP Integration**: Connect to Model Context Protocol servers for data access
+- **Visual Workflow Builder**: DAG-based workflows with multiple node types
+- **Automatic Execution**: Build and run workflows from natural language
+- **Workflow Refinement**: AI-powered workflow optimization based on feedback
+
+### Architecture
+- **Hybrid Deployment**: Cloud-based with optional on-premise agent for firewall environments
+- **Flexible Configuration**: Users can bring their own LLM API keys or use provided services
 - **Client SDK**: Easy-to-use TypeScript/JavaScript SDK
 - **Docker Support**: Complete containerized deployment
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────┐
-│              Cloud Infrastructure                │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐     │
-│  │   API    │  │  Memory  │  │  Vector  │     │
-│  │ Gateway  │  │ Manager  │  │   Store  │     │
-│  └──────────┘  └──────────┘  └──────────┘     │
-│                                                  │
-│  ┌──────────────────────────────────────────┐  │
-│  │        LLM Adapter Layer                  │  │
-│  │  [Claude] [OpenAI] [Custom] [Ollama]     │  │
-│  └──────────────────────────────────────────┘  │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│              Cloud Infrastructure                         │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐  ┌─────────┐ │
+│  │   API    │  │  Memory  │  │  Vector  │  │Workflow │ │
+│  │ Gateway  │  │ Manager  │  │   Store  │  │ Engine  │ │
+│  └──────────┘  └──────────┘  └──────────┘  └─────────┘ │
+│                                                           │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │        LLM Adapter Layer                          │   │
+│  │  [Claude] [OpenAI] [Custom] [Ollama]             │   │
+│  └──────────────────────────────────────────────────┘   │
+│                                                           │
+│  ┌──────────────────────────────────────────────────┐   │
+│  │        MCP Integration Layer                      │   │
+│  │  Connect to external data sources & tools         │   │
+│  └──────────────────────────────────────────────────┘   │
+└──────────────────────────────────────────────────────────┘
                       │
             WebSocket Connection
                       │
-┌─────────────────────────────────────────────────┐
-│          On-Premise Agent (Optional)             │
-│  ┌──────────┐  ┌──────────┐  ┌──────────┐     │
-│  │ Local LLM│  │   File   │  │   Tools  │     │
-│  │ (Ollama) │  │  Access  │  │          │     │
-│  └──────────┘  └──────────┘  └──────────┘     │
-└─────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│          On-Premise Agent (Optional)                      │
+│  ┌──────────┐  ┌──────────┐  ┌──────────┐              │
+│  │ Local LLM│  │   File   │  │   Tools  │              │
+│  │ (Ollama) │  │  Access  │  │          │              │
+│  └──────────┘  └──────────┘  └──────────┘              │
+└──────────────────────────────────────────────────────────┘
 ```
 
 ## Project Structure
@@ -121,7 +136,7 @@ pnpm run dev --filter=@pacore/agent
 
 ## Usage
 
-### Client SDK
+### Basic AI Conversations
 
 ```typescript
 import { PACoreClient } from '@pacore/sdk';
@@ -144,6 +159,12 @@ const response = await client.complete([
 
 console.log(response.response);
 
+// Workflow intent is automatically detected
+if (response.workflowIntent?.detected) {
+  console.log('Workflow opportunity:', response.workflowIntent.description);
+  console.log('Confidence:', response.workflowIntent.confidence);
+}
+
 // Search conversation history
 const context = await client.searchMemory('previous discussion about...');
 
@@ -153,6 +174,70 @@ for await (const chunk of client.streamComplete([
 ])) {
   process.stdout.write(chunk.content || '');
 }
+```
+
+### Workflow Automation
+
+```typescript
+// 1. Register an MCP server (data source)
+const mcpServer = await fetch('http://localhost:3000/v1/mcp/servers', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${apiKey}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    name: 'Legal Database',
+    serverType: 'cloud',
+    protocol: 'http',
+    connectionConfig: {
+      url: 'https://api.legal-db.com',
+      apiKey: 'your-mcp-api-key'
+    },
+    categories: ['legal', 'work']
+  })
+});
+
+// 2. AI automatically builds workflow from natural language
+const workflow = await fetch('http://localhost:3000/v1/workflows/build', {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${apiKey}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    message: 'Fetch recent legal cases from last week and email me a summary',
+    category: 'legal',
+    execute: false  // Build without executing
+  })
+});
+
+console.log('Generated workflow:', workflow.workflow);
+// Workflow includes:
+// - mcp_fetch node: Get data from Legal Database
+// - transform node: Summarize using LLM
+// - action node: Send email
+
+// 3. Execute the workflow
+const execution = await fetch(`http://localhost:3000/v1/workflows/${workflow.workflow.id}/execute`, {
+  method: 'POST',
+  headers: { 'Authorization': `Bearer ${apiKey}` }
+});
+
+console.log('Execution status:', execution.status);
+console.log('Result:', execution.result);
+
+// 4. Refine workflow based on feedback
+const refined = await fetch(`http://localhost:3000/v1/workflows/${workflow.workflow.id}/refine`, {
+  method: 'POST',
+  headers: {
+    'Authorization': `Bearer ${apiKey}`,
+    'Content-Type': 'application/json'
+  },
+  body: JSON.stringify({
+    feedback: 'Only include cases with high priority'
+  })
+});
 ```
 
 ### On-Premise Agent
@@ -181,14 +266,47 @@ Authorization: Bearer YOUR_API_KEY
 
 ### Endpoints
 
+#### Core AI Endpoints
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| POST | `/v1/complete` | Complete a conversation |
+| POST | `/v1/complete` | Complete a conversation (auto-detects workflow intent) |
 | POST | `/v1/providers/:id/configure` | Configure LLM provider |
 | GET | `/v1/providers` | List available providers |
 | POST | `/v1/memory/search` | Search conversation history |
 | GET | `/v1/conversations` | Get conversation history |
 | DELETE | `/v1/conversations/:id` | Delete a conversation |
+
+#### MCP (Model Context Protocol) Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/v1/mcp/servers` | Register an MCP server |
+| GET | `/v1/mcp/servers` | List user's MCP servers |
+| GET | `/v1/mcp/servers/:id` | Get MCP server details |
+| PUT | `/v1/mcp/servers/:id` | Update MCP server |
+| DELETE | `/v1/mcp/servers/:id` | Delete MCP server |
+| POST | `/v1/mcp/servers/:id/test` | Test MCP connection |
+| GET | `/v1/mcp/servers/:id/capabilities` | Get server capabilities |
+
+#### Workflow Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/v1/workflows` | Create a workflow |
+| GET | `/v1/workflows` | List user's workflows |
+| GET | `/v1/workflows/:id` | Get workflow details |
+| PUT | `/v1/workflows/:id` | Update workflow |
+| DELETE | `/v1/workflows/:id` | Delete workflow |
+| POST | `/v1/workflows/:id/execute` | Execute a workflow |
+| GET | `/v1/workflows/:id/executions` | List workflow executions |
+| POST | `/v1/workflows/:id/refine` | Refine workflow with AI |
+
+#### AI Workflow Builder Endpoints
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| POST | `/v1/workflows/detect-intent` | Detect workflow intent from text |
+| POST | `/v1/workflows/suggest` | Suggest similar workflows |
+| POST | `/v1/workflows/build` | Build workflow from natural language |
+| GET | `/v1/executions` | List all executions |
+| GET | `/v1/executions/:id` | Get execution details |
 
 ### Example Request
 
@@ -350,14 +468,32 @@ NODE_ENV=production docker-compose -f docker-compose.prod.yml up
 
 ## Roadmap
 
-- [ ] Web UI dashboard
+### Completed ✅
+- [x] Multi-LLM support (Claude, OpenAI, Ollama, Custom)
+- [x] Persistent conversation memory with vector search
+- [x] MCP (Model Context Protocol) integration
+- [x] AI-driven workflow generation from natural language
+- [x] DAG-based workflow execution engine
+- [x] Workflow refinement and suggestions
+- [x] Auto-classification and tagging
+- [x] Streaming support for all providers
+- [x] Docker containerization
+
+### In Progress 🚧
+- [ ] Workflow scheduling (cron-based recurring workflows)
+- [ ] MCP WebSocket and stdio protocol support
+- [ ] Credential encryption for MCP servers
+
+### Planned 📋
+- [ ] Web UI dashboard with visual workflow builder
 - [ ] Multi-tenancy support
-- [ ] Advanced analytics
+- [ ] Advanced analytics and cost tracking
 - [ ] More LLM providers (Azure OpenAI, Cohere, etc.)
-- [ ] Tool calling / function execution
 - [ ] Enhanced security features
 - [ ] Rate limiting & quotas
 - [ ] Webhook integrations
+- [ ] Workflow templates library
+- [ ] Parallel workflow execution
 
 ## Contributing
 
