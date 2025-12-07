@@ -35,16 +35,21 @@ Respond ONLY with valid JSON in this exact format:
 1. Tags: 3-5 relevant tags (single words or short phrases, lowercase)
 2. Title: A brief, descriptive title (max 60 characters)
 3. Category: Choose the BEST matching category from this list: ${userCategories.join(', ')}
-   - If none fit well, respond with "none" and the conversation will be uncategorized
-4. Confidence: Your confidence level (0.0-1.0)
+   - If one fits well, use it
+   - If none fit well (confidence < 0.6), respond with "none"
+4. SuggestedCategory: If no existing category fits well, suggest a better single-word or short category name
+5. Confidence: Your confidence level (0.0-1.0) in the category match
 
 Respond ONLY with valid JSON in this exact format:
 {
   "tags": ["tag1", "tag2", "tag3"],
   "title": "Brief conversation title",
   "category": "one-of-the-categories-or-none",
+  "suggestedCategory": "new-category-name-if-needed",
   "confidence": 0.95
-}`;
+}
+
+If category is "none", you MUST provide a suggestedCategory.`;
   }
 
   /**
@@ -187,6 +192,7 @@ Respond ONLY with valid JSON in this exact format:
 
       // Handle category based on user's categories
       const suggestedCat = parsed.category?.toLowerCase().trim();
+      const newCategorySuggestion = parsed.suggestedCategory?.toLowerCase().trim();
 
       if (userCategories.length === 0) {
         // User has no categories yet - suggest the one from LLM
@@ -211,11 +217,12 @@ Respond ONLY with valid JSON in this exact format:
         };
       }
 
-      // No match found
+      // No match found - return the LLM's suggestion for a new category
       return {
         tags,
         title,
         category: null,
+        suggestedCategory: newCategorySuggestion || suggestedCat || 'general',
         confidence,
       };
     } catch (error) {

@@ -35,6 +35,8 @@ export interface OrchestrationResponse {
     totalTokens?: number;
   };
   contextUsed?: string[];
+  conversationId?: string;
+  suggestedCategory?: string;
   workflowIntent?: {
     detected: boolean;
     confidence: number;
@@ -151,8 +153,12 @@ export class Orchestrator {
     }
 
     // 6. Store conversation in memory
+    let savedConversationId: string | undefined;
+    let suggestedCategory: string | undefined;
+
     if (options.saveToMemory !== false) {
       const conversationId = nanoid();
+      savedConversationId = conversationId;
       const conversationMessages: Message[] = [
         ...messages,
         { role: 'assistant' as const, content: response.content },
@@ -189,6 +195,7 @@ export class Orchestrator {
             // If a category suggestion exists, include it in metadata
             if (classification.suggestedCategory) {
               metadata.suggestedCategory = classification.suggestedCategory;
+              suggestedCategory = classification.suggestedCategory;
             }
           } else if (options.autoTag !== false) {
             // Just tags
@@ -217,6 +224,14 @@ export class Orchestrator {
       usage: response.usage,
       contextUsed: context.map(c => c.id),
     };
+
+    if (savedConversationId) {
+      result.conversationId = savedConversationId;
+    }
+
+    if (suggestedCategory) {
+      result.suggestedCategory = suggestedCategory;
+    }
 
     if (workflowIntentResult) {
       result.workflowIntent = workflowIntentResult;
