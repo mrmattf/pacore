@@ -85,6 +85,8 @@ export interface MCPFetchNodeConfig {
 export interface TransformNodeConfig {
   type: 'llm' | 'code';
   prompt?: string; // For LLM transforms
+  provider?: string; // LLM provider (anthropic, openai, ollama, etc.)
+  model?: string; // Model name to use
   code?: string; // For code transforms (later)
 }
 

@@ -5,7 +5,7 @@ import jwt from 'jsonwebtoken';
 import { Pool } from 'pg';
 import { Orchestrator } from '../orchestration';
 import { createAuthRoutes } from './auth-routes';
-import { MCPRegistry } from '../mcp';
+import { MCPRegistry, CredentialManager } from '../mcp';
 import { MCPClient } from '../mcp';
 import { WorkflowManager, WorkflowExecutor, WorkflowBuilder } from '../workflow';
 
@@ -15,6 +15,7 @@ export interface GatewayConfig {
   corsOrigins?: string[];
   db: Pool;
   mcpRegistry: MCPRegistry;
+  credentialManager: CredentialManager;
   workflowManager: WorkflowManager;
   workflowExecutor: WorkflowExecutor;
   workflowBuilder: WorkflowBuilder;
@@ -439,7 +440,7 @@ export class APIGateway {
     this.app.post('/v1/mcp/servers', async (req: AuthenticatedRequest, res: Response) => {
       try {
         const userId = req.user!.id;
-        const { name, serverType, protocol, connectionConfig, categories } = req.body;
+        const { name, serverType, protocol, connectionConfig, categories, credentials } = req.body;
 
         if (!name || !serverType || !protocol || !connectionConfig) {
           return res.status(400).json({
@@ -454,7 +455,12 @@ export class APIGateway {
           protocol,
           connectionConfig,
           categories,
-        });
+        }, credentials); // Pass credentials for connection testing
+
+        // If credentials were provided, store them
+        if (credentials && Object.keys(credentials).length > 0) {
+          await this.config.credentialManager.storeCredentials(userId, server.id, credentials);
+        }
 
         res.json(server);
       } catch (error: any) {
@@ -600,6 +606,80 @@ export class APIGateway {
         res.json(result);
       } catch (error: any) {
         console.error('Call MCP tool error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Store credentials for MCP server
+    this.app.post('/v1/mcp/servers/:id/credentials', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { id } = req.params;
+        const userId = req.user!.id;
+        const credentials = req.body;
+
+        // Verify server exists and user owns it
+        const server = await this.config.mcpRegistry.getServer(id);
+        if (!server) {
+          return res.status(404).json({ error: 'MCP server not found' });
+        }
+        if (server.userId !== userId) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+
+        // Store encrypted credentials
+        await this.config.credentialManager.storeCredentials(userId, id, credentials);
+
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error('Store credentials error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Check if credentials exist for MCP server
+    this.app.get('/v1/mcp/servers/:id/credentials/status', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { id } = req.params;
+        const userId = req.user!.id;
+
+        // Verify server exists and user owns it
+        const server = await this.config.mcpRegistry.getServer(id);
+        if (!server) {
+          return res.status(404).json({ error: 'MCP server not found' });
+        }
+        if (server.userId !== userId) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+
+        const hasCredentials = await this.config.credentialManager.hasCredentials(userId, id);
+
+        res.json({ hasCredentials });
+      } catch (error: any) {
+        console.error('Check credentials error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Delete credentials for MCP server
+    this.app.delete('/v1/mcp/servers/:id/credentials', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { id } = req.params;
+        const userId = req.user!.id;
+
+        // Verify server exists and user owns it
+        const server = await this.config.mcpRegistry.getServer(id);
+        if (!server) {
+          return res.status(404).json({ error: 'MCP server not found' });
+        }
+        if (server.userId !== userId) {
+          return res.status(403).json({ error: 'Access denied' });
+        }
+
+        await this.config.credentialManager.deleteCredentials(userId, id);
+
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error('Delete credentials error:', error);
         res.status(500).json({ error: error.message });
       }
     });

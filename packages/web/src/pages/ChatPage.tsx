@@ -9,7 +9,7 @@ import { useCategoryStore } from '../store/categoryStore';
 import { useProviderStore } from '../store/providerStore';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { Settings, LogOut } from 'lucide-react';
+import { Settings, LogOut, Database } from 'lucide-react';
 
 export function ChatPage() {
   const { messages, sendMessage, isLoading, lastSuggestion, clearSuggestion } = useChat();
@@ -26,13 +26,10 @@ export function ChatPage() {
     navigate('/login');
   };
 
-  const handleAcceptSuggestion = async () => {
+  const handleAcceptSuggestion = () => {
     if (!lastSuggestion) return;
-    // First refresh the category list to get the newly created category
-    await refreshCategories();
-    // Then set it as the active category
     setCategory(lastSuggestion.category);
-    // Clear the suggestion banner
+    refreshCategories(); // Refresh category list
     clearSuggestion();
   };
 
@@ -46,6 +43,13 @@ export function ChatPage() {
             onChange={setSelectedProvider}
           />
           <CategorySelector value={category} onChange={setCategory} />
+          <button
+            onClick={() => navigate('/mcp')}
+            className="p-2 hover:bg-gray-100 rounded"
+            title="MCP Servers"
+          >
+            <Database size={20} />
+          </button>
           <button
             onClick={() => navigate('/settings')}
             className="p-2 hover:bg-gray-100 rounded"

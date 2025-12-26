@@ -15,6 +15,7 @@ import {
 export class OpenAIProvider implements LLMProvider {
   id = 'openai';
   name = 'OpenAI';
+  providerType = 'openai';
   type: 'cloud' = 'cloud';
 
   private client?: OpenAI;

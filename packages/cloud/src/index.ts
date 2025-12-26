@@ -5,7 +5,7 @@ import { VectorMemoryStore, PgVectorStore, MemoryManager } from './memory';
 import { Orchestrator, UserSettings } from './orchestration';
 import { APIGateway } from './api';
 import { Pool } from 'pg';
-import { MCPRegistry } from './mcp';
+import { MCPRegistry, CredentialManager } from './mcp';
 import { WorkflowManager, WorkflowExecutor, WorkflowBuilder } from './workflow';
 
 /**
@@ -59,13 +59,21 @@ async function main() {
   await mcpRegistry.initialize();
   console.log('MCP registry initialized');
 
+  // Initialize Credential Manager
+  const credentialManager = new CredentialManager(
+    dbPool,
+    process.env.JWT_SECRET || 'your-secret-key-change-in-production'
+  );
+  await credentialManager.initialize();
+  console.log('Credential manager initialized');
+
   // Initialize Workflow Manager
   const workflowManager = new WorkflowManager(dbPool);
   await workflowManager.initialize();
   console.log('Workflow manager initialized');
 
   // Initialize Workflow Executor
-  const workflowExecutor = new WorkflowExecutor(mcpRegistry, registry);
+  const workflowExecutor = new WorkflowExecutor(mcpRegistry, registry, credentialManager);
   console.log('Workflow executor initialized');
 
   // Initialize Workflow Builder
@@ -98,6 +106,7 @@ async function main() {
     corsOrigins: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:3001'],
     db: dbPool,
     mcpRegistry,
+    credentialManager,
     workflowManager,
     workflowExecutor,
     workflowBuilder,

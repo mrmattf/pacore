@@ -38,7 +38,7 @@ export class MCPRegistry {
     `);
   }
 
-  async registerServer(request: RegisterMCPServerRequest): Promise<MCPServer> {
+  async registerServer(request: RegisterMCPServerRequest, credentials?: any): Promise<MCPServer> {
     const id = nanoid();
 
     const server: MCPServer = {
@@ -54,7 +54,7 @@ export class MCPRegistry {
 
     // Test connection and get capabilities
     if (server.serverType === 'cloud') {
-      const client = new MCPClient(server);
+      const client = new MCPClient(server, credentials); // Pass credentials to MCPClient
       const isConnected = await client.testConnection();
 
       if (!isConnected) {

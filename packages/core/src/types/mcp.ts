@@ -60,6 +60,8 @@ export interface JSONSchema {
 }
 
 export interface MCPRequest {
+  jsonrpc: string;
+  id: number | string;
   method: string;
   params?: Record<string, any>;
 }

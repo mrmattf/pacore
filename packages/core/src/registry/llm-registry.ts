@@ -2,9 +2,12 @@ import { LLMProvider, LLMConfig, ValidationResult } from '../types';
 
 /**
  * Registry for managing LLM providers and user configurations
+ *
+ * Supports multiple instances of the same provider type (e.g., anthropic-prod, anthropic-dev)
  */
 export class LLMProviderRegistry {
   private providers = new Map<string, LLMProvider>();
+  private providersByType = new Map<string, LLMProvider[]>(); // providerType -> providers
   private userConfigs = new Map<string, Map<string, LLMConfig>>();
   private defaultProviders = new Map<string, string>(); // userId -> providerId
 
@@ -16,13 +19,30 @@ export class LLMProviderRegistry {
       throw new Error(`Provider with id ${provider.id} already registered`);
     }
     this.providers.set(provider.id, provider);
+
+    // Track by provider type for lookups
+    if (!this.providersByType.has(provider.providerType)) {
+      this.providersByType.set(provider.providerType, []);
+    }
+    this.providersByType.get(provider.providerType)!.push(provider);
   }
 
   /**
    * Unregister a provider
    */
   unregisterProvider(providerId: string): void {
-    this.providers.delete(providerId);
+    const provider = this.providers.get(providerId);
+    if (provider) {
+      // Remove from type map
+      const typeProviders = this.providersByType.get(provider.providerType);
+      if (typeProviders) {
+        const index = typeProviders.findIndex(p => p.id === providerId);
+        if (index > -1) {
+          typeProviders.splice(index, 1);
+        }
+      }
+      this.providers.delete(providerId);
+    }
   }
 
   /**
@@ -30,6 +50,13 @@ export class LLMProviderRegistry {
    */
   getProviders(): LLMProvider[] {
     return Array.from(this.providers.values());
+  }
+
+  /**
+   * Get all providers of a specific type (e.g., all Anthropic instances)
+   */
+  getProvidersByType(providerType: string): LLMProvider[] {
+    return this.providersByType.get(providerType) || [];
   }
 
   /**

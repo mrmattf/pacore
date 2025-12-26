@@ -15,6 +15,7 @@ import {
 export class CustomEndpointProvider implements LLMProvider {
   id = 'custom-endpoint';
   name = 'Custom LLM Endpoint';
+  providerType = 'custom';
   type: 'custom' = 'custom';
 
   private config?: LLMConfig;

@@ -54,13 +54,16 @@ export type ProviderType = 'cloud' | 'on-premise' | 'custom';
  * Base interface that all LLM providers must implement
  */
 export interface LLMProvider {
-  /** Unique identifier for this provider */
+  /** Unique identifier for this provider instance (e.g., "anthropic-prod", "ollama-local") */
   id: string;
 
   /** Human-readable name */
   name: string;
 
-  /** Type of provider */
+  /** Base provider type (e.g., "anthropic", "openai", "ollama") */
+  providerType: string;
+
+  /** Type of provider (cloud, on-premise, custom) */
   type: ProviderType;
 
   /**

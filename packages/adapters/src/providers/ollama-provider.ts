@@ -15,6 +15,7 @@ import {
 export class OllamaProvider implements LLMProvider {
   id = 'ollama';
   name = 'Ollama';
+  providerType = 'ollama';
   type: 'on-premise' = 'on-premise';
 
   private config?: LLMConfig;

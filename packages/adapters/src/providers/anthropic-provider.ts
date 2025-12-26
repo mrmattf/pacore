@@ -15,6 +15,7 @@ import {
 export class AnthropicProvider implements LLMProvider {
   id = 'anthropic';
   name = 'Anthropic Claude';
+  providerType = 'anthropic';
   type: 'cloud' = 'cloud';
 
   private client?: Anthropic;

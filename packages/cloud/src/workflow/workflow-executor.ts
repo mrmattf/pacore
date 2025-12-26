@@ -11,7 +11,7 @@ import {
   ActionNodeConfig,
   ConditionalNodeConfig,
 } from '@pacore/core';
-import { MCPRegistry, MCPClient } from '../mcp';
+import { MCPRegistry, MCPClient, CredentialManager } from '../mcp';
 import { LLMProviderRegistry } from '@pacore/core';
 
 /**
@@ -22,6 +22,7 @@ export class WorkflowExecutor {
   constructor(
     private mcpRegistry: MCPRegistry,
     private llmRegistry: LLMProviderRegistry,
+    private credentialManager?: CredentialManager,
   ) {}
 
   /**
@@ -188,7 +189,7 @@ export class WorkflowExecutor {
   ): Promise<any> {
     switch (node.type) {
       case 'mcp_fetch':
-        return this.executeMCPFetch(node, userId);
+        return this.executeMCPFetch(node, userId, inputs);
 
       case 'transform':
         return this.executeTransform(node, inputs, userId);
@@ -216,6 +217,7 @@ export class WorkflowExecutor {
   private async executeMCPFetch(
     node: WorkflowNode,
     userId: string,
+    inputs: any[] = [],
   ): Promise<any> {
     const config = node.config as MCPFetchNodeConfig;
 
@@ -228,11 +230,28 @@ export class WorkflowExecutor {
       throw new Error('Access denied to MCP server');
     }
 
-    const client = new MCPClient(server);
+    // Retrieve credentials for this MCP server
+    let credentials: any = undefined;
+    if (this.credentialManager) {
+      try {
+        const creds = await this.credentialManager.getCredentials(userId, config.serverId);
+        if (creds) {
+          credentials = creds;
+        }
+      } catch (error) {
+        // Credentials are optional - continue without them
+        console.warn(`No credentials found for MCP server ${config.serverId}`);
+      }
+    }
+
+    // Resolve parameters with input substitution
+    const parameters = this.resolveParameters(config.parameters, inputs);
+
+    const client = new MCPClient(server, credentials);
     const result = await client.callTool({
       serverId: config.serverId,
       toolName: config.toolName,
-      parameters: config.parameters,
+      parameters,
     });
 
     if (!result.success) {
@@ -253,24 +272,27 @@ export class WorkflowExecutor {
     const config = node.config as TransformNodeConfig;
 
     if (config.type === 'llm') {
-      // Use LLM to transform data
-      const provider = this.llmRegistry.getProvider('anthropic');
-      if (!provider) {
-        throw new Error('No LLM provider available for transformation');
-      }
+      // Use LLM to transform data - get user's configured provider
+      const providerName = config.provider || 'anthropic';
+      const provider = await this.llmRegistry.getLLMForUser(userId, providerName);
 
-      const inputData = JSON.stringify(inputs, null, 2);
+      const inputData = inputs.length > 0 ? JSON.stringify(inputs, null, 2) : '';
       const prompt = config.prompt || 'Transform this data';
+
+      // Build the content - include input data if available
+      const content = inputData
+        ? `${prompt}\n\nInput data:\n${inputData}`
+        : prompt;
 
       const response = await provider.complete(
         [
           {
             role: 'user',
-            content: `${prompt}\n\nInput data:\n${inputData}`,
+            content,
           },
         ],
         {
-          model: 'claude-3-5-sonnet-20241022',
+          model: config.model || 'claude-3-5-sonnet-20241022',
           maxTokens: 4096,
         }
       );
@@ -414,5 +436,49 @@ export class WorkflowExecutor {
     } catch {
       return false;
     }
+  }
+
+  /**
+   * Resolve parameters with input substitution
+   * Allows using data from previous nodes in MCP tool parameters
+   */
+  private resolveParameters(parameters: any, inputs: any[]): any {
+    if (!parameters || inputs.length === 0) {
+      return parameters;
+    }
+
+    // If parameters is a simple object, check for input references
+    if (typeof parameters === 'object' && !Array.isArray(parameters)) {
+      const resolved: any = {};
+
+      for (const [key, value] of Object.entries(parameters)) {
+        if (typeof value === 'string') {
+          // Check for input index reference like "$input[0]" or use first input if value is "$input"
+          if (value === '$input' && inputs.length > 0) {
+            resolved[key] = typeof inputs[0] === 'string' ? inputs[0] : JSON.stringify(inputs[0]);
+          } else if (value.startsWith('$input[') && value.endsWith(']')) {
+            const match = value.match(/\$input\[(\d+)\]/);
+            if (match) {
+              const index = parseInt(match[1]);
+              if (index < inputs.length) {
+                resolved[key] = typeof inputs[index] === 'string' ? inputs[index] : JSON.stringify(inputs[index]);
+              } else {
+                resolved[key] = value; // Keep original if index out of bounds
+              }
+            } else {
+              resolved[key] = value;
+            }
+          } else {
+            resolved[key] = value;
+          }
+        } else {
+          resolved[key] = value;
+        }
+      }
+
+      return resolved;
+    }
+
+    return parameters;
   }
 }
