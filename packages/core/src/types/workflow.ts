@@ -55,8 +55,10 @@ export interface WorkflowExecutionLog {
 
 export interface WorkflowIntent {
   detected: boolean;
+  intentType?: 'create' | 'execute';
   confidence: number;
   description: string;
+  workflowId?: string;
   suggestedNodes?: WorkflowNode[];
 }
 

@@ -53,6 +53,8 @@ services:
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3001}
     ports:
       - "3000:3000"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     depends_on:
       postgres:
         condition: service_healthy

@@ -4,13 +4,26 @@ import { useCategoryStore } from '../store/categoryStore';
 import { useProviderStore } from '../store/providerStore';
 
 interface Message {
-  role: 'user' | 'assistant';
+  role: 'user' | 'assistant' | 'workflow-intent';
   content: string;
+  workflowIntent?: WorkflowIntent;
 }
 
 interface CategorySuggestion {
   category: string;
   conversationId: string;
+}
+
+interface WorkflowIntent {
+  detected: boolean;
+  intentType?: 'create' | 'execute';
+  confidence: number;
+  description: string;
+  workflowId?: string;
+  workflowName?: string;
+  workflowDescription?: string;
+  nodeCount?: number;
+  executionId?: string;
 }
 
 export function useChat() {
@@ -50,10 +63,13 @@ export function useChat() {
 
       const data = await response.json();
 
-      setMessages((prev) => [
-        ...prev,
-        { role: 'assistant', content: data.response },
-      ]);
+      // Only add assistant message if there's actual content
+      if (data.response && data.response.trim()) {
+        setMessages((prev) => [
+          ...prev,
+          { role: 'assistant', content: data.response },
+        ]);
+      }
 
       // Check if there's a suggested category in the response metadata
       // The backend may return this when autoClassify detects a new category
@@ -62,6 +78,19 @@ export function useChat() {
           category: data.suggestedCategory,
           conversationId: data.conversationId,
         });
+      }
+
+      // Check for workflow intent detection
+      if (data.workflowIntent?.detected) {
+        // Add workflow intent as a special message in the chat
+        setMessages((prev) => [
+          ...prev,
+          {
+            role: 'workflow-intent',
+            content: '', // Content is in workflowIntent object
+            workflowIntent: data.workflowIntent,
+          },
+        ]);
       }
     } catch (error) {
       console.error('Chat error:', error);
@@ -74,9 +103,19 @@ export function useChat() {
     }
   };
 
+  const addMessage = (message: Message) => {
+    setMessages((prev) => [...prev, message]);
+  };
+
+  const removeMessage = (index: number) => {
+    setMessages((prev) => prev.filter((_, i) => i !== index));
+  };
+
   return {
     messages,
     sendMessage,
+    addMessage,
+    removeMessage,
     isLoading,
     lastSuggestion,
     clearSuggestion: () => setLastSuggestion(null),

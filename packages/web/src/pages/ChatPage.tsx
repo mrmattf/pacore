@@ -12,7 +12,7 @@ import { useAuthStore } from '../store/authStore';
 import { Settings, LogOut, Database } from 'lucide-react';
 
 export function ChatPage() {
-  const { messages, sendMessage, isLoading, lastSuggestion, clearSuggestion } = useChat();
+  const { messages, sendMessage, addMessage, removeMessage, isLoading, lastSuggestion, clearSuggestion } = useChat();
   const category = useCategoryStore((state) => state.category);
   const setCategory = useCategoryStore((state) => state.setCategory);
   const selectedProvider = useProviderStore((state) => state.selectedProvider);
@@ -31,6 +31,54 @@ export function ChatPage() {
     setCategory(lastSuggestion.category);
     refreshCategories(); // Refresh category list
     clearSuggestion();
+  };
+
+  const handleConfirmExecution = async (workflowId: string) => {
+    try {
+      const token = useAuthStore.getState().token;
+      const response = await fetch(`/v1/workflows/${workflowId}/execute`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to execute workflow');
+      }
+
+      const execution = await response.json();
+
+      // Format execution results as a message
+      let resultMessage = `**Workflow Execution Complete**\n\n`;
+      resultMessage += `**Status:** ${execution.status}\n`;
+      resultMessage += `**Workflow ID:** ${execution.workflowId}\n`;
+      resultMessage += `**Started:** ${new Date(execution.startedAt).toLocaleString()}\n`;
+
+      if (execution.completedAt) {
+        resultMessage += `**Completed:** ${new Date(execution.completedAt).toLocaleString()}`;
+      }
+
+      // Add execution results to chat messages
+      addMessage({ role: 'assistant', content: resultMessage });
+
+    } catch (error) {
+      console.error('Workflow execution error:', error);
+      addMessage({
+        role: 'assistant',
+        content: `Failed to execute workflow: ${error instanceof Error ? error.message : 'Unknown error'}`
+      });
+    }
+  };
+
+  const handleCreateWorkflow = () => {
+    // Navigate to workflow builder (to be implemented)
+    console.log('Create workflow');
+  };
+
+  const handleDismissIntent = (messageIndex: number) => {
+    removeMessage(messageIndex);
   };
 
   return (
@@ -77,7 +125,12 @@ export function ChatPage() {
               onDismiss={clearSuggestion}
             />
           )}
-          <ChatBox messages={messages} />
+          <ChatBox
+            messages={messages}
+            onConfirmExecution={handleConfirmExecution}
+            onCreateWorkflow={handleCreateWorkflow}
+            onDismissIntent={handleDismissIntent}
+          />
         </div>
       </div>
 

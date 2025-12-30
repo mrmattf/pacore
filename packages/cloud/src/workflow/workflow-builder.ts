@@ -23,13 +23,29 @@ export class WorkflowBuilder {
 
   /**
    * Detect if user message contains workflow intent
+   * Can detect both creation intent and execution intent
    */
   async detectIntent(
     userId: string,
     userMessage: string,
     conversationHistory?: string,
   ): Promise<WorkflowIntent> {
-    const provider = this.llmRegistry.getProvider('anthropic');
+    // Try to get user's configured provider, fall back to anthropic, then any available provider
+    let provider;
+    try {
+      provider = await this.llmRegistry.getLLMForUser(userId);
+      console.log('[WorkflowBuilder] Using user provider for intent detection');
+    } catch (error) {
+      // If user has no provider, try anthropic
+      provider = this.llmRegistry.getProvider('anthropic');
+      if (!provider) {
+        // Fall back to any available provider (ollama, openai, etc.)
+        const providers = this.llmRegistry.getProviders();
+        provider = providers.find(p => p.providerType === 'ollama' || p.providerType === 'openai');
+      }
+      console.log('[WorkflowBuilder] Using fallback provider for intent detection');
+    }
+
     if (!provider) {
       return {
         detected: false,
@@ -38,27 +54,102 @@ export class WorkflowBuilder {
       };
     }
 
-    const prompt = `Analyze if the user wants to create an automated workflow or task.
+    // Get user's existing workflows to check for execution intent
+    const existingWorkflows = await this.workflowManager.listUserWorkflows(userId);
+    console.log('[WorkflowBuilder] Found', existingWorkflows.length, 'workflows for user:', userId);
+    console.log('[WorkflowBuilder] Workflows:', JSON.stringify(existingWorkflows.map(w => ({
+      id: w.id,
+      name: w.name,
+      description: w.description
+    })), null, 2));
+    const workflowsList = existingWorkflows.length > 0
+      ? existingWorkflows.map(w => `- "${w.name}" (ID: ${w.id}): ${w.description || 'No description'}`).join('\n')
+      : 'No existing workflows';
 
-Workflow indicators:
-- Requests to automate repetitive tasks
-- Multi-step processes involving data from different sources
-- Scheduled or recurring tasks
-- Tasks involving fetching, transforming, filtering, or combining data
-- Requests like "get data from X and Y, then do Z"
+    const prompt = `Analyze the user's message to determine if they want to:
+1. CREATE a new automated workflow
+2. EXECUTE an existing workflow
+3. Neither (regular question/conversation)
+
+Existing workflows available to this user:
+${workflowsList}
 
 User message: "${userMessage}"
 
 ${conversationHistory ? `Recent conversation context:\n${conversationHistory}` : ''}
 
-Respond with JSON:
+MATCHING LOGIC FOR EXECUTION:
+When determining if the user wants to EXECUTE a workflow, match in two ways:
+A. BY NAME: User explicitly mentions a workflow's name
+   Examples: "run my email workflow", "execute the Gmail assistant"
+B. BY DESCRIPTION: User describes an action that matches what an existing workflow DOES
+   Examples:
+   - User says "use ollama to create an email and send it via gmail"
+   - Workflow exists: "Demo: AI-Powered Email Assistant" with description "Uses Ollama to draft a helpful email response, then sends it via Gmail"
+   - MATCH! Return intentType="execute" with that workflowId
+
+IMPORTANT: Most user messages are regular questions or conversations, NOT workflow requests.
+Only detect workflow intent when it's CLEARLY about workflows OR matches an existing workflow's purpose.
+
+CREATION indicators (must be explicit):
+- Explicit requests to automate repetitive tasks
+- Explicitly asking to create/build a workflow
+- Multi-step automation requests with words like "automate", "workflow", "create workflow"
+- Examples: "create a workflow to...", "automate this process...", "build me a workflow that..."
+
+EXECUTION indicators (two types):
+1. BY NAME: Explicitly asking to run/execute/trigger a workflow BY NAME
+   - Examples: "run my email workflow", "execute the Gmail assistant", "trigger the [workflow name]"
+2. BY ACTION: Describing an action that matches what an existing workflow does
+   - Compare the user's described action with workflow descriptions
+   - If the user describes doing what a workflow does, it's an execution request
+   - Examples:
+     * "send an email via gmail using AI" matches workflow "AI-Powered Email Assistant: Uses Ollama to draft...sends via Gmail"
+     * "fetch my legal documents" matches workflow "Legal Research: Fetches legal cases from database"
+
+NOT workflow indicators (return detected: false):
+- General questions about facts (e.g., "what is...", "how do...", "tell me about...")
+- Questions about definitions or explanations
+- Simple conversational requests
+- Normal conversation
+- Examples: "what's the capital of maine?", "how does X work?", "explain quantum physics"
+
+CRITICAL: You must respond with ONLY valid JSON, no other text before or after.
+
+For workflow execution (name match):
 {
-  "detected": true/false,
-  "confidence": 0.0-1.0,
-  "description": "brief description of the intended workflow",
-  "workflowName": "suggested workflow name",
-  "category": "suggested category (work/family/hobby/etc)"
-}`;
+  "detected": true,
+  "intentType": "execute",
+  "confidence": 0.95,
+  "description": "User wants to execute the Demo workflow by name",
+  "workflowId": "abc123"
+}
+
+For workflow execution (description match):
+{
+  "detected": true,
+  "intentType": "execute",
+  "confidence": 0.85,
+  "description": "User's request matches the Demo workflow's purpose",
+  "workflowId": "abc123"
+}
+
+For workflow creation:
+{
+  "detected": true,
+  "intentType": "create",
+  "confidence": 0.90,
+  "description": "User wants to create a new workflow to automate X"
+}
+
+For NO workflow intent (regular questions/conversation):
+{
+  "detected": false,
+  "confidence": 0,
+  "description": "Regular question, not workflow-related"
+}
+
+Do not include any explanation, just the JSON object.`;
 
     try {
       const response = await provider.complete(
@@ -69,16 +160,30 @@ Respond with JSON:
           },
         ],
         {
-          model: 'claude-3-5-sonnet-20241022',
           maxTokens: 1024,
         }
       );
 
-      const result = JSON.parse(response.content);
+      console.log('[WorkflowBuilder] Raw LLM response:', response.content);
+
+      // Try to extract JSON from response (handle cases where LLM adds extra text)
+      let jsonContent = response.content.trim();
+
+      // Look for JSON object in the response
+      const jsonMatch = jsonContent.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        jsonContent = jsonMatch[0];
+      }
+
+      console.log('[WorkflowBuilder] Extracted JSON:', jsonContent);
+
+      const result = JSON.parse(jsonContent);
       return {
         detected: result.detected || false,
+        intentType: result.intentType,
         confidence: result.confidence || 0,
         description: result.description || '',
+        workflowId: result.workflowId,
         suggestedNodes: undefined,
       };
     } catch (error: any) {
@@ -119,8 +224,10 @@ Respond with JSON:
       return [];
     }
 
-    const provider = this.llmRegistry.getProvider('anthropic');
-    if (!provider) {
+    let provider;
+    try {
+      provider = await this.llmRegistry.getLLMForUser(userId);
+    } catch (error) {
       return [];
     }
 
@@ -154,7 +261,6 @@ If no good matches, return empty array.`;
           },
         ],
         {
-          model: 'claude-3-5-sonnet-20241022',
           maxTokens: 1024,
         }
       );
@@ -192,10 +298,7 @@ If no good matches, return empty array.`;
     // Build tool catalog from MCP servers
     const toolCatalog = await this.buildToolCatalog(mcpServers);
 
-    const provider = this.llmRegistry.getProvider('anthropic');
-    if (!provider) {
-      throw new Error('No LLM provider available');
-    }
+    const provider = await this.llmRegistry.getLLMForUser(userId);
 
     const prompt = `You are a workflow builder AI. Create a workflow DAG from the user's request.
 
@@ -259,7 +362,6 @@ Design principles:
           },
         ],
         {
-          model: 'claude-3-5-sonnet-20241022',
           maxTokens: 4096,
         }
       );
@@ -336,10 +438,7 @@ Design principles:
       throw new Error('Access denied');
     }
 
-    const provider = this.llmRegistry.getProvider('anthropic');
-    if (!provider) {
-      throw new Error('No LLM provider available. Please configure an API key for Anthropic or OpenAI.');
-    }
+    const provider = await this.llmRegistry.getLLMForUser(userId);
 
     const prompt = `Refine this workflow based on user feedback.
 
@@ -361,7 +460,6 @@ Only modify what the user requested.`;
           },
         ],
         {
-          model: 'claude-3-5-sonnet-20241022',
           maxTokens: 4096,
         }
       );

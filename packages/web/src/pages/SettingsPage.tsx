@@ -35,22 +35,13 @@ export function SettingsPage() {
     setMessage('');
 
     try {
-      // For Ollama, convert localhost to host.docker.internal for Docker backend
-      let finalConfig = config;
-      if (providerId === 'ollama' && config.endpoint) {
-        finalConfig = {
-          ...config,
-          endpoint: config.endpoint.replace('localhost', 'host.docker.internal')
-        };
-      }
-
       const response = await fetch(`/v1/providers/${providerId}/configure`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${token}`,
         },
-        body: JSON.stringify(finalConfig),
+        body: JSON.stringify(config),
       });
 
       if (!response.ok) throw new Error('Failed to save');

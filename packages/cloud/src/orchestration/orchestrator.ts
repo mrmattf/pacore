@@ -39,9 +39,13 @@ export interface OrchestrationResponse {
   suggestedCategory?: string;
   workflowIntent?: {
     detected: boolean;
+    intentType?: 'create' | 'execute';
     confidence: number;
     description: string;
     workflowId?: string;
+    workflowName?: string;
+    workflowDescription?: string;
+    nodeCount?: number;
     executionId?: string;
   };
 }
@@ -114,21 +118,17 @@ export class Orchestrator {
       });
     }
 
-    // 3. Determine routing strategy
-    const routing = await this.determineRouting(userId, input, options);
-
-    // 4. Prepare messages with context
-    const messages = this.prepareMessages(input, context, routing);
-
-    // 5. Execute request based on routing
-    let response: CompletionResponse;
-
-    // For now, always use cloud provider (agent support will be added separately)
-    const provider = await this.registry.getLLMForUser(userId, routing.providerId);
-    response = await provider.complete(messages, options);
-
-    // 5.5. Check for workflow intent (if enabled and workflow system available)
+    // 3. Check for workflow intent FIRST (before LLM call)
     let workflowIntentResult;
+    let shouldSkipLLM = false;
+
+    console.log('[Orchestrator] Checking workflow intent detection...', {
+      detectWorkflowIntent: options.detectWorkflowIntent,
+      hasWorkflowBuilder: !!this.workflowBuilder,
+      hasWorkflowManager: !!this.workflowManager,
+      hasWorkflowExecutor: !!this.workflowExecutor,
+    });
+
     if (
       options.detectWorkflowIntent !== false &&
       this.workflowBuilder &&
@@ -136,20 +136,90 @@ export class Orchestrator {
       this.workflowExecutor
     ) {
       try {
+        console.log('[Orchestrator] Detecting intent for user:', userId, 'input:', input);
         const intent = await this.workflowBuilder.detectIntent(userId, input);
+        console.log('[Orchestrator] Intent detection result:', JSON.stringify(intent, null, 2));
 
         if (intent.detected && intent.confidence > 0.7) {
           // High confidence workflow intent detected
-          workflowIntentResult = {
-            detected: true,
-            confidence: intent.confidence,
-            description: intent.description || 'Workflow automation opportunity detected',
-          };
+          if (intent.intentType === 'execute' && intent.workflowId) {
+            // User wants to execute an existing workflow - ask for confirmation first
+            shouldSkipLLM = true;
+            try {
+              const workflow = await this.workflowManager.getWorkflow(intent.workflowId);
+              if (workflow && workflow.userId === userId) {
+                // Return workflow details for confirmation, DON'T execute yet
+                workflowIntentResult = {
+                  detected: true,
+                  intentType: 'execute' as const,
+                  confidence: intent.confidence,
+                  description: intent.description || 'Ready to execute workflow',
+                  workflowId: intent.workflowId,
+                  workflowName: workflow.name,
+                  workflowDescription: workflow.description,
+                  nodeCount: workflow.nodes?.length || 0,
+                  // No executionId - workflow not executed yet, waiting for confirmation
+                };
+              }
+            } catch (error: any) {
+              console.error('Workflow retrieval error:', error);
+              workflowIntentResult = {
+                detected: true,
+                intentType: 'execute' as const,
+                confidence: intent.confidence,
+                description: `Failed to retrieve workflow: ${error.message}`,
+                workflowId: intent.workflowId,
+              };
+            }
+          } else if (intent.intentType === 'create') {
+            // User wants to create a new workflow - still use LLM for conversation
+            workflowIntentResult = {
+              detected: true,
+              intentType: 'create' as const,
+              confidence: intent.confidence,
+              description: intent.description || 'Workflow creation opportunity detected',
+            };
+          } else {
+            // Generic workflow intent
+            workflowIntentResult = {
+              detected: true,
+              confidence: intent.confidence,
+              description: intent.description || 'Workflow automation opportunity detected',
+            };
+          }
         }
       } catch (error) {
         console.error('Workflow intent detection error:', error);
         // Continue without workflow detection if it fails
       }
+    }
+
+    // 4. Determine routing strategy
+    const routing = await this.determineRouting(userId, input, options);
+
+    // 5. Prepare messages with context
+    const messages = this.prepareMessages(input, context, routing);
+
+    // 6. Get provider (needed for both workflow execution and normal LLM calls)
+    const provider = await this.registry.getLLMForUser(userId, routing.providerId);
+
+    // 7. Execute request based on routing (skip if workflow was executed)
+    let response: CompletionResponse;
+
+    if (shouldSkipLLM && workflowIntentResult) {
+      // Workflow execution pending confirmation - return empty response
+      // The workflow details are in workflowIntentResult, no need for LLM response
+      response = {
+        content: '',
+        usage: {
+          promptTokens: 0,
+          completionTokens: 0,
+          totalTokens: 0,
+        },
+      };
+    } else {
+      // Normal LLM call
+      response = await provider.complete(messages, options);
     }
 
     // 6. Store conversation in memory
