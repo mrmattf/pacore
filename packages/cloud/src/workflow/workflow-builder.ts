@@ -92,10 +92,15 @@ IMPORTANT: Most user messages are regular questions or conversations, NOT workfl
 Only detect workflow intent when it's CLEARLY about workflows OR matches an existing workflow's purpose.
 
 CREATION indicators (must be explicit):
+- User explicitly says "create a workflow", "build a workflow", "make a workflow"
 - Explicit requests to automate repetitive tasks
-- Explicitly asking to create/build a workflow
 - Multi-step automation requests with words like "automate", "workflow", "create workflow"
-- Examples: "create a workflow to...", "automate this process...", "build me a workflow that..."
+- Examples:
+  * "create a workflow to..."
+  * "build me a workflow that..."
+  * "automate this process..."
+  * "create a 3-step workflow..."
+  * "I want to create a workflow that..."
 
 EXECUTION indicators (two types):
 1. BY NAME: Explicitly asking to run/execute/trigger a workflow BY NAME
@@ -114,7 +119,13 @@ NOT workflow indicators (return detected: false):
 - Normal conversation
 - Examples: "what's the capital of maine?", "how does X work?", "explain quantum physics"
 
-CRITICAL: You must respond with ONLY valid JSON, no other text before or after.
+CRITICAL JSON FORMATTING RULES:
+1. You must respond with ONLY valid JSON, no other text before or after
+2. In the "description" field, DO NOT use quote characters (", ')
+3. Keep descriptions short and simple
+4. Use only letters, numbers, spaces, and basic punctuation (. , -)
+
+RESPONSE EXAMPLES:
 
 For workflow execution (name match):
 {
@@ -130,7 +141,7 @@ For workflow execution (description match):
   "detected": true,
   "intentType": "execute",
   "confidence": 0.85,
-  "description": "User's request matches the Demo workflow's purpose",
+  "description": "Request matches existing workflow purpose",
   "workflowId": "abc123"
 }
 
@@ -139,17 +150,17 @@ For workflow creation:
   "detected": true,
   "intentType": "create",
   "confidence": 0.90,
-  "description": "User wants to create a new workflow to automate X"
+  "description": "Create workflow for automation task"
 }
 
 For NO workflow intent (regular questions/conversation):
 {
   "detected": false,
   "confidence": 0,
-  "description": "Regular question, not workflow-related"
+  "description": "Regular question not workflow-related"
 }
 
-Do not include any explanation, just the JSON object.`;
+IMPORTANT: Return ONLY the JSON object with NO explanations.`;
 
     try {
       const response = await provider.complete(
@@ -177,7 +188,27 @@ Do not include any explanation, just the JSON object.`;
 
       console.log('[WorkflowBuilder] Extracted JSON:', jsonContent);
 
-      const result = JSON.parse(jsonContent);
+      let result;
+      try {
+        result = JSON.parse(jsonContent);
+      } catch (parseError) {
+        // Try to fix common JSON issues from Ollama
+        console.warn('[WorkflowBuilder] Initial JSON parse failed, attempting repair...');
+
+        // Fix unescaped quotes in description field (common Ollama issue)
+        // Match description field and escape internal quotes
+        const fixedJson = jsonContent.replace(
+          /"description":\s*"([^"]*)"/g,
+          (match, desc) => {
+            // If description contains unmatched quotes, remove them
+            const cleanDesc = desc.replace(/["']/g, '');
+            return `"description": "${cleanDesc}"`;
+          }
+        );
+
+        console.log('[WorkflowBuilder] Repaired JSON:', fixedJson);
+        result = JSON.parse(fixedJson);
+      }
       return {
         detected: result.detected || false,
         intentType: result.intentType,
@@ -286,8 +317,8 @@ If no good matches, return empty array.`;
     userMessage: string,
     category?: string,
   ): Promise<WorkflowDAG> {
-    // Get user's MCP servers
-    const mcpServers = await this.mcpRegistry.listUserServers(userId, category);
+    // Get user's MCP servers (don't filter by category to get all available servers)
+    const mcpServers = await this.mcpRegistry.listUserServers(userId);
 
     if (mcpServers.length === 0) {
       throw new Error(
@@ -295,63 +326,88 @@ If no good matches, return empty array.`;
       );
     }
 
+    console.log('[WorkflowBuilder] Found', mcpServers.length, 'MCP servers for user:', userId);
+    console.log('[WorkflowBuilder] MCP servers:', JSON.stringify(mcpServers.map(s => ({
+      id: s.id,
+      name: s.name,
+      serverType: s.serverType
+    })), null, 2));
+
     // Build tool catalog from MCP servers
     const toolCatalog = await this.buildToolCatalog(mcpServers);
+    console.log('[WorkflowBuilder] Tool catalog:\n', toolCatalog);
 
     const provider = await this.llmRegistry.getLLMForUser(userId);
 
-    const prompt = `You are a workflow builder AI. Create a workflow DAG from the user's request.
+    const prompt = `You are creating a workflow JSON for this task: ${userMessage}
 
-User request: "${userMessage}"
-
-Available MCP Tools:
+=== AVAILABLE TOOLS ===
 ${toolCatalog}
 
-Create a workflow with these node types:
-- mcp_fetch: Fetch data from MCP server tool
-- transform: Transform data using LLM or code
-- filter: Filter array data based on conditions
-- merge: Combine multiple data sources
-- action: Perform action (save, notify, webhook, email)
-- conditional: Branch based on condition
+=== YOUR TASK ===
+1. Read the user's task above
+2. Look through the AVAILABLE TOOLS section
+3. Find the server and tool you need
+4. Copy the EXACT SERVER ID and TOOL NAME from the list
+5. Create a workflow JSON using those EXACT values
 
-Each node must have:
-- id: unique identifier (use descriptive names like "fetch_legal_cases", "filter_recent")
-- type: node type from above
-- description: what this node does
-- config: node-specific configuration
-- inputs: array of node IDs this depends on (empty for first nodes)
+=== WORKFLOW NODE TYPES ===
+- "mcp_fetch": Call an MCP tool to get data (use serverId, serverName, toolName from AVAILABLE TOOLS)
+- "transform": Use LLM to process/format data (use type: "llm", prompt: "what to do")
+- "filter": Filter array data by conditions
+- "merge": Combine multiple inputs
+- "conditional": Branch based on condition
 
-Return ONLY valid JSON workflow structure:
+=== IMPORTANT ===
+The SERVER ID will be a long random string like "qsF7bbF-4VSueWuLvpyly" or "abc-xyz-123".
+You MUST copy it EXACTLY from the AVAILABLE TOOLS section above.
+DO NOT make up fake IDs. DO NOT use placeholder values.
+
+=== RESPONSE FORMAT ===
+You MUST respond with ONLY the JSON object.
+DO NOT add any explanations before or after the JSON.
+DO NOT add comments or notes.
+Just return the raw JSON.
+
+=== EXAMPLE STRUCTURE (replace ALL_CAPS with real values) ===
 {
-  "name": "descriptive workflow name",
-  "description": "what this workflow does",
+  "name": "Short Workflow Name",
+  "description": "What this workflow does",
   "category": "${category || 'general'}",
   "nodes": [
     {
-      "id": "node_1",
+      "id": "step_1",
       "type": "mcp_fetch",
-      "description": "Fetch data from source",
+      "description": "Get data from MCP tool",
       "config": {
-        "serverId": "server_id_from_catalog",
-        "serverName": "server name",
-        "toolName": "tool_name",
+        "serverId": "REAL_SERVER_ID_NO_BRACKETS",
+        "serverName": "REAL_SERVER_NAME",
+        "toolName": "REAL_TOOL_NAME",
         "parameters": {}
       },
       "inputs": []
+    },
+    {
+      "id": "step_2",
+      "type": "transform",
+      "description": "Process the data",
+      "config": {
+        "type": "llm",
+        "prompt": "Format and summarize the data",
+        "provider": "ollama"
+      },
+      "inputs": ["step_1"]
     }
   ]
 }
 
-Design principles:
-1. Start with mcp_fetch nodes to get data
-2. Use transform nodes to process/analyze data
-3. Use filter nodes to narrow results
-4. Use merge nodes to combine data from multiple sources
-5. End with action nodes to deliver results
-6. Keep it simple - 3-7 nodes is ideal
-7. Ensure all node IDs in "inputs" reference existing nodes
-8. Use descriptive node IDs that explain what they do`;
+CRITICAL RULES:
+1. Copy server IDs EXACTLY as shown - just the ID string, NO angle brackets, NO quotes around it
+2. If you see "SERVER ID (COPY THIS EXACTLY): qsF7bbF-4VSueWuLvpyly" then use "qsF7bbF-4VSueWuLvpyly"
+3. Return ONLY valid JSON - no text before or after
+4. Do NOT explain your response
+
+NOW CREATE THE WORKFLOW JSON:`;
 
     try {
       const response = await provider.complete(
@@ -366,8 +422,21 @@ Design principles:
         }
       );
 
+      console.log('[WorkflowBuilder] Raw workflow build response:', response.content);
+
+      // Try to extract JSON from response (handle cases where LLM adds extra text)
+      let jsonContent = response.content.trim();
+
+      // Look for JSON object in the response
+      const jsonMatch = jsonContent.match(/\{[\s\S]*\}/);
+      if (jsonMatch) {
+        jsonContent = jsonMatch[0];
+      }
+
+      console.log('[WorkflowBuilder] Extracted JSON:', jsonContent);
+
       // Parse and validate workflow
-      const workflowData = JSON.parse(response.content);
+      const workflowData = JSON.parse(jsonContent);
 
       const workflow: WorkflowDAG = {
         userId,
@@ -401,7 +470,11 @@ Design principles:
         continue;
       }
 
-      catalogParts.push(`\n${server.name} (ID: ${server.id}):`);
+      // Make the server ID extremely explicit for LLMs
+      catalogParts.push(`\n--- MCP SERVER ---`);
+      catalogParts.push(`SERVER NAME: ${server.name}`);
+      catalogParts.push(`SERVER ID (COPY THIS EXACTLY): ${server.id}`);
+      catalogParts.push(`AVAILABLE TOOLS:`);
 
       for (const tool of server.capabilities.tools) {
         const params = tool.inputSchema
@@ -409,9 +482,10 @@ Design principles:
           : 'No parameters';
 
         catalogParts.push(
-          `  - ${tool.name}: ${tool.description}\n    Parameters: ${params}`
+          `  - TOOL NAME: ${tool.name}\n    DESCRIPTION: ${tool.description}\n    PARAMETERS: ${params}`
         );
       }
+      catalogParts.push(`--- END OF SERVER ---\n`);
     }
 
     if (catalogParts.length === 0) {

@@ -1,4 +1,5 @@
 import { useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 interface WorkflowIntent {
   detected: boolean;
@@ -26,10 +27,52 @@ interface Props {
 
 export function ChatBox({ messages, onConfirmExecution, onCreateWorkflow, onDismissIntent }: Props) {
   const endRef = useRef<HTMLDivElement>(null);
+  const navigate = useNavigate();
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
+
+  // Process markdown links in messages: [text](/path)
+  const renderMessageContent = (content: string) => {
+    const linkRegex = /\[([^\]]+)\]\(([^)]+)\)/g;
+    const parts: (string | JSX.Element)[] = [];
+    let lastIndex = 0;
+    let match;
+
+    while ((match = linkRegex.exec(content)) !== null) {
+      // Add text before link
+      if (match.index > lastIndex) {
+        parts.push(content.substring(lastIndex, match.index));
+      }
+
+      // Add clickable link
+      const linkText = match[1];
+      const linkPath = match[2];
+      parts.push(
+        <a
+          key={match.index}
+          href={linkPath}
+          onClick={(e) => {
+            e.preventDefault();
+            navigate(linkPath);
+          }}
+          className="underline hover:text-blue-800 cursor-pointer"
+        >
+          {linkText}
+        </a>
+      );
+
+      lastIndex = match.index + match[0].length;
+    }
+
+    // Add remaining text
+    if (lastIndex < content.length) {
+      parts.push(content.substring(lastIndex));
+    }
+
+    return parts.length > 0 ? <>{parts}</> : content;
+  };
 
   return (
     <div className="space-y-4">
@@ -145,7 +188,7 @@ export function ChatBox({ messages, onConfirmExecution, onCreateWorkflow, onDism
                   : 'bg-gray-100 text-gray-900'
               }`}
             >
-              <p className="whitespace-pre-wrap">{message.content}</p>
+              <p className="whitespace-pre-wrap">{renderMessageContent(message.content)}</p>
             </div>
           </div>
         );

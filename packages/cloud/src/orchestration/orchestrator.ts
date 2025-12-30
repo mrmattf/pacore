@@ -172,7 +172,8 @@ export class Orchestrator {
               };
             }
           } else if (intent.intentType === 'create') {
-            // User wants to create a new workflow - still use LLM for conversation
+            // User wants to create a new workflow - skip LLM, show creation dialog
+            shouldSkipLLM = true;
             workflowIntentResult = {
               detected: true,
               intentType: 'create' as const,

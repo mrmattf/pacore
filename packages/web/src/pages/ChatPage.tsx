@@ -3,6 +3,7 @@ import { ChatInput } from '../components/ChatInput';
 import { CategorySelector } from '../components/CategorySelector';
 import { CategorySuggestionBanner } from '../components/CategorySuggestionBanner';
 import { ProviderSelector } from '../components/ProviderSelector';
+import { WorkflowPreview } from '../components/WorkflowPreview';
 import { useChat } from '../hooks/useChat';
 import { useCategories } from '../hooks/useCategories';
 import { useCategoryStore } from '../store/categoryStore';
@@ -10,6 +11,8 @@ import { useProviderStore } from '../store/providerStore';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { Settings, LogOut, Database } from 'lucide-react';
+import { WorkflowDAG } from '@pacore/core';
+import { useState } from 'react';
 
 export function ChatPage() {
   const { messages, sendMessage, addMessage, removeMessage, isLoading, lastSuggestion, clearSuggestion } = useChat();
@@ -20,6 +23,10 @@ export function ChatPage() {
   const { refresh: refreshCategories } = useCategories();
   const logout = useAuthStore((state) => state.logout);
   const navigate = useNavigate();
+
+  // Workflow preview state
+  const [draftWorkflow, setDraftWorkflow] = useState<WorkflowDAG | null>(null);
+  const [showWorkflowPreview, setShowWorkflowPreview] = useState(false);
 
   const handleLogout = () => {
     logout();
@@ -72,9 +79,121 @@ export function ChatPage() {
     }
   };
 
-  const handleCreateWorkflow = () => {
-    // Navigate to workflow builder (to be implemented)
-    console.log('Create workflow');
+  const handleCreateWorkflow = async () => {
+    try {
+      const token = useAuthStore.getState().token;
+
+      // Get the last user message to understand what workflow they want to create
+      const lastUserMessage = messages.filter(m => m.role === 'user').pop();
+      if (!lastUserMessage) {
+        addMessage({
+          role: 'assistant',
+          content: 'Could not determine what workflow to create. Please try again.'
+        });
+        return;
+      }
+
+      // Call the workflow builder API
+      const response = await fetch('/v1/workflows/build', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          message: lastUserMessage.content,
+          category: category || undefined,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to build workflow');
+      }
+
+      const data = await response.json();
+      const workflow = data.workflow;
+
+      // NEW: Store workflow in state and show preview instead of auto-saving
+      setDraftWorkflow(workflow);
+      setShowWorkflowPreview(true);
+
+    } catch (error) {
+      console.error('Workflow creation error:', error);
+      addMessage({
+        role: 'assistant',
+        content: `Failed to create workflow: ${error instanceof Error ? error.message : 'Unknown error'}`
+      });
+    }
+  };
+
+  const handleEditWorkflow = (workflow: WorkflowDAG) => {
+    // Navigate to workflow builder with draft
+    navigate('/workflows/builder', {
+      state: { workflow }
+    });
+  };
+
+  const handleSaveWorkflow = async (workflow: WorkflowDAG) => {
+    try {
+      const token = useAuthStore.getState().token;
+
+      // Save the workflow to the database
+      const response = await fetch('/v1/workflows', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: workflow.name,
+          description: workflow.description,
+          category: workflow.category,
+          nodes: workflow.nodes,
+        }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to save workflow');
+      }
+
+      const savedWorkflow = await response.json();
+
+      // Show success message with edit link
+      const successMessage = `**Workflow Created Successfully!**\n\n` +
+        `**Name:** ${savedWorkflow.name}\n` +
+        `**Description:** ${savedWorkflow.description}\n` +
+        `**Steps:** ${savedWorkflow.nodes?.length || 0}\n` +
+        `**ID:** ${savedWorkflow.id}\n\n` +
+        `**Actions:**\n` +
+        `- [Edit Workflow](/workflows/${savedWorkflow.id}/edit)\n` +
+        `- [Execute Now](/workflows/${savedWorkflow.id}/execute)\n` +
+        `- [View Details](/workflows/${savedWorkflow.id})\n\n` +
+        `You can also say "run ${savedWorkflow.name}" to execute it.`;
+
+      addMessage({ role: 'assistant', content: successMessage });
+      setShowWorkflowPreview(false);
+      setDraftWorkflow(null);
+
+    } catch (error) {
+      console.error('Workflow save error:', error);
+      addMessage({
+        role: 'assistant',
+        content: `Failed to save workflow: ${error instanceof Error ? error.message : 'Unknown error'}`
+      });
+    }
+  };
+
+  const handleRefineWorkflow = () => {
+    setShowWorkflowPreview(false);
+    addMessage({
+      role: 'assistant',
+      content: 'I can help refine the workflow. What would you like to change?'
+    });
+  };
+
+  const handleCancelWorkflow = () => {
+    setShowWorkflowPreview(false);
+    setDraftWorkflow(null);
   };
 
   const handleDismissIntent = (messageIndex: number) => {
@@ -131,6 +250,17 @@ export function ChatPage() {
             onCreateWorkflow={handleCreateWorkflow}
             onDismissIntent={handleDismissIntent}
           />
+
+          {/* Workflow Preview */}
+          {showWorkflowPreview && draftWorkflow && (
+            <WorkflowPreview
+              workflow={draftWorkflow}
+              onEdit={handleEditWorkflow}
+              onSave={handleSaveWorkflow}
+              onRefine={handleRefineWorkflow}
+              onCancel={handleCancelWorkflow}
+            />
+          )}
         </div>
       </div>
 
