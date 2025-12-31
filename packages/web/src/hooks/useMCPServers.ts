@@ -160,7 +160,7 @@ export function useMCPServers() {
   const fetchServerTools = async (serverId: string) => {
     if (!token) return [];
     try {
-      const response = await fetch(`/v1/mcp/servers/${serverId}/capabilities`, {
+      const response = await fetch(`/v1/mcp/servers/${serverId}/tools`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       const data = await response.json();

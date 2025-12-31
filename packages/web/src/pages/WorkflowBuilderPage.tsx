@@ -2,8 +2,11 @@ import { useState, useEffect } from 'react';
 import { useNavigate, useLocation, useParams } from 'react-router-dom';
 import { WorkflowDAG, WorkflowNode } from '@pacore/core';
 import { WorkflowGraph } from '../components/WorkflowGraph';
-import { ArrowLeft, Save, Play } from 'lucide-react';
+import { NodeConfigPanel } from '../components/NodeConfigPanel';
+import { AddNodeModal } from '../components/AddNodeModal';
+import { ArrowLeft, Save, Play, Plus, AlertTriangle } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
+import { validateWorkflow, ValidationResult } from '../utils/workflowValidation';
 
 export function WorkflowBuilderPage() {
   const navigate = useNavigate();
@@ -13,6 +16,8 @@ export function WorkflowBuilderPage() {
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [selectedNode, setSelectedNode] = useState<WorkflowNode | null>(null);
   const [isSaving, setIsSaving] = useState(false);
+  const [isAddNodeModalOpen, setIsAddNodeModalOpen] = useState(false);
+  const [validation, setValidation] = useState<ValidationResult | null>(null);
 
   // Load workflow from location state (draft from chat) or fetch by ID
   useEffect(() => {
@@ -60,8 +65,95 @@ export function WorkflowBuilderPage() {
     }
   }, [selectedNodeId, workflow]);
 
+  // Keyboard shortcuts for node deletion
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Delete or Backspace key to delete selected node
+      if ((e.key === 'Delete' || e.key === 'Backspace') && selectedNodeId) {
+        // Don't delete if user is typing in an input/textarea
+        const target = e.target as HTMLElement;
+        if (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA') {
+          return;
+        }
+
+        e.preventDefault();
+        if (confirm('Are you sure you want to delete this node?')) {
+          handleNodeDelete(selectedNodeId);
+        }
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [selectedNodeId]);
+
+  // Validate workflow whenever it changes
+  useEffect(() => {
+    if (workflow) {
+      const result = validateWorkflow(workflow);
+      setValidation(result);
+    }
+  }, [workflow]);
+
+  const handleNodeUpdate = (nodeId: string, updates: Partial<WorkflowNode>) => {
+    if (!workflow) return;
+
+    setWorkflow({
+      ...workflow,
+      nodes: workflow.nodes.map((node) =>
+        node.id === nodeId ? { ...node, ...updates } : node
+      ),
+    });
+  };
+
+  const handleNodeDelete = (nodeId: string) => {
+    if (!workflow) return;
+
+    // Remove the node
+    const updatedNodes = workflow.nodes.filter((node) => node.id !== nodeId);
+
+    // Remove references to this node from other nodes' inputs
+    const cleanedNodes = updatedNodes.map((node) => ({
+      ...node,
+      inputs: node.inputs?.filter((inputId) => inputId !== nodeId),
+    }));
+
+    setWorkflow({
+      ...workflow,
+      nodes: cleanedNodes,
+    });
+
+    // Clear selection
+    setSelectedNodeId(null);
+  };
+
+  const handleAddNode = (newNode: WorkflowNode) => {
+    if (!workflow) return;
+
+    setWorkflow({
+      ...workflow,
+      nodes: [...workflow.nodes, newNode],
+    });
+  };
+
   const handleSave = async () => {
     if (!workflow) return;
+
+    // Validate before saving
+    if (validation && !validation.valid) {
+      const errorMessages = validation.errors.map((e) => e.message).join('\n');
+      alert(`Cannot save workflow with errors:\n\n${errorMessages}`);
+      return;
+    }
+
+    // Warn about validation warnings but allow save
+    if (validation && validation.warnings.length > 0) {
+      const warningMessages = validation.warnings.map((w) => w.message).join('\n');
+      const proceed = confirm(
+        `The workflow has warnings:\n\n${warningMessages}\n\nDo you want to save anyway?`
+      );
+      if (!proceed) return;
+    }
 
     setIsSaving(true);
     try {
@@ -148,11 +240,21 @@ export function WorkflowBuilderPage() {
           >
             <ArrowLeft size={20} />
           </button>
-          <div>
-            <h1 className="text-xl font-bold">{workflow.name}</h1>
-            {workflow.description && (
-              <p className="text-sm text-gray-600">{workflow.description}</p>
-            )}
+          <div className="flex-1 max-w-2xl">
+            <input
+              type="text"
+              value={workflow.name}
+              onChange={(e) => setWorkflow({ ...workflow, name: e.target.value })}
+              className="text-xl font-bold border-none focus:outline-none focus:ring-2 focus:ring-blue-500 rounded px-2 py-1 w-full"
+              placeholder="Workflow Name"
+            />
+            <input
+              type="text"
+              value={workflow.description || ''}
+              onChange={(e) => setWorkflow({ ...workflow, description: e.target.value })}
+              className="text-sm text-gray-600 border-none focus:outline-none focus:ring-2 focus:ring-blue-500 rounded px-2 py-1 w-full mt-1"
+              placeholder="Workflow Description"
+            />
           </div>
         </div>
 
@@ -177,6 +279,42 @@ export function WorkflowBuilderPage() {
         </div>
       </header>
 
+      {/* Validation Banner */}
+      {validation && (validation.errors.length > 0 || validation.warnings.length > 0) && (
+        <div className="bg-white border-b">
+          {validation.errors.length > 0 && (
+            <div className="px-6 py-3 bg-red-50 border-l-4 border-red-500">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <h3 className="text-sm font-medium text-red-800">Workflow Errors</h3>
+                  <ul className="mt-1 text-sm text-red-700 list-disc list-inside">
+                    {validation.errors.map((error, idx) => (
+                      <li key={idx}>{error.message}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+          {validation.warnings.length > 0 && (
+            <div className="px-6 py-3 bg-yellow-50 border-l-4 border-yellow-500">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="w-5 h-5 text-yellow-600 flex-shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <h3 className="text-sm font-medium text-yellow-800">Workflow Warnings</h3>
+                  <ul className="mt-1 text-sm text-yellow-700 list-disc list-inside">
+                    {validation.warnings.map((warning, idx) => (
+                      <li key={idx}>{warning.message}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Main Content - Two Panel Layout */}
       <div className="flex-1 flex overflow-hidden">
         {/* Left Panel - Visual Graph */}
@@ -191,68 +329,38 @@ export function WorkflowBuilderPage() {
         {/* Right Panel - Node Configuration */}
         <div className="w-96 bg-white p-6 overflow-y-auto">
           {selectedNode ? (
-            <div>
-              <h2 className="text-lg font-semibold mb-4">Node Configuration</h2>
-
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Node Type
-                  </label>
-                  <input
-                    type="text"
-                    value={selectedNode.type}
-                    disabled
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-600"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Description
-                  </label>
-                  <input
-                    type="text"
-                    value={selectedNode.description || ''}
-                    disabled
-                    className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-gray-600"
-                  />
-                </div>
-
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-1">
-                    Configuration
-                  </label>
-                  <pre className="w-full px-3 py-2 border border-gray-300 rounded-md bg-gray-50 text-xs text-gray-700 overflow-auto max-h-96">
-                    {JSON.stringify(selectedNode.config, null, 2)}
-                  </pre>
-                </div>
-
-                {selectedNode.inputs && selectedNode.inputs.length > 0 && (
-                  <div>
-                    <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Dependencies
-                    </label>
-                    <div className="text-sm text-gray-600">
-                      {selectedNode.inputs.join(', ')}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              <div className="mt-6 pt-6 border-t border-gray-200">
-                <p className="text-xs text-gray-500">
-                  Full editing capabilities coming in Sprint 3
-                </p>
-              </div>
-            </div>
+            <NodeConfigPanel
+              node={selectedNode}
+              onUpdate={handleNodeUpdate}
+              onDelete={handleNodeDelete}
+            />
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-gray-400">
-              <p className="text-sm">Click on a node to view its configuration</p>
+              <p className="text-sm">Click on a node to edit its configuration</p>
             </div>
           )}
         </div>
       </div>
+
+      {/* Floating Add Node Button */}
+      <button
+        onClick={() => setIsAddNodeModalOpen(true)}
+        className="fixed bottom-8 right-8 w-14 h-14 bg-blue-600 hover:bg-blue-700 text-white rounded-full shadow-lg hover:shadow-xl transition-all flex items-center justify-center group"
+        title="Add New Node"
+      >
+        <Plus className="w-6 h-6" />
+        <span className="absolute right-16 bg-gray-900 text-white text-sm px-3 py-1 rounded whitespace-nowrap opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none">
+          Add Node
+        </span>
+      </button>
+
+      {/* Add Node Modal */}
+      <AddNodeModal
+        isOpen={isAddNodeModalOpen}
+        onClose={() => setIsAddNodeModalOpen(false)}
+        onAddNode={handleAddNode}
+        existingNodes={workflow.nodes}
+      />
     </div>
   );
 }
