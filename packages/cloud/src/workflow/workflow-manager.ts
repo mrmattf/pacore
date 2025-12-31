@@ -258,15 +258,17 @@ export class WorkflowManager {
     }
 
     if (workflow.nodes) {
+      // First pass: collect all node IDs and check for duplicates
       const nodeIds = new Set<string>();
-
       for (const node of workflow.nodes) {
-        // Check for duplicate IDs
         if (nodeIds.has(node.id)) {
           errors.push(`Duplicate node ID: ${node.id}`);
         }
         nodeIds.add(node.id);
+      }
 
+      // Second pass: validate node inputs and config
+      for (const node of workflow.nodes) {
         // Validate node inputs reference existing nodes
         if (node.inputs) {
           for (const inputId of node.inputs) {
@@ -275,6 +277,7 @@ export class WorkflowManager {
             }
           }
         }
+        // Note: Nodes with no inputs are valid (starter nodes)
 
         // Validate node config
         if (!node.config) {

@@ -18,6 +18,7 @@ interface WorkflowGraphProps {
   workflow: WorkflowDAG;
   onNodeSelect?: (nodeId: string) => void;
   selectedNodeId?: string | null;
+  onConnect?: (sourceId: string, targetId: string) => void;
 }
 
 // Node types for React Flow
@@ -80,7 +81,7 @@ const getLayoutedElements = (nodes: Node[], edges: Edge[]) => {
   return { nodes: layoutedNodes, edges };
 };
 
-export function WorkflowGraph({ workflow, onNodeSelect, selectedNodeId }: WorkflowGraphProps) {
+export function WorkflowGraph({ workflow, onNodeSelect, selectedNodeId, onConnect }: WorkflowGraphProps) {
   const { nodes: flowNodes, edges: flowEdges } = convertToFlowNodes(workflow);
   const { nodes: layoutedNodes, edges: layoutedEdges } = getLayoutedElements(flowNodes, flowEdges);
 
@@ -123,6 +124,15 @@ export function WorkflowGraph({ workflow, onNodeSelect, selectedNodeId }: Workfl
     }
   }, [onNodeSelect]);
 
+  const handleConnect = useCallback(
+    (connection: any) => {
+      if (onConnect && connection.source && connection.target) {
+        onConnect(connection.source, connection.target);
+      }
+    },
+    [onConnect]
+  );
+
   return (
     <div className="w-full h-full bg-gray-50">
       <ReactFlow
@@ -132,6 +142,7 @@ export function WorkflowGraph({ workflow, onNodeSelect, selectedNodeId }: Workfl
         onEdgesChange={onEdgesChange}
         onNodeClick={onNodeClick}
         onPaneClick={onPaneClick}
+        onConnect={handleConnect}
         nodeTypes={nodeTypes}
         connectionMode={ConnectionMode.Loose}
         fitView

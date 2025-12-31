@@ -1,18 +1,22 @@
 import { useState, useEffect } from 'react';
 import { WorkflowNode, MCPFetchNodeConfig, TransformNodeConfig } from '@pacore/core';
 import { useMCPServers } from '../hooks/useMCPServers';
+import { SchemaFormBuilder } from './SchemaFormBuilder';
 import { Trash2 } from 'lucide-react';
 
 interface NodeConfigPanelProps {
   node: WorkflowNode;
   onUpdate: (nodeId: string, updates: Partial<WorkflowNode>) => void;
   onDelete: (nodeId: string) => void;
+  existingNodes: WorkflowNode[];
 }
 
-export function NodeConfigPanel({ node, onUpdate, onDelete }: NodeConfigPanelProps) {
+export function NodeConfigPanel({ node, onUpdate, onDelete, existingNodes }: NodeConfigPanelProps) {
   const { servers, loading: serversLoading, fetchServerTools } = useMCPServers();
   const [description, setDescription] = useState(node.description || '');
   const [tools, setTools] = useState<any[]>([]);
+  const [selectedTool, setSelectedTool] = useState<any>(null);
+  const [selectedInputs, setSelectedInputs] = useState<string[]>([]);
 
   // For MCP Fetch nodes
   const [serverId, setServerId] = useState('');
@@ -28,17 +32,13 @@ export function NodeConfigPanel({ node, onUpdate, onDelete }: NodeConfigPanelPro
   // Initialize form values from node config
   useEffect(() => {
     setDescription(node.description || '');
+    setSelectedInputs(node.inputs || []);
 
     if (node.type === 'mcp_fetch') {
       const config = node.config as MCPFetchNodeConfig;
       setServerId(config.serverId || '');
       setToolName(config.toolName || '');
       setParameters(JSON.stringify(config.parameters || {}, null, 2));
-
-      // Load tools for selected server
-      if (config.serverId) {
-        fetchServerTools(config.serverId).then(setTools);
-      }
     } else if (node.type === 'transform') {
       const config = node.config as any;
       setTransformType(config.type || 'llm');
@@ -46,18 +46,30 @@ export function NodeConfigPanel({ node, onUpdate, onDelete }: NodeConfigPanelPro
       setModel(config.model || 'claude-3-5-sonnet-20241022');
       setPrompt(config.prompt || '');
     }
-  }, [node, fetchServerTools]);
+  }, [node]);
 
   // Load tools when server changes
   useEffect(() => {
     if (serverId && node.type === 'mcp_fetch') {
       fetchServerTools(serverId).then(setTools);
     }
-  }, [serverId, fetchServerTools, node.type]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [serverId, node.type]);
+
+  // Update selected tool when tools or toolName changes
+  useEffect(() => {
+    if (serverId && toolName && tools.length > 0) {
+      const tool = tools.find(t => t.name === toolName);
+      setSelectedTool(tool || null);
+    } else {
+      setSelectedTool(null);
+    }
+  }, [serverId, toolName, tools]);
 
   const handleSave = () => {
     const updates: Partial<WorkflowNode> = {
       description,
+      inputs: selectedInputs.length > 0 ? selectedInputs : undefined,
     };
 
     if (node.type === 'mcp_fetch') {
@@ -130,6 +142,54 @@ export function NodeConfigPanel({ node, onUpdate, onDelete }: NodeConfigPanelPro
         />
       </div>
 
+      {/* Input Connections */}
+      <div>
+        <label className="block text-sm font-medium text-gray-700 mb-2">
+          Input Connections
+        </label>
+        <div className="space-y-2 max-h-48 overflow-y-auto border border-gray-200 rounded-md p-3 bg-gray-50">
+          {existingNodes.filter(n => n.id !== node.id).length === 0 ? (
+            <p className="text-sm text-gray-500">No other nodes available to connect</p>
+          ) : (
+            existingNodes
+              .filter(n => n.id !== node.id)
+              .map((availableNode) => (
+                <div
+                  key={availableNode.id}
+                  className="flex items-center gap-2 p-2 hover:bg-gray-100 rounded"
+                >
+                  <input
+                    type="checkbox"
+                    id={`input-${availableNode.id}`}
+                    checked={selectedInputs.includes(availableNode.id)}
+                    onChange={(e) => {
+                      e.stopPropagation();
+                      if (e.target.checked) {
+                        setSelectedInputs([...selectedInputs, availableNode.id]);
+                      } else {
+                        setSelectedInputs(selectedInputs.filter(id => id !== availableNode.id));
+                      }
+                    }}
+                    className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
+                  />
+                  <label
+                    htmlFor={`input-${availableNode.id}`}
+                    className="flex-1 min-w-0 cursor-pointer"
+                  >
+                    <div className="text-sm font-medium text-gray-900 truncate">
+                      {availableNode.description || availableNode.type}
+                    </div>
+                    <div className="text-xs text-gray-500">{availableNode.type}</div>
+                  </label>
+                </div>
+              ))
+          )}
+        </div>
+        <p className="text-xs text-gray-500 mt-1">
+          Select which nodes should feed data into this node
+        </p>
+      </div>
+
       {/* MCP Fetch specific fields */}
       {node.type === 'mcp_fetch' && (
         <>
@@ -172,16 +232,37 @@ export function NodeConfigPanel({ node, onUpdate, onDelete }: NodeConfigPanelPro
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-gray-700 mb-1">
-              Parameters (JSON)
+            <label className="block text-sm font-medium text-gray-700 mb-2">
+              Tool Parameters
             </label>
-            <textarea
-              value={parameters}
-              onChange={(e) => setParameters(e.target.value)}
-              rows={6}
-              className="w-full px-3 py-2 border border-gray-300 rounded-md font-mono text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
-              placeholder='{"key": "value"}'
-            />
+            {selectedTool?.inputSchema ? (
+              <SchemaFormBuilder
+                schema={selectedTool.inputSchema}
+                value={(() => {
+                  try {
+                    return JSON.parse(parameters);
+                  } catch {
+                    return {};
+                  }
+                })()}
+                onChange={(value) => setParameters(JSON.stringify(value, null, 2))}
+                existingNodes={existingNodes}
+                currentNodeId={node.id}
+              />
+            ) : (
+              <div>
+                <textarea
+                  value={parameters}
+                  onChange={(e) => setParameters(e.target.value)}
+                  rows={6}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md font-mono text-xs focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+                  placeholder='{"key": "value"}'
+                />
+                <p className="text-xs text-gray-500 mt-1">
+                  {toolName ? 'No schema available for this tool. Use JSON format.' : 'Select a tool to see parameter form.'}
+                </p>
+              </div>
+            )}
           </div>
         </>
       )}

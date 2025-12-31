@@ -93,21 +93,43 @@ export function ChatPage() {
         return;
       }
 
-      // Call the workflow builder API
-      const response = await fetch('/v1/workflows/build', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify({
-          message: lastUserMessage.content,
-          category: category || undefined,
-        }),
+      // Add building status message
+      addMessage({
+        role: 'assistant',
+        content: 'Building your workflow... This may take 30-60 seconds depending on your LLM provider.'
       });
 
-      if (!response.ok) {
-        throw new Error('Failed to build workflow');
+      // Call the workflow builder API with extended timeout
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minute timeout
+
+      let response;
+      try {
+        response = await fetch('/v1/workflows/build', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`,
+          },
+          body: JSON.stringify({
+            message: lastUserMessage.content,
+            category: category || undefined,
+          }),
+          signal: controller.signal,
+        });
+
+        clearTimeout(timeoutId);
+
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({ error: 'Unknown error' }));
+          throw new Error(errorData.error || 'Failed to build workflow');
+        }
+      } catch (fetchError: any) {
+        clearTimeout(timeoutId);
+        if (fetchError.name === 'AbortError') {
+          throw new Error('Workflow build timed out. This might be due to slow LLM response. Please try again or use a faster LLM provider.');
+        }
+        throw fetchError;
       }
 
       const data = await response.json();

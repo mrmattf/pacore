@@ -317,8 +317,13 @@ If no good matches, return empty array.`;
     userMessage: string,
     category?: string,
   ): Promise<WorkflowDAG> {
+    console.log('[WorkflowBuilder] Starting workflow build for user:', userId);
+    console.log('[WorkflowBuilder] User message:', userMessage);
+
     // Get user's MCP servers (don't filter by category to get all available servers)
+    const startTime = Date.now();
     const mcpServers = await this.mcpRegistry.listUserServers(userId);
+    console.log(`[WorkflowBuilder] Listed MCP servers in ${Date.now() - startTime}ms`);
 
     if (mcpServers.length === 0) {
       throw new Error(
@@ -334,10 +339,14 @@ If no good matches, return empty array.`;
     })), null, 2));
 
     // Build tool catalog from MCP servers
+    const catalogStart = Date.now();
     const toolCatalog = await this.buildToolCatalog(mcpServers);
-    console.log('[WorkflowBuilder] Tool catalog:\n', toolCatalog);
+    console.log(`[WorkflowBuilder] Built tool catalog in ${Date.now() - catalogStart}ms`);
+    console.log('[WorkflowBuilder] Tool catalog length:', toolCatalog.length, 'characters');
 
+    const providerStart = Date.now();
     const provider = await this.llmRegistry.getLLMForUser(userId);
+    console.log(`[WorkflowBuilder] Got LLM provider in ${Date.now() - providerStart}ms`);
 
     const prompt = `You are creating a workflow JSON for this task: ${userMessage}
 
@@ -410,6 +419,8 @@ CRITICAL RULES:
 NOW CREATE THE WORKFLOW JSON:`;
 
     try {
+      console.log('[WorkflowBuilder] Calling LLM with prompt length:', prompt.length, 'characters');
+      const llmStart = Date.now();
       const response = await provider.complete(
         [
           {
@@ -421,7 +432,7 @@ NOW CREATE THE WORKFLOW JSON:`;
           maxTokens: 4096,
         }
       );
-
+      console.log(`[WorkflowBuilder] LLM call completed in ${Date.now() - llmStart}ms`);
       console.log('[WorkflowBuilder] Raw workflow build response:', response.content);
 
       // Try to extract JSON from response (handle cases where LLM adds extra text)

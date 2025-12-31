@@ -441,6 +441,7 @@ export class WorkflowExecutor {
   /**
    * Resolve parameters with input substitution
    * Allows using data from previous nodes in MCP tool parameters
+   * Supports: $input, $input[0], $input[0].path.to.property
    */
   private resolveParameters(parameters: any, inputs: any[]): any {
     if (!parameters || inputs.length === 0) {
@@ -452,25 +453,9 @@ export class WorkflowExecutor {
       const resolved: any = {};
 
       for (const [key, value] of Object.entries(parameters)) {
-        if (typeof value === 'string') {
-          // Check for input index reference like "$input[0]" or use first input if value is "$input"
-          if (value === '$input' && inputs.length > 0) {
-            resolved[key] = typeof inputs[0] === 'string' ? inputs[0] : JSON.stringify(inputs[0]);
-          } else if (value.startsWith('$input[') && value.endsWith(']')) {
-            const match = value.match(/\$input\[(\d+)\]/);
-            if (match) {
-              const index = parseInt(match[1]);
-              if (index < inputs.length) {
-                resolved[key] = typeof inputs[index] === 'string' ? inputs[index] : JSON.stringify(inputs[index]);
-              } else {
-                resolved[key] = value; // Keep original if index out of bounds
-              }
-            } else {
-              resolved[key] = value;
-            }
-          } else {
-            resolved[key] = value;
-          }
+        if (typeof value === 'string' && value.startsWith('$input')) {
+          // Use new unified reference resolver
+          resolved[key] = this.resolveInputReference(value, inputs);
         } else {
           resolved[key] = value;
         }
@@ -480,5 +465,78 @@ export class WorkflowExecutor {
     }
 
     return parameters;
+  }
+
+  /**
+   * Resolve input reference with property path support
+   * Examples: $input, $input[0], $input[0].user.email, $input[1].items[0].name
+   */
+  private resolveInputReference(reference: string, inputs: any[]): any {
+    // Handle "$input" → first input
+    if (reference === '$input') {
+      return inputs.length > 0
+        ? (typeof inputs[0] === 'string' ? inputs[0] : JSON.stringify(inputs[0]))
+        : reference;
+    }
+
+    // Handle "$input[0]" or "$input[0].path.to.property"
+    const match = reference.match(/^\$input\[(\d+)\](.*)$/);
+    if (match) {
+      const index = parseInt(match[1]);
+      const path = match[2];
+
+      if (index >= inputs.length) {
+        return reference; // Index out of bounds, keep original
+      }
+
+      if (!path || path === '') {
+        // Just "$input[0]" - return entire input
+        return typeof inputs[index] === 'string'
+          ? inputs[index]
+          : JSON.stringify(inputs[index]);
+      }
+
+      // Remove leading dot and resolve property path
+      const cleanPath = path.startsWith('.') ? path.substring(1) : path;
+      const result = this.getNestedProperty(inputs[index], cleanPath);
+
+      // If property doesn't exist, return undefined (not the reference string)
+      return result !== undefined ? result : undefined;
+    }
+
+    return reference; // Doesn't match pattern, return as-is
+  }
+
+  /**
+   * Get nested property using dot notation
+   * Supports: obj.user.email, obj.items[0].name, obj.data.tags[2]
+   */
+  private getNestedProperty(obj: any, path: string): any {
+    if (!path || obj == null) return obj;
+
+    const parts = path.split('.');
+    let current = obj;
+
+    for (const part of parts) {
+      if (current == null) return undefined;
+
+      // Handle array access: items[0] or [0]
+      const arrayMatch = part.match(/^(.+)?\[(\d+)\]$/);
+      if (arrayMatch) {
+        const [, prop, idx] = arrayMatch;
+        if (prop) {
+          // Property with array index: items[0]
+          current = current[prop];
+          if (current == null) return undefined;
+        }
+        // Access array element
+        current = current[parseInt(idx)];
+      } else {
+        // Simple property access
+        current = current[part];
+      }
+    }
+
+    return current;
   }
 }

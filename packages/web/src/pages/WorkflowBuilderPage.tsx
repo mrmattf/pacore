@@ -136,6 +136,28 @@ export function WorkflowBuilderPage() {
     });
   };
 
+  const handleConnect = (sourceId: string, targetId: string) => {
+    if (!workflow) return;
+
+    // Add sourceId to the target node's inputs
+    setWorkflow({
+      ...workflow,
+      nodes: workflow.nodes.map((node) => {
+        if (node.id === targetId) {
+          const currentInputs = node.inputs || [];
+          // Avoid duplicates
+          if (!currentInputs.includes(sourceId)) {
+            return {
+              ...node,
+              inputs: [...currentInputs, sourceId],
+            };
+          }
+        }
+        return node;
+      }),
+    });
+  };
+
   const handleSave = async () => {
     if (!workflow) return;
 
@@ -323,6 +345,7 @@ export function WorkflowBuilderPage() {
             workflow={workflow}
             onNodeSelect={setSelectedNodeId}
             selectedNodeId={selectedNodeId}
+            onConnect={handleConnect}
           />
         </div>
 
@@ -333,6 +356,7 @@ export function WorkflowBuilderPage() {
               node={selectedNode}
               onUpdate={handleNodeUpdate}
               onDelete={handleNodeDelete}
+              existingNodes={workflow.nodes}
             />
           ) : (
             <div className="flex flex-col items-center justify-center h-full text-gray-400">
