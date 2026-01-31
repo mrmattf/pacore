@@ -7,8 +7,15 @@ import { GorgiasClient } from './clients/gorgias';
 import { MCPServer } from './mcp/server';
 import { handleBackorderCheck } from './handler/backorder';
 
+// Early startup logging (before config validation)
+console.log('Starting shopify-backorder service...');
+console.log('NODE_ENV:', process.env.NODE_ENV);
+console.log('PORT env:', process.env.PORT);
+
 // Load configuration
+console.log('Loading configuration...');
 const config = loadConfig();
+console.log('Configuration loaded successfully. Port:', config.port);
 
 // Initialize clients
 const shopifyClient = new ShopifyClient(config);
@@ -157,11 +164,17 @@ app.post('/trigger/:orderId', requireApiKey, async (req: Request, res: Response)
   }
 });
 
-// Start server
-app.listen(config.port, () => {
+// Start server - bind to 0.0.0.0 for Railway
+const server = app.listen(config.port, '0.0.0.0', () => {
+  console.log(`Server listening on 0.0.0.0:${config.port}`);
   logger.info('server.started', {
     port: config.port,
     mcpTools: mcpServer.getCapabilities().tools.map(t => t.name),
   });
   alertSlack('Backorder service started', 'info');
+});
+
+server.on('error', (err) => {
+  console.error('Server failed to start:', err);
+  process.exit(1);
 });
