@@ -52,7 +52,7 @@ export class ShopifyClient {
       throw new Error(`Shopify API error: ${response.status} ${response.statusText}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as { order: ShopifyOrder };
     return data.order;
   }
 
@@ -66,7 +66,7 @@ export class ShopifyClient {
       throw new Error(`Shopify API error: ${response.status} ${response.statusText}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as { inventory_levels: InventoryLevel[] };
     return data.inventory_levels;
   }
 
@@ -79,7 +79,7 @@ export class ShopifyClient {
       throw new Error(`Shopify API error: ${response.status} ${response.statusText}`);
     }
 
-    const data = await response.json();
+    const data = await response.json() as { variant: { inventory_item_id: number } };
     return data.variant.inventory_item_id;
   }
 

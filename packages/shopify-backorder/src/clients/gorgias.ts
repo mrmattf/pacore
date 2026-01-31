@@ -73,7 +73,7 @@ export class GorgiasClient {
       throw new Error(`Gorgias API error: ${response.status} - ${error}`);
     }
 
-    return response.json();
+    return response.json() as Promise<GorgiasTicket>;
   }
 
   async addMessage(ticketId: number, message: string): Promise<GorgiasMessage> {
@@ -97,6 +97,6 @@ export class GorgiasClient {
       throw new Error(`Gorgias API error: ${response.status} - ${error}`);
     }
 
-    return response.json();
+    return response.json() as Promise<GorgiasMessage>;
   }
 }
