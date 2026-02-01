@@ -10,6 +10,7 @@ interface SchemaFieldProps {
   onChange: (value: any) => void;
   existingNodes: WorkflowNode[];
   currentNodeId: string;
+  connectedInputs: string[]; // Node IDs connected as inputs
 }
 
 export function SchemaField({
@@ -19,7 +20,8 @@ export function SchemaField({
   value,
   onChange,
   existingNodes,
-  currentNodeId
+  currentNodeId,
+  connectedInputs
 }: SchemaFieldProps) {
   // Determine if current value is mapped or static
   const isMapped = typeof value === 'string' && value.startsWith('$input');
@@ -40,8 +42,8 @@ export function SchemaField({
       const defaultValue = fieldSchema.default ?? getTypeDefault(fieldSchema.type);
       onChange(defaultValue);
     } else {
-      // Reset to first node reference
-      onChange(existingNodes.length > 0 ? `$input[0]` : '');
+      // Reset to first connected node reference
+      onChange(connectedInputs.length > 0 ? `$input[0]` : '');
     }
   };
 
@@ -207,9 +209,9 @@ export function SchemaField({
             checked={inputMode === 'mapped'}
             onChange={() => handleModeChange('mapped')}
             className="text-blue-600 focus:ring-blue-500"
-            disabled={existingNodes.length === 0}
+            disabled={connectedInputs.length === 0}
           />
-          <span className={existingNodes.length === 0 ? 'text-gray-400' : 'text-gray-700'}>
+          <span className={connectedInputs.length === 0 ? 'text-gray-400' : 'text-gray-700'}>
             Map from Node
           </span>
         </label>
@@ -222,6 +224,7 @@ export function SchemaField({
         <NodeOutputMapper
           existingNodes={existingNodes}
           currentNodeId={currentNodeId}
+          connectedInputs={connectedInputs}
           value={value || ''}
           onChange={onChange}
         />

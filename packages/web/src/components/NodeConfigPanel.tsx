@@ -248,6 +248,7 @@ export function NodeConfigPanel({ node, onUpdate, onDelete, existingNodes }: Nod
                 onChange={(value) => setParameters(JSON.stringify(value, null, 2))}
                 existingNodes={existingNodes}
                 currentNodeId={node.id}
+                connectedInputs={selectedInputs}
               />
             ) : (
               <div>

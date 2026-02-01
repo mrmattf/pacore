@@ -10,6 +10,7 @@ interface SchemaFormBuilderProps {
   onChange: (value: Record<string, any>) => void;
   existingNodes: WorkflowNode[];
   currentNodeId: string;
+  connectedInputs: string[]; // Node IDs connected as inputs
 }
 
 export function SchemaFormBuilder({
@@ -17,7 +18,8 @@ export function SchemaFormBuilder({
   value,
   onChange,
   existingNodes,
-  currentNodeId
+  currentNodeId,
+  connectedInputs
 }: SchemaFormBuilderProps) {
   const [viewMode, setViewMode] = useState<'form' | 'json'>('form');
   const [jsonText, setJsonText] = useState('');
@@ -122,6 +124,7 @@ export function SchemaFormBuilder({
               onChange={(v) => handleFieldChange(fieldName, v)}
               existingNodes={existingNodes}
               currentNodeId={currentNodeId}
+              connectedInputs={connectedInputs}
             />
           ))}
         </div>

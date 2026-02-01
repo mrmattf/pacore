@@ -179,6 +179,34 @@ importers:
         specifier: ^5.3.3
         version: 5.9.3
 
+  packages/shopify-backorder:
+    dependencies:
+      '@pacore/core':
+        specifier: workspace:*
+        version: link:../core
+      express:
+        specifier: ^4.18.2
+        version: 4.21.2
+      zod:
+        specifier: ^3.22.4
+        version: 3.25.76
+    devDependencies:
+      '@types/express':
+        specifier: ^4.17.21
+        version: 4.17.25
+      '@types/node':
+        specifier: ^20.10.5
+        version: 20.19.25
+      dotenv-cli:
+        specifier: ^11.0.0
+        version: 11.0.0
+      tsx:
+        specifier: ^4.7.0
+        version: 4.20.6
+      typescript:
+        specifier: ^5.3.3
+        version: 5.9.3
+
   packages/web:
     dependencies:
       '@pacore/core':

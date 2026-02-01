@@ -2,6 +2,16 @@
 
 A unified AI integration platform with persistent conversation memory that enables seamless access to multiple AI tools (Claude, OpenAI, custom endpoints) with both cloud and on-premise deployment options.
 
+## Documentation
+
+| Document | Purpose |
+|----------|---------|
+| [CLAUDE.md](CLAUDE.md) | Project overview for AI assistants (Claude Code) |
+| [.cursorrules](.cursorrules) | Project rules for Cursor IDE |
+| [API.md](API.md) | Complete API reference |
+| [docs/SESSION_LOG.md](docs/SESSION_LOG.md) | Development session tracking |
+| [docs/decisions/](docs/decisions/) | Architecture Decision Records |
+
 ## Features
 
 ### Core AI Capabilities

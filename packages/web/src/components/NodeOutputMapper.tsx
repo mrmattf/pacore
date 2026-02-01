@@ -5,6 +5,7 @@ import { useMCPServers } from '../hooks/useMCPServers';
 interface NodeOutputMapperProps {
   existingNodes: WorkflowNode[];
   currentNodeId: string; // To exclude self from selection
+  connectedInputs: string[]; // Node IDs that are connected as inputs (for correct index calculation)
   value: string; // Current reference like "$input[0].email"
   onChange: (value: string) => void;
 }
@@ -12,6 +13,7 @@ interface NodeOutputMapperProps {
 export function NodeOutputMapper({
   existingNodes,
   currentNodeId,
+  connectedInputs,
   value,
   onChange
 }: NodeOutputMapperProps) {
@@ -34,14 +36,14 @@ export function NodeOutputMapper({
       const index = parseInt(match[1]);
       const path = match[2];
 
-      // Find node at this index (based on current node's inputs order)
-      if (index < existingNodes.length) {
-        const node = existingNodes[index];
-        setSelectedNodeId(node.id);
+      // Find node at this index (based on connectedInputs order, not existingNodes)
+      if (index < connectedInputs.length) {
+        const nodeId = connectedInputs[index];
+        setSelectedNodeId(nodeId);
         setSelectedPath(path);
       }
     }
-  }, [value, existingNodes]);
+  }, [value, connectedInputs]);
 
   // Fetch output schema when node is selected
   useEffect(() => {
@@ -97,8 +99,8 @@ export function NodeOutputMapper({
       return;
     }
 
-    // Find node index in workflow
-    const index = existingNodes.findIndex(n => n.id === nodeId);
+    // Find node index in connectedInputs (the actual order used at execution time)
+    const index = connectedInputs.indexOf(nodeId);
     if (index >= 0) {
       onChange(`$input[${index}]`);
     }
@@ -107,14 +109,18 @@ export function NodeOutputMapper({
   const handlePathChange = (path: string) => {
     setSelectedPath(path);
 
-    const index = existingNodes.findIndex(n => n.id === selectedNodeId);
+    // Find node index in connectedInputs (the actual order used at execution time)
+    const index = connectedInputs.indexOf(selectedNodeId);
     if (index >= 0) {
       onChange(path ? `$input[${index}].${path}` : `$input[${index}]`);
     }
   };
 
-  // Filter out current node (can't reference self)
-  const availableNodes = existingNodes.filter(n => n.id !== currentNodeId);
+  // Only show nodes that are connected as inputs (can only map from connected nodes)
+  // Also filter out current node (can't reference self)
+  const availableNodes = existingNodes.filter(
+    n => n.id !== currentNodeId && connectedInputs.includes(n.id)
+  );
 
   return (
     <div className="space-y-2">
@@ -163,7 +169,9 @@ export function NodeOutputMapper({
       {/* Helper Text */}
       {!selectedNodeId && availableNodes.length === 0 && (
         <p className="text-xs text-gray-500">
-          No upstream nodes available to map from.
+          {connectedInputs.length === 0
+            ? 'Connect input nodes first using the checkboxes above.'
+            : 'No upstream nodes available to map from.'}
         </p>
       )}
     </div>

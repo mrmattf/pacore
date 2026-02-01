@@ -4,6 +4,7 @@ import { ChatPage } from './pages/ChatPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { MCPServersPage } from './pages/MCPServersPage';
 import { WorkflowBuilderPage } from './pages/WorkflowBuilderPage';
+import { WorkflowsPage } from './pages/WorkflowsPage';
 import { useAuthStore } from './store/authStore';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -37,6 +38,14 @@ export function App() {
           element={
             <PrivateRoute>
               <MCPServersPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/workflows"
+          element={
+            <PrivateRoute>
+              <WorkflowsPage />
             </PrivateRoute>
           }
         />

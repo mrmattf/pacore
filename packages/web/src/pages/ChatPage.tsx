@@ -10,7 +10,7 @@ import { useCategoryStore } from '../store/categoryStore';
 import { useProviderStore } from '../store/providerStore';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { Settings, LogOut, Database } from 'lucide-react';
+import { Settings, LogOut, Database, Workflow } from 'lucide-react';
 import { WorkflowDAG } from '@pacore/core';
 import { useState } from 'react';
 
@@ -232,6 +232,13 @@ export function ChatPage() {
             onChange={setSelectedProvider}
           />
           <CategorySelector value={category} onChange={setCategory} />
+          <button
+            onClick={() => navigate('/workflows')}
+            className="p-2 hover:bg-gray-100 rounded"
+            title="My Workflows"
+          >
+            <Workflow size={20} />
+          </button>
           <button
             onClick={() => navigate('/mcp')}
             className="p-2 hover:bg-gray-100 rounded"
