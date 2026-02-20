@@ -104,9 +104,10 @@ export class ShopifyClient {
 
         // Sum available across all locations
         const totalAvailable = levels.reduce((sum, level) => sum + level.available, 0);
+        console.log(`[Shopify] Inventory for variant ${variantId}: ${totalAvailable} (${levels.length} location(s))`);
         inventoryMap.set(variantId, totalAvailable);
       } catch (error) {
-        // If we can't get inventory, assume 0
+        console.error(`[Shopify] Inventory check failed for variant ${variantId}:`, (error as Error).message);
         inventoryMap.set(variantId, 0);
       }
     }
