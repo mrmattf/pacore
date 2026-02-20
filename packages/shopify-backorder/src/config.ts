@@ -16,7 +16,9 @@ const configSchema = z.object({
 
   // Shopify
   shopifyStoreDomain: z.string().min(1),
-  shopifyAccessToken: z.string().min(1),
+  shopifyClientId: z.string().min(1),
+  shopifyClientSecret: z.string().min(1),
+  shopifyAccessToken: z.string().optional(), // bootstrap token, replaced by token manager
   shopifyWebhookSecret: z.string().optional(),
 
   // Gorgias (optional - set GORGIAS_ENABLED=true to enable)
@@ -36,7 +38,9 @@ export function loadConfig(): Config {
     port: process.env.PORT,
     apiSecret: process.env.API_SECRET,
     shopifyStoreDomain: process.env.SHOPIFY_STORE_DOMAIN,
-    shopifyAccessToken: process.env.SHOPIFY_ACCESS_TOKEN,
+    shopifyClientId: process.env.SHOPIFY_CLIENT_ID,
+    shopifyClientSecret: process.env.SHOPIFY_CLIENT_SECRET,
+    shopifyAccessToken: emptyToUndefined(process.env.SHOPIFY_ACCESS_TOKEN),
     shopifyWebhookSecret: emptyToUndefined(process.env.SHOPIFY_WEBHOOK_SECRET),
     gorgiasEnabled: parseBoolean(process.env.GORGIAS_ENABLED),
     gorgiasDomain: emptyToUndefined(process.env.GORGIAS_DOMAIN),

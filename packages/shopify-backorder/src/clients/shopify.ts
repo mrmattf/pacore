@@ -1,4 +1,5 @@
 import { Config } from '../config';
+import { ShopifyTokenManager } from './shopify-token-manager';
 
 export interface ShopifyLineItem {
   id: number;
@@ -33,14 +34,18 @@ export interface InventoryLevel {
 
 export class ShopifyClient {
   private baseUrl: string;
-  private headers: Record<string, string>;
+  private tokenManager: ShopifyTokenManager;
 
-  constructor(config: Config) {
+  constructor(config: Config, tokenManager: ShopifyTokenManager) {
     // Use current API version
     this.baseUrl = `https://${config.shopifyStoreDomain}/admin/api/2026-01`;
-    this.headers = {
+    this.tokenManager = tokenManager;
+  }
+
+  private async headers(): Promise<Record<string, string>> {
+    return {
       'Content-Type': 'application/json',
-      'X-Shopify-Access-Token': config.shopifyAccessToken,
+      'X-Shopify-Access-Token': await this.tokenManager.getToken(),
     };
   }
 
@@ -49,7 +54,7 @@ export class ShopifyClient {
     console.log(`[Shopify] GET ${url}`);
 
     const response = await fetch(url, {
-      headers: this.headers,
+      headers: await this.headers(),
     });
 
     if (!response.ok) {
@@ -57,7 +62,6 @@ export class ShopifyClient {
       console.error(`[Shopify] Error Response:`, {
         status: response.status,
         statusText: response.statusText,
-        headers: Object.fromEntries(response.headers.entries()),
         body: errorBody,
       });
       throw new Error(`Shopify API error: ${response.status} ${response.statusText} - ${errorBody}`);
@@ -70,7 +74,7 @@ export class ShopifyClient {
   async getInventoryLevel(inventoryItemId: number): Promise<InventoryLevel[]> {
     const response = await fetch(
       `${this.baseUrl}/inventory_levels.json?inventory_item_ids=${inventoryItemId}`,
-      { headers: this.headers }
+      { headers: await this.headers() }
     );
 
     if (!response.ok) {
@@ -83,7 +87,7 @@ export class ShopifyClient {
 
   async getVariantInventoryItemId(variantId: number): Promise<number> {
     const response = await fetch(`${this.baseUrl}/variants/${variantId}.json`, {
-      headers: this.headers,
+      headers: await this.headers(),
     });
 
     if (!response.ok) {
