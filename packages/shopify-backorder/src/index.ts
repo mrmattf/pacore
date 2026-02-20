@@ -109,9 +109,11 @@ app.post('/webhook/orders/create', async (req: Request, res: Response) => {
   }
 
   // Parse the order from webhook payload
+  // express.raw() gives a Buffer, so we must call .toString() before JSON.parse
   let order: ShopifyOrder;
   try {
-    order = typeof req.body === 'string' ? JSON.parse(req.body) : req.body;
+    const raw = req.body;
+    order = JSON.parse(Buffer.isBuffer(raw) ? raw.toString('utf8') : raw);
   } catch (error) {
     logger.error('webhook.parse.failed', error as Error);
     res.status(400).json({ error: 'Invalid JSON' });
