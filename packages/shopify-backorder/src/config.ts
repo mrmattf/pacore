@@ -4,6 +4,10 @@ import { z } from 'zod';
 const emptyToUndefined = (val: string | undefined) =>
   val === '' || val === undefined ? undefined : val;
 
+// Helper to properly parse boolean env vars (z.coerce.boolean treats "false" as true!)
+const parseBoolean = (val: string | undefined): boolean =>
+  val?.toLowerCase() === 'true' || val === '1';
+
 const configSchema = z.object({
   port: z.coerce.number().default(3002),
 
@@ -15,10 +19,11 @@ const configSchema = z.object({
   shopifyAccessToken: z.string().min(1),
   shopifyWebhookSecret: z.string().optional(),
 
-  // Gorgias
-  gorgiasDomain: z.string().min(1),
-  gorgiasApiKey: z.string().min(1),
-  gorgiasApiEmail: z.string().email(),
+  // Gorgias (optional - set GORGIAS_ENABLED=true to enable)
+  gorgiasEnabled: z.boolean().default(false),
+  gorgiasDomain: z.string().optional(),
+  gorgiasApiKey: z.string().optional(),
+  gorgiasApiEmail: z.string().optional(),
 
   // Alerts
   slackWebhookUrl: z.string().url().optional(),
@@ -33,9 +38,10 @@ export function loadConfig(): Config {
     shopifyStoreDomain: process.env.SHOPIFY_STORE_DOMAIN,
     shopifyAccessToken: process.env.SHOPIFY_ACCESS_TOKEN,
     shopifyWebhookSecret: emptyToUndefined(process.env.SHOPIFY_WEBHOOK_SECRET),
-    gorgiasDomain: process.env.GORGIAS_DOMAIN,
-    gorgiasApiKey: process.env.GORGIAS_API_KEY,
-    gorgiasApiEmail: process.env.GORGIAS_API_EMAIL,
+    gorgiasEnabled: parseBoolean(process.env.GORGIAS_ENABLED),
+    gorgiasDomain: emptyToUndefined(process.env.GORGIAS_DOMAIN),
+    gorgiasApiKey: emptyToUndefined(process.env.GORGIAS_API_KEY),
+    gorgiasApiEmail: emptyToUndefined(process.env.GORGIAS_API_EMAIL),
     slackWebhookUrl: emptyToUndefined(process.env.SLACK_WEBHOOK_URL),
   });
 

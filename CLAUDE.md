@@ -20,60 +20,49 @@ PA Core is a personal AI assistant platform that orchestrates multiple LLM provi
 
 ## Product Strategy
 
-PA Core powers customer-facing **solutions** (like "Backorder Detection") while hiding the underlying workflow/agent complexity:
+**PA Core is a Personal Assistants platform** - AI-powered assistants that help users automate tasks, manage business operations, and integrate with their tools.
+
+### Agent-First Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
-│                      CUSTOMER SOLUTIONS                          │
-│   "Backorder Detection"   "Order Routing"   "Support Triage"    │
+│  CUSTOMER TIERS                                                  │
+│  ┌────────┐ ┌────────┐ ┌────────────┐ ┌─────────────────────┐   │
+│  │ Tier 1 │ │ Tier 2 │ │ Tier 3     │ │ Tier 4              │   │
+│  │ Skills │ │ Compose│ │ Custom Code│ │ Full Agent Mode     │   │
+│  │ (use)  │ │ (build)│ │ (AI-gen)   │ │ (autonomous)        │   │
+│  └────────┘ └────────┘ └────────────┘ └─────────────────────┘   │
 ├─────────────────────────────────────────────────────────────────┤
-│                      INTELLIGENCE LAYER                          │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │                     AI AGENTS                             │   │
-│  │   - Reasoning & decisions                                 │   │
-│  │   - Edge case handling                                    │   │
-│  │   - Can call ANY MCP tool (including workflows!)          │   │
-│  └──────────────────────────┬───────────────────────────────┘   │
-│                             ▼                                    │
+│  PLATFORM INFRASTRUCTURE (Tier 0)                                │
+│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌───────────┐  │
+│  │ Tool Chains │ │ MCP Tools   │ │ Agent       │ │ Validators│  │
+│  │(deterministic)│(integrations)│ │ Runtime     │ │           │  │
+│  └─────────────┘ └─────────────┘ └─────────────┘ └───────────┘  │
 ├─────────────────────────────────────────────────────────────────┤
-│                      MCP TOOL LAYER                              │
-│  ┌────────────────────┐  ┌────────────────────────────────────┐ │
-│  │  WORKFLOW MCP      │  │  INTEGRATION MCP SERVERS           │ │
-│  │  workflow.list     │  │  shopify.get_order                 │ │
-│  │  workflow.execute  │  │  gorgias.create_ticket             │ │
-│  │  workflow.status   │  │  gmail.send, slack.notify          │ │
-│  └─────────┬──────────┘  └────────────────────────────────────┘ │
-│            ▼                                                     │
-│  ┌──────────────────────────────────────────────────────────┐   │
-│  │  WORKFLOWS (DAG) - Deterministic, scheduled, bulk        │   │
-│  └──────────────────────────────────────────────────────────┘   │
+│  EXECUTION: Cloud Runtime ◄───────────────► Edge Agent          │
 ├─────────────────────────────────────────────────────────────────┤
-│                      EXECUTION LAYER                             │
-│       CLOUD RUNTIME  ◄──────────────────►  EDGE AGENT           │
-│       (API, workflows, credentials)         (Local LLM, desktop) │
-├─────────────────────────────────────────────────────────────────┤
-│   INTEGRATIONS: Shopify │ WooCommerce │ Gorgias │ Zendesk │ ... │
+│  INTEGRATIONS: Shopify │ Gorgias │ Gmail │ Slack │ ...          │
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-### Solution Development Lifecycle
-
-1. **Standalone MVP** - Validate concept (e.g., `packages/shopify-backorder`)
-2. **AI Agent Layer** - Add intelligent decision-making
-3. **Workflow Conversion** - Convert to pacore workflow, expose via Workflow MCP
-4. **Solution Packaging** - Multi-tenant deployment, customer configuration
-
 ### Key Concepts
 
-- **MCP as Universal Interface**: Same tools used by agents AND workflows
-- **Workflows as MCP Tools**: Agents can call `workflow.execute` to orchestrate deterministic workflows
+- **Agent-First**: Agents decide WHEN to act, tool chains execute HOW (deterministic)
+- **No Workflow Engine**: We don't build a visual workflow builder - tool chains provide determinism
+- **Skills**: Portable, reusable capability definitions (like "Backorder Detection")
+- **BYOK**: Multi-provider AI support (Claude, OpenAI, Azure, Ollama)
 - **Edge Agent**: Local execution for privacy, desktop access, local LLMs
-- **Solutions**: Customer-facing products that hide workflow/agent complexity
+- **Orchestrator Business Model**: We own platform + solution templates; customers own configuration + data. See [Product Strategy](docs/product-strategy.md#business-model-orchestrator) for IP ownership.
+
+### Solution Development Lifecycle
+
+1. **Standalone MVP** - Validate concept, build tool chains and MCP tools
+2. **AI Agent Layer** - Add intelligent decision-making
+3. **Skill Packaging** - Multi-tenant deployment, customer configuration
 
 See detailed documentation:
-- [Product Strategy](docs/product-strategy.md) - Full lifecycle and architecture
+- [Product Strategy](docs/product-strategy.md) - Vision, architecture, business model
 - [AI Agents](docs/ai-agents.md) - Agent patterns and MCP integration
-- [Workflow MCP](docs/workflow-mcp.md) - Exposing workflows as tools
 - [Solutions Index](docs/solutions/README.md) - Available solutions
 
 ## Architecture
@@ -92,10 +81,10 @@ See detailed documentation:
 
 | Component | Location | Purpose |
 |-----------|----------|---------|
-| **Orchestrator** | `packages/cloud/src/orchestration/` | Routes messages to LLMs, detects workflow intent |
+| **Orchestrator** | `packages/cloud/src/orchestration/` | Routes messages to LLMs, coordinates agent actions |
 | **LLM Registry** | `packages/core/src/llm/` | Multi-provider LLM support (Anthropic, OpenAI, Ollama) |
 | **MCP Registry** | `packages/cloud/src/mcp/` | Manages MCP server connections and tool execution |
-| **Workflow Engine** | `packages/cloud/src/workflow/` | DAG-based workflow builder, executor, and manager |
+| **Tool Chains** | `packages/*/src/chains/` | Deterministic execution functions for Skills |
 | **API Gateway** | `packages/cloud/src/api/gateway.ts` | REST + WebSocket endpoints |
 | **Credential Manager** | `packages/cloud/src/mcp/credential-manager.ts` | Encrypted credential storage |
 

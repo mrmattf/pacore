@@ -75,6 +75,15 @@ Solutions allow customers to swap integrations:
 | Ticketing | Gorgias, Zendesk, Jira |
 | SMS | Twilio, MessageBird |
 
+## IP Ownership
+
+Solutions follow the [Orchestrator business model](../product-strategy.md#business-model-orchestrator):
+
+- **We own**: Solution templates, MCP tools, workflow definitions, agent prompts
+- **Customer owns**: Their credentials, business rules, thresholds, data, execution history
+
+A customer's configuration is portable. The platform and reusable components are our IP.
+
 ## Adding a New Solution
 
 1. **Create standalone package**: `packages/<solution-name>/`

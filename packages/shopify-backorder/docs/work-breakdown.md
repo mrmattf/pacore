@@ -1,5 +1,14 @@
 # Work Breakdown
 
+## Ownership Note
+
+**This is a customer engagement solution for Yota Xpedition.**
+- Yota owns this specific solution
+- This work breakdown covers Phases 1-2 only
+- Phase 3 (Skill Packaging) is for PA Core platform, not this solution
+
+---
+
 ## Immediate Tasks (MVP Completion)
 
 ### 1. Customer Integration
@@ -44,27 +53,37 @@
 
 ## Phase 2 Tasks (AI Agent)
 
-### 5. Agent Runtime Setup
+### 5. Tool Chain Creation
+
+**Priority: High (Phase 2)**
+
+- [ ] Create `src/chains/backorder-chain.ts`
+- [ ] Extract deterministic logic from handler into tool chain
+- [ ] Define chain: get_order → check_inventory → filter_backorders → create_ticket
+- [ ] Add chain configuration (thresholds, templates)
+- [ ] Test chain execution independently
+
+### 6. Agent Runtime Setup
 
 **Priority: High (Phase 2)**
 
 - [ ] Add Anthropic Claude SDK dependency
 - [ ] Create agent configuration schema
 - [ ] Define system prompt for backorder scenarios
-- [ ] Implement agent executor with tool calling
+- [ ] Implement agent executor that calls tool chains
 - [ ] Add environment variables for agent config
 
-### 6. Agent MCP Integration
+### 7. Agent + Tool Chain Integration
 
 **Priority: High (Phase 2)**
 
-- [ ] Register existing MCP tools with agent
-- [ ] Add Workflow MCP tools (`workflow.execute`, `workflow.status`)
-- [ ] Create tool result formatters for agent consumption
+- [ ] Register tool chain as callable by agent
+- [ ] Agent decides WHEN to call tool chain
+- [ ] Tool chain executes HOW (deterministic)
 - [ ] Add tool call logging with reasoning trace
-- [ ] Test agent → MCP tool → response flow
+- [ ] Test agent → tool chain → MCP tools flow
 
-### 7. Intelligent Decision Making
+### 8. Intelligent Decision Making
 
 **Priority: High (Phase 2)**
 
@@ -72,9 +91,9 @@
 - [ ] Add order value assessment
 - [ ] Create personalized message templates
 - [ ] Define escalation rules (complex orders, high value, etc.)
-- [ ] Implement hybrid pattern: agent calls workflow for standard cases
+- [ ] Agent handles edge cases, tool chain handles standard cases
 
-### 8. Agent Observability
+### 9. Agent Observability
 
 **Priority: Medium (Phase 2)**
 
@@ -86,90 +105,13 @@
 
 ---
 
-## Phase 3 Tasks (Workflow Conversion)
+## Phase 3: Skill Packaging (PA Core Platform - Separate)
 
-### 9. Workflow DAG Definition
+**Note**: These tasks apply to the PA Core platform Skill, NOT this Yota solution.
 
-**Priority: High (Phase 3)**
+The Yota solution ends at Phase 2. A separate "Backorder Detection" Skill will be built clean-room for the PA Core platform using patterns learned from this engagement.
 
-- [ ] Design workflow nodes: get_order → check_inventory → filter → create_ticket
-- [ ] Define input schema for workflow
-- [ ] Add conditional logic node for edge cases
-- [ ] Test workflow execution via pacore
-- [ ] Document workflow in visual builder
-
-### 10. Workflow MCP Exposure
-
-**Priority: High (Phase 3)**
-
-- [ ] Register MCP server with pacore registry
-- [ ] Expose `workflow.execute` for this workflow
-- [ ] Implement async execution support
-- [ ] Add execution status tracking
-- [ ] Test agent calling `workflow.execute`
-
-### 11. Agent-Workflow Orchestration
-
-**Priority: High (Phase 3)**
-
-- [ ] Update agent to use workflow for standard path
-- [ ] Agent handles exceptions from workflow
-- [ ] Add fallback if workflow fails
-- [ ] Document hybrid execution pattern
-- [ ] Performance comparison: agent-only vs hybrid
-
-### 12. Visual Editor Integration
-
-**Priority: Medium (Phase 3)**
-
-- [ ] Verify workflow editable in pacore UI
-- [ ] Add custom node configurations
-- [ ] Test workflow changes propagate to execution
-- [ ] Create workflow versioning strategy
-
----
-
-## Phase 4 Tasks (Solution Packaging)
-
-### 13. Integration Abstraction
-
-**Priority: High (Phase 4)**
-
-- [ ] Abstract Shopify → "Order Source" interface
-- [ ] Abstract Gorgias → "Notification System" interface
-- [ ] Create adapter pattern for swappable integrations
-- [ ] Add WooCommerce adapter (proof of concept)
-- [ ] Add Zendesk adapter (proof of concept)
-
-### 14. Multi-Tenancy
-
-**Priority: High (Phase 4)**
-
-- [ ] Add customer/tenant model in pacore
-- [ ] Implement per-tenant credential storage
-- [ ] Add tenant isolation for workflows
-- [ ] Create customer onboarding flow
-- [ ] Test multiple customers running same solution
-
-### 15. Customer Configuration UI
-
-**Priority: High (Phase 4)**
-
-- [ ] Create solution configuration page
-- [ ] Add OAuth flows for integrations (Shopify, Gorgias, etc.)
-- [ ] Implement template editor for notifications
-- [ ] Add trigger configuration (webhook, scheduled, manual)
-- [ ] Test end-to-end customer setup
-
-### 16. Analytics & Billing
-
-**Priority: Medium (Phase 4)**
-
-- [ ] Add order processing dashboard per customer
-- [ ] Implement ticket analytics
-- [ ] Create agent usage reports
-- [ ] Add usage-based billing metrics
-- [ ] Build admin dashboard for all customers
+See [Product Strategy](../../../docs/product-strategy.md) for the Skill packaging lifecycle.
 
 ---
 
@@ -218,36 +160,28 @@ Customer Integration ─────┬───► Email Templates
                               Phase 1 Complete
                                       │
                                       ▼
+                              Tool Chain Creation
+                                      │
+                                      ▼
                               Agent Runtime Setup
                                       │
                                       ▼
-                              Agent Tool Integration
+                              Agent + Tool Chain Integration
                                       │
                                       ▼
                               Phase 2 Complete
                                       │
                                       ▼
-                              Workflow Definition
+                              Yota Solution Complete
                                       │
-                                      ▼
-                              Tool Registration
-                                      │
-                                      ▼
-                              Phase 3 Complete
-                                      │
-                                      ▼
-                              Multi-Tenancy
-                                      │
-                                      ▼
-                              Phase 4 Complete
+                     (PA Core Platform Skill is separate)
 ```
 
 ## Estimated Effort
 
-| Phase | Tasks | Complexity |
-|-------|-------|------------|
-| Phase 1 (MVP) | 4 task groups | Low-Medium |
-| Phase 2 (Agent) | 4 task groups | Medium-High |
-| Phase 3 (Workflows) | 3 task groups | High |
-| Phase 4 (Platform) | 3 task groups | High |
-| Tech Debt | 4 task groups | Ongoing |
+| Phase | Tasks | Complexity | Scope |
+|-------|-------|------------|-------|
+| Phase 1 (MVP) | 4 task groups | Low-Medium | This solution |
+| Phase 2 (Agent) | 5 task groups | Medium-High | This solution |
+| Tech Debt | 4 task groups | Ongoing | This solution |
+| Phase 3 (Skill) | N/A | High | PA Core platform (separate) |

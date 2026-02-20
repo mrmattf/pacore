@@ -48,8 +48,26 @@ src/
 │   └── tools/
 │       ├── shopify-tools.ts  # shopify.get_order, shopify.check_inventory
 │       └── gorgias-tools.ts  # gorgias.create_ticket, gorgias.add_message
+├── chains/
+│   └── backorder-chain.ts   # Deterministic tool chain for backorder processing
 └── handler/
-    └── backorder.ts   # Core backorder detection logic
+    └── backorder.ts   # Webhook handler (calls tool chain)
+```
+
+### Tool Chain Pattern
+
+This package uses the **agent-first architecture** from PA Core:
+- **Tool chains** provide deterministic execution (code decides HOW)
+- **AI agents** (Phase 2) decide WHEN to invoke tool chains
+- **MCP tools** are the building blocks called by tool chains
+
+```
+Event → Handler → Tool Chain → MCP Tools → Result
+                     ↓
+           processBackorder()
+           ├── shopify.get_order
+           ├── shopify.check_inventory
+           └── gorgias.create_ticket
 ```
 
 ## Key Endpoints
@@ -139,33 +157,37 @@ docker run -p 3002:3002 --env-file .env shopify-backorder
 
 For Railway: Push to connected repo, ensure environment variables are set.
 
+## Ownership
+
+**This is a customer engagement solution for Yota Xpedition.**
+
+- **Customer owns**: This specific solution (per licensing agreement)
+- **We gain**: Infrastructure know-how, Shopify/Gorgias integration patterns
+- **Platform Skill**: A separate "Backorder Detection" Skill will be built into PA Core (clean-room)
+
+See [Product Strategy](../../docs/product-strategy.md) for the distinction between customer engagements and platform solutions.
+
 ## Phase Roadmap
 
-This package evolves into a customer-facing "Backorder Detection" solution:
-
 ### Phase 1: Standalone MVP (Current)
-- Express service with MCP tools
+- Express service with MCP tools and tool chains
 - Webhook processing + backorder detection
 - Deployed independently to Railway
 - **Exit**: Customer validates value proposition
 
 ### Phase 2: AI Agent Layer
 - Add Claude agent for intelligent decisions
+- Agent decides WHEN to call tool chains
+- Tool chains execute HOW (deterministic)
 - Agent reasons about: urgency, customer history, special handling
-- Agent calls existing MCP tools
 - **Exit**: Agent handles edge cases that pure logic can't
 
-### Phase 3: Workflow Conversion
-- Convert logic to pacore workflow DAG
-- Expose via Workflow MCP (`workflow.execute`)
-- Agent orchestrates workflow + handles exceptions
-- **Exit**: Same functionality, but manageable via visual builder
+### Phase 3: Skill Packaging
+- "Backorder Detection" as packaged Skill (for PA Core platform)
+- Configurable for any Shopify store
+- Swappable notification system (Gorgias, Zendesk, email)
+- **Exit**: Skill ready for multi-tenant deployment
 
-### Phase 4: Solution Packaging
-- "Backorder Detection" as customer product
-- Customizable: swap Shopify for other order sources
-- Customizable: swap Gorgias for other notification systems
-- Multi-tenant deployment on pacore platform
-- **Exit**: Multiple customers using isolated configurations
+**Note**: This Yota solution remains standalone. Phase 3 applies to the PA Core platform Skill, built separately using patterns learned here.
 
 See [Product Strategy](../../docs/product-strategy.md) for full lifecycle details.

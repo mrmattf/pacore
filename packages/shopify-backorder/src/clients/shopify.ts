@@ -36,7 +36,8 @@ export class ShopifyClient {
   private headers: Record<string, string>;
 
   constructor(config: Config) {
-    this.baseUrl = `https://${config.shopifyStoreDomain}/admin/api/2024-01`;
+    // Use current API version
+    this.baseUrl = `https://${config.shopifyStoreDomain}/admin/api/2026-01`;
     this.headers = {
       'Content-Type': 'application/json',
       'X-Shopify-Access-Token': config.shopifyAccessToken,
@@ -44,12 +45,22 @@ export class ShopifyClient {
   }
 
   async getOrder(orderId: number): Promise<ShopifyOrder> {
-    const response = await fetch(`${this.baseUrl}/orders/${orderId}.json`, {
+    const url = `${this.baseUrl}/orders/${orderId}.json`;
+    console.log(`[Shopify] GET ${url}`);
+
+    const response = await fetch(url, {
       headers: this.headers,
     });
 
     if (!response.ok) {
-      throw new Error(`Shopify API error: ${response.status} ${response.statusText}`);
+      const errorBody = await response.text();
+      console.error(`[Shopify] Error Response:`, {
+        status: response.status,
+        statusText: response.statusText,
+        headers: Object.fromEntries(response.headers.entries()),
+        body: errorBody,
+      });
+      throw new Error(`Shopify API error: ${response.status} ${response.statusText} - ${errorBody}`);
     }
 
     const data = await response.json() as { order: ShopifyOrder };

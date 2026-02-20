@@ -1,7 +1,21 @@
 # ADR-006: Workflow MCP Server
 
 ## Status
-Proposed (for Phase 3)
+**SUPERSEDED** - See ADR-008 for current approach
+
+## Superseded By
+ADR-008: Tool Chain Architecture
+
+## Why Superseded
+PA Core adopted an **agent-first architecture** that uses code-level tool chains instead of a workflow engine:
+- Tool chains provide deterministic execution without a visual workflow builder
+- Agent decides WHEN to act, tool chains execute HOW
+- Simpler architecture, avoids competing with n8n/Make/Zapier
+- No workflow MCP needed - agents call tool chains directly
+
+---
+
+## Original Proposal (Historical Reference)
 
 ## Context
 

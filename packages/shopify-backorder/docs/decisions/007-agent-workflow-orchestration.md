@@ -1,9 +1,25 @@
 # ADR-007: Agent-Workflow Orchestration Pattern
 
 ## Status
-Proposed (for Phase 2-3)
+**SUPERSEDED** - See ADR-008 for current approach
 
-## Context
+## Superseded By
+ADR-008: Tool Chain Architecture
+
+## Why Superseded
+PA Core adopted an **agent-first architecture** with tool chains:
+- Tool chains replace workflows for deterministic execution
+- Agent + Tool Chain pattern is simpler than Agent + Workflow
+- No visual workflow builder needed
+- Code-level tool chains are version-controlled and testable
+
+The core concept (agent decides, deterministic execution follows) is preserved, but implemented via tool chains instead of workflow DAGs.
+
+---
+
+## Original Proposal (Historical Reference)
+
+### Context
 
 With both AI agents and workflows available, we need to decide how they work together. Options:
 

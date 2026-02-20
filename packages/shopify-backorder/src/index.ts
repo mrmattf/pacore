@@ -19,10 +19,17 @@ console.log('Configuration loaded successfully. Port:', config.port);
 
 // Initialize clients
 const shopifyClient = new ShopifyClient(config);
-const gorgiasClient = new GorgiasClient(config);
+
+// Only create Gorgias client if enabled
+const gorgiasClient = config.gorgiasEnabled ? new GorgiasClient(config) : null;
 
 // Initialize MCP server
-const mcpServer = new MCPServer(shopifyClient, gorgiasClient);
+const mcpServer = new MCPServer(shopifyClient, gorgiasClient, config.gorgiasEnabled);
+
+if (!config.gorgiasEnabled) {
+  console.log('\n⚠️  GORGIAS DISABLED - Running in dry-run mode');
+  console.log('   Gorgias calls will be logged to console instead of sent.\n');
+}
 
 // Initialize alerting
 initAlerts(config.slackWebhookUrl);

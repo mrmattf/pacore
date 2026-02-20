@@ -21,6 +21,11 @@ export class GorgiasClient {
   private fromEmail: string;
 
   constructor(config: Config) {
+    // Validate required Gorgias config (should only be called when gorgiasEnabled=true)
+    if (!config.gorgiasDomain || !config.gorgiasApiKey || !config.gorgiasApiEmail) {
+      throw new Error('Gorgias credentials required when GORGIAS_ENABLED=true');
+    }
+
     this.baseUrl = `https://${config.gorgiasDomain}/api`;
     this.fromEmail = config.gorgiasApiEmail;
 

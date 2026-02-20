@@ -54,6 +54,88 @@ export const gorgiasTools: MCPTool[] = [
   },
 ];
 
+// Dry-run executor - logs payloads instead of calling Gorgias
+export class DryRunGorgiasToolExecutor {
+  async execute(toolName: string, args: Record<string, unknown>): Promise<MCPToolResult> {
+    const timestamp = new Date().toISOString();
+
+    console.log('\n' + '='.repeat(80));
+    console.log(`[DRY RUN] Gorgias tool call: ${toolName}`);
+    console.log('='.repeat(80));
+
+    switch (toolName) {
+      case 'gorgias.create_ticket':
+        console.log('\n📧 STEP 1: Create Ticket Request');
+        console.log('-'.repeat(40));
+        console.log('Endpoint: POST /api/tickets');
+        console.log('Payload:');
+        console.log(JSON.stringify({
+          customer: {
+            email: args.customer_email,
+            name: args.customer_name,
+          },
+          subject: args.subject,
+          messages: [{
+            channel: 'email',
+            via: 'email',
+            from_agent: true,
+            subject: args.subject,
+            body_html: args.message,
+          }],
+          tags: args.tags ? (args.tags as string[]).map(name => ({ name })) : undefined,
+        }, null, 2));
+
+        console.log('\n📤 STEP 2: Send Email to Customer');
+        console.log('-'.repeat(40));
+        console.log(`To: ${args.customer_email}`);
+        console.log(`Subject: ${args.subject}`);
+        console.log('Body (HTML):');
+        console.log(args.message);
+        console.log('\n' + '='.repeat(80) + '\n');
+
+        return {
+          success: true,
+          data: {
+            ticket_id: 999999,
+            subject: args.subject,
+            status: 'open',
+            created_at: timestamp,
+            _dry_run: true,
+          },
+        };
+
+      case 'gorgias.add_message':
+        console.log('\n💬 STEP 1: Add Message to Ticket');
+        console.log('-'.repeat(40));
+        console.log(`Endpoint: POST /api/tickets/${args.ticket_id}/messages`);
+        console.log('Payload:');
+        console.log(JSON.stringify({
+          channel: 'email',
+          via: 'email',
+          from_agent: true,
+          body_html: args.message,
+        }, null, 2));
+        console.log('\n' + '='.repeat(80) + '\n');
+
+        return {
+          success: true,
+          data: {
+            message_id: 888888,
+            ticket_id: args.ticket_id,
+            created_at: timestamp,
+            _dry_run: true,
+          },
+        };
+
+      default:
+        return {
+          success: false,
+          error: `Unknown tool: ${toolName}`,
+        };
+    }
+  }
+}
+
 // Tool implementations
 export class GorgiasToolExecutor {
   constructor(private client: GorgiasClient) {}

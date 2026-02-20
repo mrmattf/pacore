@@ -7,7 +7,7 @@ import {
   JSONRPCResponse,
 } from './types';
 import { shopifyTools, ShopifyToolExecutor } from './tools/shopify-tools';
-import { gorgiasTools, GorgiasToolExecutor } from './tools/gorgias-tools';
+import { gorgiasTools, GorgiasToolExecutor, DryRunGorgiasToolExecutor } from './tools/gorgias-tools';
 import { ShopifyClient } from '../clients/shopify';
 import { GorgiasClient } from '../clients/gorgias';
 import { logger } from '../logger';
@@ -15,12 +15,21 @@ import { logger } from '../logger';
 export class MCPServer {
   private tools: MCPTool[];
   private shopifyExecutor: ShopifyToolExecutor;
-  private gorgiasExecutor: GorgiasToolExecutor;
+  private gorgiasExecutor: GorgiasToolExecutor | DryRunGorgiasToolExecutor;
+  private gorgiasEnabled: boolean;
 
-  constructor(shopifyClient: ShopifyClient, gorgiasClient: GorgiasClient) {
+  constructor(shopifyClient: ShopifyClient, gorgiasClient: GorgiasClient | null, gorgiasEnabled: boolean = false) {
     this.tools = [...shopifyTools, ...gorgiasTools];
     this.shopifyExecutor = new ShopifyToolExecutor(shopifyClient);
-    this.gorgiasExecutor = new GorgiasToolExecutor(gorgiasClient);
+    this.gorgiasEnabled = gorgiasEnabled;
+
+    if (gorgiasEnabled && gorgiasClient) {
+      this.gorgiasExecutor = new GorgiasToolExecutor(gorgiasClient);
+      logger.info('mcp.gorgias.enabled', { mode: 'live' });
+    } else {
+      this.gorgiasExecutor = new DryRunGorgiasToolExecutor();
+      logger.info('mcp.gorgias.enabled', { mode: 'dry-run' });
+    }
   }
 
   getRouter(): Router {

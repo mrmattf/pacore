@@ -14,6 +14,7 @@ An ADR documents a significant architectural decision made in the project, inclu
 | [002](002-dag-workflows.md) | DAG-based workflow execution | Accepted | 2024-12 |
 | [003](003-multi-provider-llm.md) | Multi-provider LLM support | Accepted | 2024-12 |
 | [004](004-edge-cloud-hybrid.md) | Edge + Cloud hybrid architecture | Proposed | 2025-01 |
+| [005](005-builder-agent.md) | Domain-Specialized Builder Agent for E-Commerce | Proposed | 2026-02 |
 
 ## Template
 
