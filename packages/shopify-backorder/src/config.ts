@@ -25,7 +25,8 @@ const configSchema = z.object({
   gorgiasEnabled: z.boolean().default(false),
   gorgiasDomain: z.string().optional(),
   gorgiasApiKey: z.string().optional(),
-  gorgiasApiEmail: z.string().optional(),
+  gorgiasApiEmail: z.string().optional(),   // API auth email (your login)
+  gorgiasFromEmail: z.string().optional(),  // sender email (must match a Gorgias email integration)
 
   // Alerts
   slackWebhookUrl: z.string().url().optional(),
@@ -46,6 +47,7 @@ export function loadConfig(): Config {
     gorgiasDomain: emptyToUndefined(process.env.GORGIAS_DOMAIN),
     gorgiasApiKey: emptyToUndefined(process.env.GORGIAS_API_KEY),
     gorgiasApiEmail: emptyToUndefined(process.env.GORGIAS_API_EMAIL),
+    gorgiasFromEmail: emptyToUndefined(process.env.GORGIAS_FROM_EMAIL),
     slackWebhookUrl: emptyToUndefined(process.env.SLACK_WEBHOOK_URL),
   });
 

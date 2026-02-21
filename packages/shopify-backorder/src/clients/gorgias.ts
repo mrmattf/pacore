@@ -27,7 +27,10 @@ export class GorgiasClient {
     }
 
     this.baseUrl = `https://${config.gorgiasDomain}/api`;
-    this.fromEmail = config.gorgiasApiEmail;
+
+    // GORGIAS_FROM_EMAIL must match a configured email integration in Gorgias
+    // (e.g. support@yourstore.com) - cannot be an arbitrary email address
+    this.fromEmail = config.gorgiasFromEmail ?? config.gorgiasApiEmail;
 
     // Gorgias uses Basic Auth with email:api_key
     const auth = Buffer.from(`${config.gorgiasApiEmail}:${config.gorgiasApiKey}`).toString('base64');
@@ -56,13 +59,14 @@ export class GorgiasClient {
         messages: [
           {
             channel: 'email',
-            via: 'email',
+            via: 'api',
             from_agent: true,
             sender: {
               email: this.fromEmail,
             },
-            receiver: {
-              email: params.customerEmail,
+            source: {
+              from: { address: this.fromEmail },
+              to: [{ address: params.customerEmail }],
             },
             subject: params.subject,
             body_html: params.message,
@@ -87,10 +91,13 @@ export class GorgiasClient {
       headers: this.headers,
       body: JSON.stringify({
         channel: 'email',
-        via: 'email',
+        via: 'api',
         from_agent: true,
         sender: {
           email: this.fromEmail,
+        },
+        source: {
+          from: { address: this.fromEmail },
         },
         body_html: message,
         body_text: message.replace(/<[^>]*>/g, ''),
