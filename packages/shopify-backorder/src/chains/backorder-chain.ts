@@ -143,7 +143,7 @@ export async function executeBackorderChain(
   // Step 7: Create Gorgias ticket with email
   try {
     const customerName = order.customer
-      ? `${order.customer.first_name} ${order.customer.last_name}`.trim()
+      ? [order.customer.first_name, order.customer.last_name].filter(Boolean).join(' ') || 'Customer'
       : 'Customer';
 
     const emailHtml = renderBackorderEmailHtml(order, backorderedItems, availableItems);
