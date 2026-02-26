@@ -150,16 +150,29 @@ export async function executeBackorderChain(
     })),
   });
 
-  // Step 7: Build email using template config (merchant branding)
+  // Step 7: Build email using template config (merchant branding + custom messages)
   const templateConfig = getTemplateConfig();
 
   const emailHtml = allBackordered
     ? renderAllBackorderedEmailHtml(order, backorderedItems, templateConfig)
     : renderPartialBackorderEmailHtml(order, backorderedItems, availableItems, templateConfig);
 
-  const subject = allBackordered
+  // Use merchant-configured subject if set; apply {{orderNumber}} / {{customerName}} variables
+  const vars: Record<string, string> = {
+    orderNumber: String(order.order_number),
+    customerName: order.customer?.first_name || 'Valued Customer',
+  };
+  const applyVars = (s: string) => s.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? '');
+
+  const defaultSubject = allBackordered
     ? `Order #${order.order_number} — Items currently on backorder`
     : `Order #${order.order_number} — Shipping options for your order`;
+
+  const configuredSubject = allBackordered
+    ? templateConfig.messages?.allBackordered?.subject
+    : templateConfig.messages?.partialBackorder?.subject;
+
+  const subject = configuredSubject ? applyVars(configuredSubject) : defaultSubject;
 
   // Step 8: Create Gorgias ticket (sends email to customer)
   try {

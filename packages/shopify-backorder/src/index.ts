@@ -177,12 +177,12 @@ app.post('/trigger/:orderId', requireApiKey, async (req: Request, res: Response)
 });
 
 // Email template customization endpoints (protected by API key)
-// GET  /api/template — returns current branding config
-// PUT  /api/template — replaces branding config (fields are optional; unknown keys stripped)
-const ALLOWED_TEMPLATE_KEYS: Array<keyof TemplateConfig> = [
-  'brandName', 'logoUrl', 'primaryColor', 'accentColor', 'footerText', 'signOff',
-];
+// GET  /api/template — returns current config (style + messages)
+// PUT  /api/template — deep-merges style and messages sections; unknown keys stripped
 const CSS_COLOR_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$|^[a-zA-Z]+$/;
+const STYLE_STRING_KEYS = ['brandName', 'signOff', 'footerText'] as const;
+const MSG_STRING_KEYS_PARTIAL = ['subject', 'intro', 'optionsTitle', 'closing'] as const;
+const MSG_STRING_KEYS_ALL = ['subject', 'intro', 'waitMessage', 'cancelMessage', 'closing'] as const;
 
 app.get('/api/template', requireApiKey, (_req: Request, res: Response) => {
   res.json(getTemplateConfig());
@@ -190,35 +190,146 @@ app.get('/api/template', requireApiKey, (_req: Request, res: Response) => {
 
 app.put('/api/template', requireApiKey, (req: Request, res: Response) => {
   const body = req.body as Record<string, unknown>;
+  const current = getTemplateConfig();
 
-  // Merge only known keys
-  const merged: TemplateConfig = { ...getTemplateConfig() };
+  // ── Validate and merge style ──────────────────────────────────────────────
+  const mergedStyle = { ...(current.style ?? {}) };
 
-  for (const key of ALLOWED_TEMPLATE_KEYS) {
-    if (key in body) {
-      const val = body[key];
-      if (val === null || val === undefined || val === '') {
-        delete merged[key];
-        continue;
+  if ('style' in body) {
+    const style = body['style'];
+    if (typeof style !== 'object' || style === null || Array.isArray(style)) {
+      res.status(400).json({ error: '"style" must be an object' });
+      return;
+    }
+    const s = style as Record<string, unknown>;
+
+    for (const key of STYLE_STRING_KEYS) {
+      if (key in s) {
+        const val = s[key];
+        if (val === null || val === undefined || val === '') { delete mergedStyle[key]; continue; }
+        if (typeof val !== 'string') { res.status(400).json({ error: `style.${key} must be a string` }); return; }
+        mergedStyle[key] = val;
       }
-      if (typeof val !== 'string') {
-        res.status(400).json({ error: `Field "${key}" must be a string` });
+    }
+
+    for (const key of ['primaryColor', 'accentColor'] as const) {
+      if (key in s) {
+        const val = s[key];
+        if (val === null || val === undefined || val === '') { delete mergedStyle[key]; continue; }
+        if (typeof val !== 'string' || !CSS_COLOR_RE.test(val)) {
+          res.status(400).json({ error: `style.${key} must be a valid hex color (e.g. #1a365d)` });
+          return;
+        }
+        mergedStyle[key] = val;
+      }
+    }
+
+    if ('logoUrl' in s) {
+      const val = s['logoUrl'];
+      if (val === null || val === undefined || val === '') { delete mergedStyle.logoUrl; }
+      else if (typeof val !== 'string' || !val.startsWith('https://')) {
+        res.status(400).json({ error: 'style.logoUrl must start with https://' });
         return;
+      } else {
+        mergedStyle.logoUrl = val;
       }
-      if ((key === 'primaryColor' || key === 'accentColor') && !CSS_COLOR_RE.test(val)) {
-        res.status(400).json({ error: `Field "${key}" must be a valid hex color (e.g. #1a365d)` });
-        return;
-      }
-      if (key === 'logoUrl' && !val.startsWith('https://')) {
-        res.status(400).json({ error: 'logoUrl must start with https://' });
-        return;
-      }
-      (merged as Record<string, unknown>)[key] = val;
     }
   }
 
+  // ── Validate and merge messages ───────────────────────────────────────────
+  const mergedMessages = {
+    partialBackorder: { ...(current.messages?.partialBackorder ?? {}) },
+    allBackordered: { ...(current.messages?.allBackordered ?? {}) },
+  };
+
+  if ('messages' in body) {
+    const messages = body['messages'];
+    if (typeof messages !== 'object' || messages === null || Array.isArray(messages)) {
+      res.status(400).json({ error: '"messages" must be an object' });
+      return;
+    }
+    const m = messages as Record<string, unknown>;
+
+    // partialBackorder
+    if ('partialBackorder' in m) {
+      const pb = m['partialBackorder'];
+      if (typeof pb !== 'object' || pb === null || Array.isArray(pb)) {
+        res.status(400).json({ error: '"messages.partialBackorder" must be an object' });
+        return;
+      }
+      const pbObj = pb as Record<string, unknown>;
+
+      for (const key of MSG_STRING_KEYS_PARTIAL) {
+        if (key in pbObj) {
+          const val = pbObj[key];
+          if (val === null || val === undefined || val === '') { delete mergedMessages.partialBackorder[key]; continue; }
+          if (typeof val !== 'string') { res.status(400).json({ error: `messages.partialBackorder.${key} must be a string` }); return; }
+          mergedMessages.partialBackorder[key] = val;
+        }
+      }
+
+      if ('options' in pbObj) {
+        const opts = pbObj['options'];
+        if (opts === null || opts === undefined) {
+          delete mergedMessages.partialBackorder.options;
+        } else {
+          if (!Array.isArray(opts)) {
+            res.status(400).json({ error: 'messages.partialBackorder.options must be an array' });
+            return;
+          }
+          for (let i = 0; i < opts.length; i++) {
+            const opt = opts[i] as Record<string, unknown>;
+            if (typeof opt !== 'object' || opt === null) {
+              res.status(400).json({ error: `messages.partialBackorder.options[${i}] must be an object` });
+              return;
+            }
+            if (typeof opt['label'] !== 'string' || !opt['label']) {
+              res.status(400).json({ error: `messages.partialBackorder.options[${i}].label must be a non-empty string` });
+              return;
+            }
+            if (typeof opt['description'] !== 'string') {
+              res.status(400).json({ error: `messages.partialBackorder.options[${i}].description must be a string` });
+              return;
+            }
+          }
+          mergedMessages.partialBackorder.options = opts.map(o => ({
+            label: (o as Record<string, unknown>)['label'] as string,
+            description: (o as Record<string, unknown>)['description'] as string,
+          }));
+        }
+      }
+    }
+
+    // allBackordered
+    if ('allBackordered' in m) {
+      const ab = m['allBackordered'];
+      if (typeof ab !== 'object' || ab === null || Array.isArray(ab)) {
+        res.status(400).json({ error: '"messages.allBackordered" must be an object' });
+        return;
+      }
+      const abObj = ab as Record<string, unknown>;
+
+      for (const key of MSG_STRING_KEYS_ALL) {
+        if (key in abObj) {
+          const val = abObj[key];
+          if (val === null || val === undefined || val === '') { delete mergedMessages.allBackordered[key]; continue; }
+          if (typeof val !== 'string') { res.status(400).json({ error: `messages.allBackordered.${key} must be a string` }); return; }
+          mergedMessages.allBackordered[key] = val;
+        }
+      }
+    }
+  }
+
+  const merged: TemplateConfig = {
+    style: Object.keys(mergedStyle).length > 0 ? mergedStyle : undefined,
+    messages: {
+      partialBackorder: Object.keys(mergedMessages.partialBackorder).length > 0 ? mergedMessages.partialBackorder : undefined,
+      allBackordered: Object.keys(mergedMessages.allBackordered).length > 0 ? mergedMessages.allBackordered : undefined,
+    },
+  };
+
   setTemplateConfig(merged);
-  logger.info('template.updated', merged as Record<string, unknown>);
+  logger.info('template.updated', merged as unknown as Record<string, unknown>);
   res.json(merged);
 });
 

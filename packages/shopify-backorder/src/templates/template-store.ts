@@ -1,13 +1,42 @@
 import fs from 'fs';
 import path from 'path';
 
-export interface TemplateConfig {
+export interface StyleConfig {
   brandName?: string;     // shown in email header/footer — default "Customer Support Team"
   logoUrl?: string;       // https:// URL for a logo image above the order heading
   primaryColor?: string;  // heading color — default "#1a202c"
   accentColor?: string;   // backordered status color — default "#e53e3e"
-  footerText?: string;    // e.g. "Questions? Email support@yota.com"
   signOff?: string;       // e.g. "The Yota Team"
+  footerText?: string;    // e.g. "Questions? Email support@yota.com"
+}
+
+export interface BackorderOption {
+  label: string;        // bold prefix, e.g. "Ship now"
+  description: string;  // explanation text
+}
+
+export interface PartialBackorderMessages {
+  subject?: string;        // email subject — supports {{orderNumber}}, {{customerName}}
+  intro?: string;          // opening paragraph after "Hi {{customerName}}"
+  optionsTitle?: string;   // heading above the options box
+  options?: BackorderOption[];  // replaces hardcoded A/B; undefined = use defaults; [] = hide box
+  closing?: string;        // closing line before sign-off
+}
+
+export interface AllBackorderedMessages {
+  subject?: string;        // email subject — supports {{orderNumber}}, {{customerName}}
+  intro?: string;          // opening paragraph
+  waitMessage?: string;    // "we'll ship when back in stock" copy
+  cancelMessage?: string;  // "reply to cancel" copy
+  closing?: string;        // closing line before sign-off
+}
+
+export interface TemplateConfig {
+  style?: StyleConfig;
+  messages?: {
+    partialBackorder?: PartialBackorderMessages;
+    allBackordered?: AllBackorderedMessages;
+  };
 }
 
 const CONFIG_PATH = path.resolve(process.cwd(), 'template-config.json');

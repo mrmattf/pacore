@@ -1,5 +1,5 @@
 import { ShopifyLineItem, ShopifyOrder } from '../clients/shopify';
-import { TemplateConfig } from './template-store';
+import { BackorderOption, TemplateConfig } from './template-store';
 
 export interface BackorderedItem {
   lineItem: ShopifyLineItem;
@@ -7,17 +7,52 @@ export interface BackorderedItem {
   backordered: number;
 }
 
-// ─── Shared helpers ───────────────────────────────────────────────────────────
+// ─── Security helpers ─────────────────────────────────────────────────────────
 
-function logoHtml(config: TemplateConfig): string {
-  if (!config.logoUrl) return '';
-  return `<img src="${config.logoUrl}" alt="${config.brandName ?? ''}" style="max-height: 48px; margin-bottom: 16px; display: block;">`;
+function escapeAttr(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;');
 }
 
-function footerHtml(config: TemplateConfig): string {
-  const signOff = config.signOff ?? config.brandName ?? 'Customer Support Team';
-  const footer = config.footerText ? `<p style="margin-top: 4px; color: #718096; font-size: 13px;">${config.footerText}</p>` : '';
-  return `<p>Best regards,<br><strong>${signOff}</strong></p>${footer}`;
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+function applyVars(s: string, vars: Record<string, string>): string {
+  return s.replace(/\{\{(\w+)\}\}/g, (_, key) => escapeHtml(vars[key] ?? ''));
+}
+
+// Converts **text** → <strong>text</strong> after HTML escaping.
+// Safe: the input is already escaped so no raw HTML can slip through.
+function boldInline(s: string): string {
+  return s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+}
+
+// ─── Default options (used when merchant hasn't configured custom options) ────
+
+const DEFAULT_OPTIONS: BackorderOption[] = [
+  {
+    label: 'Option A — Split shipment',
+    description: 'Reply **"A"** to this email and we\'ll ship your available items right away. The backordered items will follow in a separate shipment once they\'re back in stock.',
+  },
+  {
+    label: 'Option B — Wait & ship together',
+    description: 'No reply needed. If we don\'t hear from you, we\'ll hold the order and ship everything together once all items are available.',
+  },
+];
+
+// ─── Shared helpers ───────────────────────────────────────────────────────────
+
+function logoHtml(style: NonNullable<TemplateConfig['style']>): string {
+  if (!style.logoUrl) return '';
+  const src = escapeAttr(style.logoUrl);
+  const alt = escapeAttr(style.brandName ?? '');
+  return `<img src="${src}" alt="${alt}" style="max-height: 48px; margin-bottom: 16px; display: block;">`;
+}
+
+function footerHtml(style: NonNullable<TemplateConfig['style']>): string {
+  const signOff = style.signOff ?? style.brandName ?? 'Customer Support Team';
+  const footer = style.footerText ? `<p style="margin-top: 4px; color: #718096; font-size: 13px;">${escapeHtml(style.footerText)}</p>` : '';
+  return `<p>Best regards,<br><strong>${escapeHtml(signOff)}</strong></p>${footer}`;
 }
 
 function baseStyles(): string {
@@ -26,8 +61,9 @@ function baseStyles(): string {
 
 // ─── Partial backorder email (some items available, some backordered) ─────────
 //
-// Option A: customer replies "A" to split the shipment
-// Option B: no reply needed — silent default, we wait and ship together
+// Merchant configures how many options to show (and what they say).
+// If options is undefined, DEFAULT_OPTIONS (A/B) are used.
+// If options is [], the "How would you like to proceed?" box is hidden.
 
 export function renderPartialBackorderEmailHtml(
   order: ShopifyOrder,
@@ -35,14 +71,24 @@ export function renderPartialBackorderEmailHtml(
   availableItems: ShopifyLineItem[],
   config: TemplateConfig = {}
 ): string {
-  const customerName = order.customer?.first_name || 'Valued Customer';
-  const primaryColor = config.primaryColor ?? '#1a202c';
-  const accentColor = config.accentColor ?? '#e53e3e';
+  const style = config.style ?? {};
+  const msgs = config.messages?.partialBackorder ?? {};
+  const primaryColor = style.primaryColor ?? '#1a202c';
+  const accentColor = style.accentColor ?? '#e53e3e';
+
+  const vars: Record<string, string> = {
+    orderNumber: String(order.order_number),
+    customerName: order.customer?.first_name || 'Valued Customer',
+  };
+
+  const customerName = vars.customerName;
+  const intro = applyVars(msgs.intro ?? 'Thank you for your order! Some items are temporarily out of stock — we wanted to let you know and give you a choice on how to proceed.', vars);
+  const closing = applyVars(msgs.closing ?? 'We apologize for the inconvenience and appreciate your patience!', vars);
 
   const backorderedRows = backorderedItems
     .map(item => `
       <tr>
-        <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.lineItem.title}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee;">${escapeHtml(item.lineItem.title)}</td>
         <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.lineItem.quantity}</td>
         <td style="padding: 8px; border-bottom: 1px solid #eee; color: ${accentColor};">${item.backordered} backordered</td>
       </tr>
@@ -52,12 +98,26 @@ export function renderPartialBackorderEmailHtml(
   const availableRows = availableItems.length > 0
     ? availableItems.map(item => `
         <tr>
-          <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.title}</td>
+          <td style="padding: 8px; border-bottom: 1px solid #eee;">${escapeHtml(item.title)}</td>
           <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.quantity}</td>
           <td style="padding: 8px; border-bottom: 1px solid #eee; color: #38a169;">Ready to ship</td>
         </tr>
       `).join('')
     : '<tr><td colspan="3" style="padding: 8px; color: #666;">No items ready to ship</td></tr>';
+
+  // options: undefined → use defaults; [] → hide box; [...] → use custom list
+  const options = msgs.options ?? DEFAULT_OPTIONS;
+  const optionItems = options.map((opt, i) =>
+    `<p${i === options.length - 1 ? ' style="margin-bottom: 0;"' : ''}>
+      <strong>${applyVars(escapeHtml(opt.label), vars)}:</strong> ${boldInline(applyVars(escapeHtml(opt.description), vars))}
+    </p>`
+  ).join('');
+
+  const optionsBox = options.length === 0 ? '' : `
+  <div style="background: #f7fafc; padding: 20px; margin-top: 24px; border-radius: 8px;">
+    <div style="font-size: 16px; font-weight: 700; color: ${primaryColor}; margin-bottom: 12px;">${applyVars(msgs.optionsTitle ?? 'How would you like us to proceed?', vars)}</div>
+    ${optionItems}
+  </div>`;
 
   return `
 <!DOCTYPE html>
@@ -66,14 +126,14 @@ export function renderPartialBackorderEmailHtml(
   <meta charset="utf-8">
 </head>
 <body style="${baseStyles()}">
-  ${logoHtml(config)}
-  <h2 style="color: ${primaryColor};">Order #${order.order_number} Update</h2>
+  ${logoHtml(style)}
+  <div style="font-size: 22px; font-weight: 700; color: ${primaryColor}; margin-bottom: 16px;">Order #${order.order_number} Update</div>
 
-  <p>Hi ${customerName},</p>
+  <p>Hi ${escapeHtml(customerName)},</p>
 
-  <p>Thank you for your order! Some items are temporarily out of stock — we wanted to let you know and give you a choice on how to proceed.</p>
+  <p>${intro}</p>
 
-  <h3 style="color: ${accentColor}; margin-top: 24px;">Backordered Items</h3>
+  <div style="font-size: 16px; font-weight: 700; color: ${accentColor}; margin-top: 24px; margin-bottom: 8px;">Backordered Items</div>
   <table style="width: 100%; border-collapse: collapse;">
     <thead>
       <tr style="background: #f7fafc;">
@@ -87,7 +147,7 @@ export function renderPartialBackorderEmailHtml(
     </tbody>
   </table>
 
-  <h3 style="color: #38a169; margin-top: 24px;">Items Ready to Ship</h3>
+  <div style="font-size: 16px; font-weight: 700; color: #38a169; margin-top: 24px; margin-bottom: 8px;">Items Ready to Ship</div>
   <table style="width: 100%; border-collapse: collapse;">
     <thead>
       <tr style="background: #f7fafc;">
@@ -101,19 +161,11 @@ export function renderPartialBackorderEmailHtml(
     </tbody>
   </table>
 
-  <div style="background: #f7fafc; padding: 20px; margin-top: 24px; border-radius: 8px;">
-    <h3 style="margin-top: 0; color: ${primaryColor};">How would you like us to proceed?</h3>
-    <p>
-      <strong>Option A — Split shipment:</strong> Reply <strong>"A"</strong> to this email and we'll ship your available items right away. The backordered items will follow in a separate shipment once they're back in stock.
-    </p>
-    <p style="margin-bottom: 0;">
-      <strong>Option B — Wait &amp; ship together:</strong> No reply needed. If we don't hear from you, we'll hold the order and ship everything together once all items are available.
-    </p>
-  </div>
+  ${optionsBox}
 
-  <p style="margin-top: 24px;">We apologize for the inconvenience and appreciate your patience!</p>
+  <p style="margin-top: 24px;">${closing}</p>
 
-  ${footerHtml(config)}
+  ${footerHtml(style)}
 </body>
 </html>
 `.trim();
@@ -121,21 +173,33 @@ export function renderPartialBackorderEmailHtml(
 
 // ─── All-backordered email (every item in the order is out of stock) ──────────
 //
-// No A/B choice — there's nothing to split. Just notify and give a cancel option.
+// No options box — there's nothing to split. Just notify and give a cancel option.
 
 export function renderAllBackorderedEmailHtml(
   order: ShopifyOrder,
   backorderedItems: BackorderedItem[],
   config: TemplateConfig = {}
 ): string {
-  const customerName = order.customer?.first_name || 'Valued Customer';
-  const primaryColor = config.primaryColor ?? '#1a202c';
-  const accentColor = config.accentColor ?? '#e53e3e';
+  const style = config.style ?? {};
+  const msgs = config.messages?.allBackordered ?? {};
+  const primaryColor = style.primaryColor ?? '#1a202c';
+  const accentColor = style.accentColor ?? '#e53e3e';
+
+  const vars: Record<string, string> = {
+    orderNumber: String(order.order_number),
+    customerName: order.customer?.first_name || 'Valued Customer',
+  };
+
+  const customerName = vars.customerName;
+  const intro = applyVars(msgs.intro ?? 'Thank you for your order! We wanted to let you know that all items in your order are currently on backorder.', vars);
+  const waitMessage = applyVars(msgs.waitMessage ?? "We'll ship your complete order as soon as all items are back in stock — no action is needed from you.", vars);
+  const cancelMessage = applyVars(msgs.cancelMessage ?? "If you'd prefer to cancel your order, simply reply to this email and our team will take care of it right away.", vars);
+  const closing = applyVars(msgs.closing ?? 'We apologize for the inconvenience and appreciate your patience!', vars);
 
   const backorderedRows = backorderedItems
     .map(item => `
       <tr>
-        <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.lineItem.title}</td>
+        <td style="padding: 8px; border-bottom: 1px solid #eee;">${escapeHtml(item.lineItem.title)}</td>
         <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.lineItem.quantity}</td>
         <td style="padding: 8px; border-bottom: 1px solid #eee; color: ${accentColor};">${item.backordered} backordered</td>
       </tr>
@@ -149,14 +213,14 @@ export function renderAllBackorderedEmailHtml(
   <meta charset="utf-8">
 </head>
 <body style="${baseStyles()}">
-  ${logoHtml(config)}
-  <h2 style="color: ${primaryColor};">Order #${order.order_number} Update</h2>
+  ${logoHtml(style)}
+  <div style="font-size: 22px; font-weight: 700; color: ${primaryColor}; margin-bottom: 16px;">Order #${order.order_number} Update</div>
 
-  <p>Hi ${customerName},</p>
+  <p>Hi ${escapeHtml(customerName)},</p>
 
-  <p>Thank you for your order! We wanted to let you know that all items in your order are currently on backorder.</p>
+  <p>${intro}</p>
 
-  <h3 style="color: ${accentColor}; margin-top: 24px;">Backordered Items</h3>
+  <div style="font-size: 16px; font-weight: 700; color: ${accentColor}; margin-top: 24px; margin-bottom: 8px;">Backordered Items</div>
   <table style="width: 100%; border-collapse: collapse;">
     <thead>
       <tr style="background: #f7fafc;">
@@ -171,17 +235,13 @@ export function renderAllBackorderedEmailHtml(
   </table>
 
   <div style="background: #f7fafc; padding: 20px; margin-top: 24px; border-radius: 8px;">
-    <p style="margin-top: 0;">
-      We'll ship your complete order as soon as all items are back in stock — no action is needed from you.
-    </p>
-    <p style="margin-bottom: 0; color: #718096; font-size: 14px;">
-      If you'd prefer to cancel your order, simply reply to this email and our team will take care of it right away.
-    </p>
+    <p style="margin-top: 0;">${waitMessage}</p>
+    <p style="margin-bottom: 0; color: #718096; font-size: 14px;">${cancelMessage}</p>
   </div>
 
-  <p style="margin-top: 24px;">We apologize for the inconvenience and appreciate your patience!</p>
+  <p style="margin-top: 24px;">${closing}</p>
 
-  ${footerHtml(config)}
+  ${footerHtml(style)}
 </body>
 </html>
 `.trim();
