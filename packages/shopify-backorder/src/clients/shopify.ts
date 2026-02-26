@@ -18,8 +18,8 @@ export interface ShopifyOrder {
   customer: {
     id: number;
     email: string;
-    first_name: string;
-    last_name: string;
+    first_name: string | null;
+    last_name: string | null;
   };
   line_items: ShopifyLineItem[];
   total_price: string;

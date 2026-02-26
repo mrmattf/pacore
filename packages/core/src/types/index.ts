@@ -7,3 +7,5 @@ export * from './conversation';
 export * from './agent';
 export * from './mcp';
 export * from './workflow';
+export * from './organization';
+export * from './skill';

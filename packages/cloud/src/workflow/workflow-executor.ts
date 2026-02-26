@@ -234,7 +234,7 @@ export class WorkflowExecutor {
     let credentials: any = undefined;
     if (this.credentialManager) {
       try {
-        const creds = await this.credentialManager.getCredentials(userId, config.serverId);
+        const creds = await this.credentialManager.getUserCredentials(userId, config.serverId);
         if (creds) {
           credentials = creds;
         }

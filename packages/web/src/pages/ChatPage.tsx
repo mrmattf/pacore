@@ -10,7 +10,7 @@ import { useCategoryStore } from '../store/categoryStore';
 import { useProviderStore } from '../store/providerStore';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
-import { Settings, LogOut, Database, Workflow } from 'lucide-react';
+import { Settings, LogOut, Database, Workflow, Zap, CreditCard } from 'lucide-react';
 import { WorkflowDAG } from '@pacore/core';
 import { useState } from 'react';
 
@@ -240,11 +240,25 @@ export function ChatPage() {
             <Workflow size={20} />
           </button>
           <button
+            onClick={() => navigate('/skills')}
+            className="p-2 hover:bg-gray-100 rounded"
+            title="Skills"
+          >
+            <Zap size={20} />
+          </button>
+          <button
             onClick={() => navigate('/mcp')}
             className="p-2 hover:bg-gray-100 rounded"
             title="MCP Servers"
           >
             <Database size={20} />
+          </button>
+          <button
+            onClick={() => navigate('/billing')}
+            className="p-2 hover:bg-gray-100 rounded"
+            title="Billing"
+          >
+            <CreditCard size={20} />
           </button>
           <button
             onClick={() => navigate('/settings')}

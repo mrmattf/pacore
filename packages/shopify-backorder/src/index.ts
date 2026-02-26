@@ -7,6 +7,7 @@ import { ShopifyTokenManager } from './clients/shopify-token-manager';
 import { GorgiasClient } from './clients/gorgias';
 import { MCPServer } from './mcp/server';
 import { handleBackorderCheck } from './handler/backorder';
+import { getTemplateConfig, setTemplateConfig, TemplateConfig } from './templates/template-store';
 
 // Early startup logging (before config validation)
 console.log('Starting shopify-backorder service...');
@@ -173,6 +174,52 @@ app.post('/trigger/:orderId', requireApiKey, async (req: Request, res: Response)
     logger.error('trigger.failed', error as Error, { orderId });
     res.status(500).json({ error: (error as Error).message });
   }
+});
+
+// Email template customization endpoints (protected by API key)
+// GET  /api/template — returns current branding config
+// PUT  /api/template — replaces branding config (fields are optional; unknown keys stripped)
+const ALLOWED_TEMPLATE_KEYS: Array<keyof TemplateConfig> = [
+  'brandName', 'logoUrl', 'primaryColor', 'accentColor', 'footerText', 'signOff',
+];
+const CSS_COLOR_RE = /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$|^[a-zA-Z]+$/;
+
+app.get('/api/template', requireApiKey, (_req: Request, res: Response) => {
+  res.json(getTemplateConfig());
+});
+
+app.put('/api/template', requireApiKey, (req: Request, res: Response) => {
+  const body = req.body as Record<string, unknown>;
+
+  // Merge only known keys
+  const merged: TemplateConfig = { ...getTemplateConfig() };
+
+  for (const key of ALLOWED_TEMPLATE_KEYS) {
+    if (key in body) {
+      const val = body[key];
+      if (val === null || val === undefined || val === '') {
+        delete merged[key];
+        continue;
+      }
+      if (typeof val !== 'string') {
+        res.status(400).json({ error: `Field "${key}" must be a string` });
+        return;
+      }
+      if ((key === 'primaryColor' || key === 'accentColor') && !CSS_COLOR_RE.test(val)) {
+        res.status(400).json({ error: `Field "${key}" must be a valid hex color (e.g. #1a365d)` });
+        return;
+      }
+      if (key === 'logoUrl' && !val.startsWith('https://')) {
+        res.status(400).json({ error: 'logoUrl must start with https://' });
+        return;
+      }
+      (merged as Record<string, unknown>)[key] = val;
+    }
+  }
+
+  setTemplateConfig(merged);
+  logger.info('template.updated', merged as Record<string, unknown>);
+  res.json(merged);
 });
 
 // Initialize token manager then start server

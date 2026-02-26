@@ -9,7 +9,9 @@
  * Chain steps:
  * 1. Check inventory for order line items (shopify.check_inventory)
  * 2. Identify backordered items
- * 3. Create support ticket with email (gorgias.create_ticket)
+ * 3. Send appropriate email via gorgias.create_ticket:
+ *    - ALL items backordered → all-backordered notification (no A/B choice)
+ *    - SOME items backordered → partial backorder email (Option A = reply, Option B = silent default)
  * 4. Return result
  *
  * The chain is called by:
@@ -22,8 +24,10 @@ import { MCPServer } from '../mcp/server';
 import { logger, alertSlack } from '../logger';
 import {
   BackorderedItem,
-  renderBackorderEmailHtml
+  renderPartialBackorderEmailHtml,
+  renderAllBackorderedEmailHtml,
 } from '../templates/backorder-email';
+import { getTemplateConfig } from '../templates/template-store';
 
 export interface BackorderChainInput {
   order: ShopifyOrder;
@@ -44,7 +48,9 @@ export interface BackorderChainResult {
  * This is a deterministic tool chain that:
  * 1. Checks inventory via MCP tool
  * 2. Identifies backordered items
- * 3. Creates Gorgias ticket if backorders found
+ * 3. Creates Gorgias ticket with the appropriate email:
+ *    - Partial backorder: Option A (reply) / Option B (no reply needed — silent default)
+ *    - All backordered: informational email only, no A/B choice
  *
  * @param input - The order to check
  * @param mcp - MCP server for tool calls
@@ -97,7 +103,7 @@ export async function executeBackorderChain(
     inventoryMap.set(item.variant_id, item.available);
   }
 
-  // Step 4: Identify backordered items
+  // Step 4: Identify backordered vs available items
   const backorderedItems: BackorderedItem[] = [];
   const availableItems: ShopifyLineItem[] = [];
 
@@ -129,10 +135,14 @@ export async function executeBackorderChain(
   result.hasBackorders = true;
   result.backorderedItems = backorderedItems;
 
+  const allBackordered = availableItems.length === 0;
+
   logger.info('chain.backorder.detected', {
     orderId: order.id,
     orderNumber: order.order_number,
     backorderedCount: backorderedItems.length,
+    availableCount: availableItems.length,
+    scenario: allBackordered ? 'all_backordered' : 'partial_backorder',
     items: backorderedItems.map(b => ({
       title: b.lineItem.title,
       sku: b.lineItem.sku,
@@ -140,20 +150,29 @@ export async function executeBackorderChain(
     })),
   });
 
-  // Step 7: Create Gorgias ticket with email
+  // Step 7: Build email using template config (merchant branding)
+  const templateConfig = getTemplateConfig();
+
+  const emailHtml = allBackordered
+    ? renderAllBackorderedEmailHtml(order, backorderedItems, templateConfig)
+    : renderPartialBackorderEmailHtml(order, backorderedItems, availableItems, templateConfig);
+
+  const subject = allBackordered
+    ? `Order #${order.order_number} — Items currently on backorder`
+    : `Order #${order.order_number} — Shipping options for your order`;
+
+  // Step 8: Create Gorgias ticket (sends email to customer)
   try {
     const customerName = order.customer
       ? [order.customer.first_name, order.customer.last_name].filter(Boolean).join(' ') || 'Customer'
       : 'Customer';
 
-    const emailHtml = renderBackorderEmailHtml(order, backorderedItems, availableItems);
-
     const ticketResult = await mcp.callTool('gorgias.create_ticket', {
       customer_email: order.email,
       customer_name: customerName,
-      subject: `Order #${order.order_number} - Some items are backordered`,
+      subject,
       message: emailHtml,
-      tags: ['backorder', 'automated'],
+      tags: ['backorder', 'automated', allBackordered ? 'all-backordered' : 'partial-backorder'],
     });
 
     if (!ticketResult.success) {
@@ -168,9 +187,10 @@ export async function executeBackorderChain(
       orderId: order.id,
       orderNumber: order.order_number,
       ticketId: ticketData.ticket_id,
+      scenario: allBackordered ? 'all_backordered' : 'partial_backorder',
     });
 
-    // Step 8: Send Slack notification
+    // Step 9: Send Slack notification
     await alertSlack(
       `Backorder detected for Order #${order.order_number}. ` +
       `${backorderedItems.length} item(s) affected. Ticket #${ticketData.ticket_id} created.`,

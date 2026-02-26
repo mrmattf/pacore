@@ -3,18 +3,19 @@
  * Basic types for demo - not production-ready
  */
 
-export type MCPServerType = 'cloud' | 'edge';
+export type MCPServerType = 'cloud' | 'edge' | 'platform';
 export type MCPProtocol = 'stdio' | 'http' | 'websocket';
 
 export interface MCPServer {
   id: string;
-  userId: string;
+  userId: string | null;   // null for org-scoped or platform servers
+  orgId?: string | null;   // set for org-scoped servers
   name: string;
   serverType: MCPServerType;
   protocol: MCPProtocol;
   connectionConfig: MCPConnectionConfig;
   capabilities?: MCPCapabilities;
-  categories?: string[]; // Role-based filtering
+  categories?: string[];
   createdAt: Date;
 }
 

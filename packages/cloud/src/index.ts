@@ -6,7 +6,14 @@ import { Orchestrator, UserSettings } from './orchestration';
 import { APIGateway } from './api';
 import { Pool } from 'pg';
 import { MCPRegistry, CredentialManager } from './mcp';
+import { registerPlatformMCPServers } from './mcp/platform-servers';
 import { WorkflowManager, WorkflowExecutor, WorkflowBuilder } from './workflow';
+import { OrgManager } from './organizations/org-manager';
+import { SkillRegistry } from './skills/skill-registry';
+import { SkillDispatcher } from './skills/skill-dispatcher';
+import { WebhookTriggerHandler } from './triggers/webhook-trigger';
+import { BackorderDetectionSkill } from './skills/definitions/backorder-detection';
+import { BillingManager } from './billing';
 
 /**
  * Main entry point for the cloud service
@@ -57,6 +64,7 @@ async function main() {
   // Initialize MCP Registry
   const mcpRegistry = new MCPRegistry(dbPool);
   await mcpRegistry.initialize();
+  await registerPlatformMCPServers(dbPool);
   console.log('MCP registry initialized');
 
   // Initialize Credential Manager
@@ -99,6 +107,30 @@ async function main() {
     workflowExecutor,
   );
 
+  // Initialize Org Manager
+  const orgManager = new OrgManager(dbPool);
+  await orgManager.initialize();
+  console.log('Org manager initialized');
+
+  // Initialize Billing Manager
+  const billingManager = new BillingManager(dbPool);
+  await billingManager.initialize();
+  console.log('Billing manager initialized');
+
+  // Initialize Skill Registry + register platform skills
+  const skillRegistry = new SkillRegistry(dbPool, billingManager);
+  skillRegistry.registerSkill(BackorderDetectionSkill);
+  await skillRegistry.initialize(); // syncs in-memory catalog to the skills DB table
+  console.log('Skill registry initialized, registered skills:', skillRegistry.listSkills().map(s => s.id));
+
+  // Initialize Skill Dispatcher
+  const skillDispatcher = new SkillDispatcher(skillRegistry, mcpRegistry, credentialManager);
+  console.log('Skill dispatcher initialized');
+
+  // Initialize Webhook Trigger Handler
+  const webhookTriggerHandler = new WebhookTriggerHandler(skillRegistry, skillDispatcher, dbPool, billingManager);
+  console.log('Webhook trigger handler initialized');
+
   // Initialize API Gateway
   const gateway = new APIGateway(orchestrator, {
     port: parseInt(process.env.PORT || '3000'),
@@ -110,6 +142,11 @@ async function main() {
     workflowManager,
     workflowExecutor,
     workflowBuilder,
+    orgManager,
+    skillRegistry,
+    skillDispatcher,
+    webhookTriggerHandler,
+    billingManager,
   });
 
   await gateway.start();

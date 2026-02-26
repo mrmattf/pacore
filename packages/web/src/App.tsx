@@ -1,10 +1,14 @@
 import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { LoginPage } from './pages/LoginPage';
+import { RegisterPage } from './pages/RegisterPage';
 import { ChatPage } from './pages/ChatPage';
 import { SettingsPage } from './pages/SettingsPage';
 import { MCPServersPage } from './pages/MCPServersPage';
 import { WorkflowBuilderPage } from './pages/WorkflowBuilderPage';
 import { WorkflowsPage } from './pages/WorkflowsPage';
+import { SkillsPage } from './pages/SkillsPage';
+import { SkillConfigPage } from './pages/SkillConfigPage';
+import { BillingPage } from './pages/BillingPage';
 import { useAuthStore } from './store/authStore';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -17,6 +21,7 @@ export function App() {
     <BrowserRouter>
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
         <Route
           path="/chat"
           element={
@@ -62,6 +67,30 @@ export function App() {
           element={
             <PrivateRoute>
               <WorkflowBuilderPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/skills"
+          element={
+            <PrivateRoute>
+              <SkillsPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/skills/:skillId/setup/:userSkillId"
+          element={
+            <PrivateRoute>
+              <SkillConfigPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/billing"
+          element={
+            <PrivateRoute>
+              <BillingPage />
             </PrivateRoute>
           }
         />
