@@ -115,7 +115,7 @@ export function renderPartialBackorderEmailHtml(
 
   const optionsBox = options.length === 0 ? '' : `
   <div style="background: #f7fafc; padding: 20px; margin-top: 24px; border-radius: 8px;">
-    <div style="font-size: 16px; font-weight: 700; color: ${primaryColor}; margin-bottom: 12px;">${applyVars(msgs.optionsTitle ?? 'How would you like us to proceed?', vars)}</div>
+    <p style="font-size: 16px; font-weight: bold; color: ${primaryColor}; margin: 0 0 12px 0;">${applyVars(msgs.optionsTitle ?? 'How would you like us to proceed?', vars)}</p>
     ${optionItems}
   </div>`;
 
@@ -127,13 +127,13 @@ export function renderPartialBackorderEmailHtml(
 </head>
 <body style="${baseStyles()}">
   ${logoHtml(style)}
-  <div style="font-size: 22px; font-weight: 700; color: ${primaryColor}; margin-bottom: 16px;">Order #${order.order_number} Update</div>
+  <p style="font-size: 22px; font-weight: bold; color: ${primaryColor}; margin: 0 0 16px 0;">Order #${order.order_number} Update</p>
 
   <p>Hi ${escapeHtml(customerName)},</p>
 
   <p>${intro}</p>
 
-  <div style="font-size: 16px; font-weight: 700; color: ${accentColor}; margin-top: 24px; margin-bottom: 8px;">Backordered Items</div>
+  <p style="font-size: 16px; font-weight: bold; color: ${accentColor}; margin: 24px 0 8px 0;">Backordered Items</p>
   <table style="width: 100%; border-collapse: collapse;">
     <thead>
       <tr style="background: #f7fafc;">
@@ -147,7 +147,7 @@ export function renderPartialBackorderEmailHtml(
     </tbody>
   </table>
 
-  <div style="font-size: 16px; font-weight: 700; color: #38a169; margin-top: 24px; margin-bottom: 8px;">Items Ready to Ship</div>
+  <p style="font-size: 16px; font-weight: bold; color: #38a169; margin: 24px 0 8px 0;">Items Ready to Ship</p>
   <table style="width: 100%; border-collapse: collapse;">
     <thead>
       <tr style="background: #f7fafc;">
@@ -214,13 +214,13 @@ export function renderAllBackorderedEmailHtml(
 </head>
 <body style="${baseStyles()}">
   ${logoHtml(style)}
-  <div style="font-size: 22px; font-weight: 700; color: ${primaryColor}; margin-bottom: 16px;">Order #${order.order_number} Update</div>
+  <p style="font-size: 22px; font-weight: bold; color: ${primaryColor}; margin: 0 0 16px 0;">Order #${order.order_number} Update</p>
 
   <p>Hi ${escapeHtml(customerName)},</p>
 
   <p>${intro}</p>
 
-  <div style="font-size: 16px; font-weight: 700; color: ${accentColor}; margin-top: 24px; margin-bottom: 8px;">Backordered Items</div>
+  <p style="font-size: 16px; font-weight: bold; color: ${accentColor}; margin: 24px 0 8px 0;">Backordered Items</p>
   <table style="width: 100%; border-collapse: collapse;">
     <thead>
       <tr style="background: #f7fafc;">
