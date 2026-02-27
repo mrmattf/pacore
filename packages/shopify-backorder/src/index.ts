@@ -73,15 +73,27 @@ function requireApiKey(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
-// ── OAuth 2.0 endpoints (public — these ARE the auth mechanism) ───────────────
+// ── OAuth 2.0 Authorization Code + PKCE flow ──────────────────────────────────
 //
-// Claude Desktop's "Custom Connector" UI requires OAuth. We implement the
-// simplest possible flow: client_credentials grant where:
-//   client_id  = anything (not validated — only the secret matters)
-//   client_secret = API_SECRET (the same key used for /mcp Bearer auth)
+// Claude Desktop opens a browser to /oauth/authorize, the user enters the
+// API secret, the server generates an auth code and redirects back to Claude.
+// Claude then exchanges the code for an access token at /oauth/token.
 //
 // The issued access_token is the API_SECRET itself, so the existing
-// requireApiKey middleware accepts it without changes.
+// requireApiKey middleware accepts it without any changes.
+
+// In-memory auth code store (single-merchant, codes expire in 5 minutes)
+interface PendingCode {
+  codeChallenge: string;
+  codeChallengeMethod: string;
+  redirectUri: string;
+  expiresAt: number;
+}
+const pendingCodes = new Map<string, PendingCode>();
+
+function escapeHtml(s: string): string {
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
 
 // OAuth metadata discovery
 app.get('/.well-known/oauth-authorization-server', (req: Request, res: Response) => {
@@ -91,50 +103,156 @@ app.get('/.well-known/oauth-authorization-server', (req: Request, res: Response)
 
   res.json({
     issuer: base,
+    authorization_endpoint: `${base}/oauth/authorize`,
     token_endpoint: `${base}/oauth/token`,
-    token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
-    grant_types_supported: ['client_credentials'],
-    response_types_supported: ['token'],
+    token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic', 'none'],
+    grant_types_supported: ['authorization_code'],
+    response_types_supported: ['code'],
+    code_challenge_methods_supported: ['S256', 'plain'],
   });
 });
 
-// Token endpoint — client_credentials grant
-app.post('/oauth/token', express.urlencoded({ extended: false }), (req: Request, res: Response) => {
-  const grantType = req.body.grant_type ?? req.body['grant_type'];
-  const clientSecret = req.body.client_secret ?? req.body['client_secret'];
+// Authorization endpoint — browser opens this, user enters API secret
+app.get('/oauth/authorize', (req: Request, res: Response) => {
+  const { response_type, client_id, redirect_uri, state, code_challenge, code_challenge_method } = req.query as Record<string, string>;
 
-  // Also support HTTP Basic Auth (Authorization: Basic base64(id:secret))
-  let resolvedSecret = clientSecret;
-  if (!resolvedSecret) {
-    const basic = req.get('Authorization');
-    if (basic?.startsWith('Basic ')) {
-      const decoded = Buffer.from(basic.slice(6), 'base64').toString('utf8');
-      resolvedSecret = decoded.split(':')[1] ?? '';
-    }
+  if (response_type !== 'code') {
+    res.status(400).send('unsupported_response_type');
+    return;
   }
 
-  if (grantType !== 'client_credentials') {
+  res.send(`<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Connect — Backorder MCP Server</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+           background: #f7fafc; display: flex; align-items: center; justify-content: center;
+           min-height: 100vh; padding: 20px; }
+    .card { background: #fff; border-radius: 12px; box-shadow: 0 4px 24px rgba(0,0,0,.08);
+            padding: 40px; max-width: 420px; width: 100%; }
+    h1 { font-size: 22px; color: #1a202c; margin-bottom: 8px; }
+    p  { color: #718096; font-size: 14px; margin-bottom: 24px; line-height: 1.5; }
+    label { display: block; font-size: 13px; font-weight: 600; color: #4a5568; margin-bottom: 6px; }
+    input[type=password] { width: 100%; padding: 10px 14px; border: 1px solid #e2e8f0;
+                           border-radius: 8px; font-size: 15px; outline: none; }
+    input[type=password]:focus { border-color: #1a202c; box-shadow: 0 0 0 3px rgba(26,32,44,.1); }
+    button { margin-top: 20px; width: 100%; padding: 12px; background: #1a202c; color: #fff;
+             border: none; border-radius: 8px; font-size: 15px; font-weight: 600;
+             cursor: pointer; }
+    button:hover { background: #2d3748; }
+    .error { margin-top: 12px; color: #e53e3e; font-size: 13px; display: none; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Connect to Backorder MCP</h1>
+    <p>Enter your API secret to authorize Claude to manage your backorder notification templates.</p>
+    <form method="POST" action="/oauth/authorize">
+      <input type="hidden" name="client_id"             value="${escapeHtml(client_id ?? '')}">
+      <input type="hidden" name="redirect_uri"          value="${escapeHtml(redirect_uri ?? '')}">
+      <input type="hidden" name="state"                 value="${escapeHtml(state ?? '')}">
+      <input type="hidden" name="code_challenge"        value="${escapeHtml(code_challenge ?? '')}">
+      <input type="hidden" name="code_challenge_method" value="${escapeHtml(code_challenge_method ?? 'plain')}">
+      <label for="api_secret">API Secret</label>
+      <input type="password" id="api_secret" name="api_secret" placeholder="Enter your API secret" autofocus required>
+      <button type="submit">Authorize</button>
+    </form>
+  </div>
+</body>
+</html>`);
+});
+
+// Authorization form submission
+app.post('/oauth/authorize', express.urlencoded({ extended: false }), (req: Request, res: Response) => {
+  const { client_id, redirect_uri, state, code_challenge, code_challenge_method, api_secret } = req.body as Record<string, string>;
+
+  if (!redirect_uri) {
+    res.status(400).send('missing redirect_uri');
+    return;
+  }
+
+  const isValid =
+    typeof api_secret === 'string' &&
+    api_secret.length === config.apiSecret.length &&
+    crypto.timingSafeEqual(Buffer.from(api_secret), Buffer.from(config.apiSecret));
+
+  if (!isValid) {
+    logger.warn('oauth.authorize.invalid_secret', { ip: req.ip });
+    // Redirect back with error so Claude Desktop gets a proper response
+    const url = new URL(redirect_uri);
+    url.searchParams.set('error', 'access_denied');
+    if (state) url.searchParams.set('state', state);
+    res.redirect(url.toString());
+    return;
+  }
+
+  // Generate one-time auth code (expires in 5 minutes)
+  const code = crypto.randomBytes(32).toString('hex');
+  pendingCodes.set(code, {
+    codeChallenge: code_challenge ?? '',
+    codeChallengeMethod: code_challenge_method ?? 'plain',
+    redirectUri: redirect_uri,
+    expiresAt: Date.now() + 5 * 60 * 1000,
+  });
+
+  logger.info('oauth.authorize.code_issued', { ip: req.ip, clientId: client_id });
+
+  const url = new URL(redirect_uri);
+  url.searchParams.set('code', code);
+  if (state) url.searchParams.set('state', state);
+  res.redirect(url.toString());
+});
+
+// Token endpoint — exchanges auth code for access token
+app.post('/oauth/token', express.urlencoded({ extended: false }), (req: Request, res: Response) => {
+  const { grant_type, code, code_verifier, redirect_uri } = req.body as Record<string, string>;
+
+  if (grant_type !== 'authorization_code') {
     res.status(400).json({ error: 'unsupported_grant_type' });
     return;
   }
 
-  // Constant-time comparison
-  const isValid =
-    resolvedSecret?.length === config.apiSecret.length &&
-    crypto.timingSafeEqual(Buffer.from(resolvedSecret), Buffer.from(config.apiSecret));
+  const pending = pendingCodes.get(code);
 
-  if (!isValid) {
-    logger.warn('oauth.token.invalid_secret', { ip: req.ip });
-    res.status(401).json({ error: 'invalid_client' });
+  if (!pending) {
+    res.status(400).json({ error: 'invalid_grant', error_description: 'Unknown or expired code' });
     return;
   }
 
+  if (Date.now() > pending.expiresAt) {
+    pendingCodes.delete(code);
+    res.status(400).json({ error: 'invalid_grant', error_description: 'Code expired' });
+    return;
+  }
+
+  if (pending.redirectUri !== redirect_uri) {
+    res.status(400).json({ error: 'invalid_grant', error_description: 'redirect_uri mismatch' });
+    return;
+  }
+
+  // Verify PKCE code_verifier if a code_challenge was sent
+  if (pending.codeChallenge) {
+    let computed = code_verifier ?? '';
+    if (pending.codeChallengeMethod === 'S256') {
+      computed = crypto.createHash('sha256').update(code_verifier ?? '').digest('base64url');
+    }
+    if (computed !== pending.codeChallenge) {
+      res.status(400).json({ error: 'invalid_grant', error_description: 'PKCE verification failed' });
+      return;
+    }
+  }
+
+  pendingCodes.delete(code); // single-use
   logger.info('oauth.token.issued', { ip: req.ip });
 
   res.json({
     access_token: config.apiSecret,
     token_type: 'Bearer',
-    expires_in: 86400, // 24 hours — Claude Desktop will re-fetch as needed
+    expires_in: 86400,
   });
 });
 
