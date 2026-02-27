@@ -73,6 +73,71 @@ function requireApiKey(req: Request, res: Response, next: NextFunction) {
   next();
 }
 
+// ── OAuth 2.0 endpoints (public — these ARE the auth mechanism) ───────────────
+//
+// Claude Desktop's "Custom Connector" UI requires OAuth. We implement the
+// simplest possible flow: client_credentials grant where:
+//   client_id  = anything (not validated — only the secret matters)
+//   client_secret = API_SECRET (the same key used for /mcp Bearer auth)
+//
+// The issued access_token is the API_SECRET itself, so the existing
+// requireApiKey middleware accepts it without changes.
+
+// OAuth metadata discovery
+app.get('/.well-known/oauth-authorization-server', (req: Request, res: Response) => {
+  const proto = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0].trim() ?? req.protocol;
+  const host = req.headers['host'];
+  const base = `${proto}://${host}`;
+
+  res.json({
+    issuer: base,
+    token_endpoint: `${base}/oauth/token`,
+    token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
+    grant_types_supported: ['client_credentials'],
+    response_types_supported: ['token'],
+  });
+});
+
+// Token endpoint — client_credentials grant
+app.post('/oauth/token', express.urlencoded({ extended: false }), (req: Request, res: Response) => {
+  const grantType = req.body.grant_type ?? req.body['grant_type'];
+  const clientSecret = req.body.client_secret ?? req.body['client_secret'];
+
+  // Also support HTTP Basic Auth (Authorization: Basic base64(id:secret))
+  let resolvedSecret = clientSecret;
+  if (!resolvedSecret) {
+    const basic = req.get('Authorization');
+    if (basic?.startsWith('Basic ')) {
+      const decoded = Buffer.from(basic.slice(6), 'base64').toString('utf8');
+      resolvedSecret = decoded.split(':')[1] ?? '';
+    }
+  }
+
+  if (grantType !== 'client_credentials') {
+    res.status(400).json({ error: 'unsupported_grant_type' });
+    return;
+  }
+
+  // Constant-time comparison
+  const isValid =
+    resolvedSecret?.length === config.apiSecret.length &&
+    crypto.timingSafeEqual(Buffer.from(resolvedSecret), Buffer.from(config.apiSecret));
+
+  if (!isValid) {
+    logger.warn('oauth.token.invalid_secret', { ip: req.ip });
+    res.status(401).json({ error: 'invalid_client' });
+    return;
+  }
+
+  logger.info('oauth.token.issued', { ip: req.ip });
+
+  res.json({
+    access_token: config.apiSecret,
+    token_type: 'Bearer',
+    expires_in: 86400, // 24 hours — Claude Desktop will re-fetch as needed
+  });
+});
+
 // Health check (public)
 app.get('/health', (_req: Request, res: Response) => {
   res.json({
