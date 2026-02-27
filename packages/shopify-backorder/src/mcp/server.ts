@@ -1,3 +1,4 @@
+import crypto from 'crypto';
 import { Router, Request, Response } from 'express';
 import {
   MCPTool,
@@ -8,6 +9,7 @@ import {
 } from './types';
 import { shopifyTools, ShopifyToolExecutor } from './tools/shopify-tools';
 import { gorgiasTools, GorgiasToolExecutor, DryRunGorgiasToolExecutor } from './tools/gorgias-tools';
+import { configTools, ConfigToolExecutor } from './tools/config-tools';
 import { ShopifyClient } from '../clients/shopify';
 import { ShopifyTokenManager } from '../clients/shopify-token-manager';
 import { GorgiasClient } from '../clients/gorgias';
@@ -23,10 +25,13 @@ export class MCPServer {
   private tools: MCPTool[];
   private shopifyExecutor: ShopifyToolExecutor;
   private gorgiasExecutor: GorgiasToolExecutor | DryRunGorgiasToolExecutor;
+  private configExecutor: ConfigToolExecutor;
   private gorgiasEnabled: boolean;
+  private sessions = new Map<string, Response>();
 
   constructor(shopifyClient: ShopifyClient, gorgiasClient: GorgiasClient | null, gorgiasEnabled: boolean = false) {
-    this.tools = [...shopifyTools, ...gorgiasTools];
+    this.tools = [...shopifyTools, ...gorgiasTools, ...configTools];
+    this.configExecutor = new ConfigToolExecutor();
     this.shopifyExecutor = new ShopifyToolExecutor(shopifyClient);
     this.gorgiasEnabled = gorgiasEnabled;
 
@@ -67,6 +72,77 @@ export class MCPServer {
 
       const result = await this.callTool(toolName, args, perRequest ?? undefined);
       res.json(result);
+    });
+
+    // ── SSE transport (for Claude Desktop and MCP-compatible AI clients) ──────
+    //
+    // Connection flow:
+    //   1. Client opens GET /mcp/sse  → receives SSE stream with endpoint URL
+    //   2. Client POSTs JSON-RPC to   → POST /mcp/message?sessionId=<id>
+    //   3. Server responds via SSE    → event: message / data: <json-rpc-response>
+    //
+    // Claude Desktop config (claude_desktop_config.json):
+    //   { "mcpServers": { "yota-backorder": {
+    //       "url": "https://<railway-domain>/mcp/sse",
+    //       "headers": { "Authorization": "Bearer <API_SECRET>" }
+    //   }}}
+
+    router.get('/sse', (req: Request, res: Response) => {
+      const sessionId = crypto.randomUUID();
+
+      res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      });
+
+      // Keepalive comment every 30 s — prevents Railway/proxy idle timeout
+      const keepalive = setInterval(() => res.write(': keepalive\n\n'), 30_000);
+
+      // Tell the client where to POST JSON-RPC messages
+      res.write(`event: endpoint\ndata: /mcp/message?sessionId=${sessionId}\n\n`);
+
+      this.sessions.set(sessionId, res);
+      logger.info('mcp.sse.connected', { sessionId, activeSessions: this.sessions.size });
+
+      req.on('close', () => {
+        clearInterval(keepalive);
+        this.sessions.delete(sessionId);
+        logger.info('mcp.sse.disconnected', { sessionId, activeSessions: this.sessions.size });
+      });
+    });
+
+    router.post('/message', async (req: Request, res: Response) => {
+      const sessionId = req.query['sessionId'] as string;
+      const sseRes = this.sessions.get(sessionId);
+
+      if (!sseRes) {
+        res.status(404).json({ error: 'Session not found or expired' });
+        return;
+      }
+
+      const request = req.body as JSONRPCRequest;
+
+      // Notifications (e.g. notifications/initialized) are fire-and-forget
+      if (typeof request.method === 'string' && request.method.startsWith('notifications/')) {
+        res.status(202).send();
+        return;
+      }
+
+      try {
+        const perRequest = this.buildPerRequestExecutors(req);
+        const response = await this.handleRequest(request, perRequest ?? undefined);
+        sseRes.write(`event: message\ndata: ${JSON.stringify(response)}\n\n`);
+      } catch (error) {
+        const errResponse: JSONRPCResponse = {
+          jsonrpc: '2.0',
+          id: request.id,
+          error: { code: -32603, message: (error as Error).message },
+        };
+        sseRes.write(`event: message\ndata: ${JSON.stringify(errResponse)}\n\n`);
+      }
+
+      res.status(202).send();
     });
 
     return router;
@@ -177,6 +253,8 @@ export class MCPServer {
       result = await shopifyExec.execute(toolName, args);
     } else if (toolName.startsWith('gorgias.')) {
       result = await gorgiasExec.execute(toolName, args);
+    } else if (toolName.startsWith('config.')) {
+      result = await this.configExecutor.execute(toolName, args);
     } else {
       result = { success: false, error: `Unknown tool: ${toolName}` };
     }
