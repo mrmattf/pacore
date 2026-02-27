@@ -320,12 +320,38 @@ app.put('/api/template', requireApiKey, (req: Request, res: Response) => {
     }
   }
 
+  // ── Validate and merge html overrides ────────────────────────────────────────
+  const mergedHtml = { ...(current.html ?? {}) };
+
+  if ('html' in body) {
+    const html = body['html'];
+    if (typeof html !== 'object' || html === null || Array.isArray(html)) {
+      res.status(400).json({ error: '"html" must be an object' });
+      return;
+    }
+    const h = html as Record<string, unknown>;
+    for (const key of ['partialBackorder', 'allBackordered'] as const) {
+      if (key in h) {
+        const val = h[key];
+        if (val === null || val === undefined || val === '') {
+          delete mergedHtml[key];
+        } else if (typeof val !== 'string') {
+          res.status(400).json({ error: `html.${key} must be a string` });
+          return;
+        } else {
+          mergedHtml[key] = val;
+        }
+      }
+    }
+  }
+
   const merged: TemplateConfig = {
     style: Object.keys(mergedStyle).length > 0 ? mergedStyle : undefined,
     messages: {
       partialBackorder: Object.keys(mergedMessages.partialBackorder).length > 0 ? mergedMessages.partialBackorder : undefined,
       allBackordered: Object.keys(mergedMessages.allBackordered).length > 0 ? mergedMessages.allBackordered : undefined,
     },
+    html: Object.keys(mergedHtml).length > 0 ? mergedHtml : undefined,
   };
 
   setTemplateConfig(merged);

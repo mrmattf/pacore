@@ -31,12 +31,18 @@ export interface AllBackorderedMessages {
   closing?: string;        // closing line before sign-off
 }
 
+export interface HtmlConfig {
+  partialBackorder?: string;  // full HTML override for partial-backorder email
+  allBackordered?: string;    // full HTML override for all-backordered email
+}
+
 export interface TemplateConfig {
   style?: StyleConfig;
   messages?: {
     partialBackorder?: PartialBackorderMessages;
     allBackordered?: AllBackorderedMessages;
   };
+  html?: HtmlConfig;  // raw HTML overrides; takes priority over generated template
 }
 
 const CONFIG_PATH = path.resolve(process.cwd(), 'template-config.json');

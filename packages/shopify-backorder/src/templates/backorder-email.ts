@@ -59,6 +59,40 @@ function baseStyles(): string {
   return 'font-family: -apple-system, BlinkMacSystemFont, \'Segoe UI\', Roboto, sans-serif; line-height: 1.6; color: #333; max-width: 600px; margin: 0 auto; padding: 20px;';
 }
 
+// ─── Exported row/custom-HTML helpers (used by backorder-chain for {{vars}}) ──
+
+/** Pre-renders <tr> rows for the backordered items table. */
+export function renderBackorderedRows(items: BackorderedItem[]): string {
+  return items.map(item => `
+    <tr>
+      <td style="padding: 8px; border-bottom: 1px solid #eee;">${escapeHtml(item.lineItem.title)}</td>
+      <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.lineItem.quantity}</td>
+      <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.backordered} backordered</td>
+    </tr>
+  `).join('');
+}
+
+/** Pre-renders <tr> rows for the available items table. */
+export function renderAvailableRows(items: ShopifyLineItem[]): string {
+  if (items.length === 0) return '<tr><td colspan="3" style="padding: 8px; color: #666;">No items ready to ship</td></tr>';
+  return items.map(item => `
+    <tr>
+      <td style="padding: 8px; border-bottom: 1px solid #eee;">${escapeHtml(item.title)}</td>
+      <td style="padding: 8px; border-bottom: 1px solid #eee;">${item.quantity}</td>
+      <td style="padding: 8px; border-bottom: 1px solid #eee;">Ready to ship</td>
+    </tr>
+  `).join('');
+}
+
+/**
+ * Substitutes {{variables}} in a merchant-provided HTML template.
+ * Does NOT HTML-escape values — row vars are already HTML; order/customer
+ * values come from Shopify (not from merchant input).
+ */
+export function applyCustomHtml(template: string, vars: Record<string, string>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? '');
+}
+
 // ─── Partial backorder email (some items available, some backordered) ─────────
 //
 // Merchant configures how many options to show (and what they say).

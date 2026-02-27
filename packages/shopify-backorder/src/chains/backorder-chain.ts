@@ -26,6 +26,9 @@ import {
   BackorderedItem,
   renderPartialBackorderEmailHtml,
   renderAllBackorderedEmailHtml,
+  renderBackorderedRows,
+  renderAvailableRows,
+  applyCustomHtml,
 } from '../templates/backorder-email';
 import { getTemplateConfig } from '../templates/template-store';
 
@@ -153,15 +156,24 @@ export async function executeBackorderChain(
   // Step 7: Build email using template config (merchant branding + custom messages)
   const templateConfig = getTemplateConfig();
 
-  const emailHtml = allBackordered
-    ? renderAllBackorderedEmailHtml(order, backorderedItems, templateConfig)
-    : renderPartialBackorderEmailHtml(order, backorderedItems, availableItems, templateConfig);
-
-  // Use merchant-configured subject if set; apply {{orderNumber}} / {{customerName}} variables
   const vars: Record<string, string> = {
     orderNumber: String(order.order_number),
     customerName: order.customer?.first_name || 'Valued Customer',
+    backorderedItemsRows: renderBackorderedRows(backorderedItems),
+    availableItemsRows: renderAvailableRows(availableItems),
   };
+
+  const customHtml = allBackordered
+    ? templateConfig.html?.allBackordered
+    : templateConfig.html?.partialBackorder;
+
+  const emailHtml = customHtml
+    ? applyCustomHtml(customHtml, vars)
+    : allBackordered
+      ? renderAllBackorderedEmailHtml(order, backorderedItems, templateConfig)
+      : renderPartialBackorderEmailHtml(order, backorderedItems, availableItems, templateConfig);
+
+  // Use merchant-configured subject if set; apply {{orderNumber}} / {{customerName}} variables
   const applyVars = (s: string) => s.replace(/\{\{(\w+)\}\}/g, (_, k) => vars[k] ?? '');
 
   const defaultSubject = allBackordered
@@ -173,6 +185,13 @@ export async function executeBackorderChain(
     : templateConfig.messages?.partialBackorder?.subject;
 
   const subject = configuredSubject ? applyVars(configuredSubject) : defaultSubject;
+
+  logger.info('chain.backorder.email_payload', {
+    orderId: order.id,
+    orderNumber: order.order_number,
+    subject,
+    emailHtml,
+  });
 
   // Step 8: Create Gorgias ticket (sends email to customer)
   try {
