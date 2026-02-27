@@ -85,7 +85,7 @@ export async function executeBackorderChain(
     .filter(id => id != null);
 
   // Step 2: Check inventory using MCP tool
-  const inventoryResult = await mcp.callTool('shopify.check_inventory', {
+  const inventoryResult = await mcp.callTool('shopify_check_inventory', {
     variant_ids: variantIds,
   });
 
@@ -199,7 +199,7 @@ export async function executeBackorderChain(
       ? [order.customer.first_name, order.customer.last_name].filter(Boolean).join(' ') || 'Customer'
       : 'Customer';
 
-    const ticketResult = await mcp.callTool('gorgias.create_ticket', {
+    const ticketResult = await mcp.callTool('gorgias_create_ticket', {
       customer_email: order.email,
       customer_name: customerName,
       subject,

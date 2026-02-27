@@ -14,7 +14,7 @@ import { ShopifyOrder, ShopifyLineItem } from '../../clients/shopify';
 
 export const configTools = [
   {
-    name: 'config.get_template',
+    name: 'config_get_template',
     description: 'Get the current email template configuration (style, messages, and HTML overrides).',
     inputSchema: {
       type: 'object',
@@ -23,7 +23,7 @@ export const configTools = [
     },
   },
   {
-    name: 'config.update_style',
+    name: 'config_update_style',
     description:
       'Update email style settings. All fields are optional — only provided fields are changed. ' +
       'Pass an empty string to clear a field back to its default.',
@@ -41,7 +41,7 @@ export const configTools = [
     },
   },
   {
-    name: 'config.update_messages',
+    name: 'config_update_messages',
     description:
       'Update the email copy for a given scenario. All message fields are optional — only provided fields are changed. ' +
       'Supports {{orderNumber}} and {{customerName}} template variables.',
@@ -60,7 +60,7 @@ export const configTools = [
     },
   },
   {
-    name: 'config.set_html',
+    name: 'config_set_html',
     description:
       'Set a full custom HTML email for a scenario, overriding all generated templates and styling. ' +
       'Inline CSS is recommended for best email client compatibility. ' +
@@ -76,7 +76,7 @@ export const configTools = [
     },
   },
   {
-    name: 'config.preview_email',
+    name: 'config_preview_email',
     description:
       'Generate a sample email HTML with realistic mock order data so you can see exactly what ' +
       'customers will receive. Returns the rendered HTML string.',
@@ -96,15 +96,15 @@ export class ConfigToolExecutor {
   async execute(toolName: string, args: Record<string, unknown>): Promise<MCPToolResult> {
     try {
       switch (toolName) {
-        case 'config.get_template':
+        case 'config_get_template':
           return this.getTemplate();
-        case 'config.update_style':
+        case 'config_update_style':
           return this.updateStyle(args);
-        case 'config.update_messages':
+        case 'config_update_messages':
           return this.updateMessages(args);
-        case 'config.set_html':
+        case 'config_set_html':
           return this.setHtml(args);
-        case 'config.preview_email':
+        case 'config_preview_email':
           return this.previewEmail(args);
         default:
           return { success: false, error: `Unknown tool: ${toolName}` };

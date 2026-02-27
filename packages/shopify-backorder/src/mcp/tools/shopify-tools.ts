@@ -4,7 +4,7 @@ import { ShopifyClient } from '../../clients/shopify';
 // Tool definitions
 export const shopifyTools: MCPTool[] = [
   {
-    name: 'shopify.get_order',
+    name: 'shopify_get_order',
     description: 'Get detailed information about a Shopify order including customer info and line items',
     inputSchema: {
       type: 'object',
@@ -18,7 +18,7 @@ export const shopifyTools: MCPTool[] = [
     },
   },
   {
-    name: 'shopify.check_inventory',
+    name: 'shopify_check_inventory',
     description: 'Check inventory levels for product variants. Returns available quantity for each variant.',
     inputSchema: {
       type: 'object',
@@ -41,10 +41,10 @@ export class ShopifyToolExecutor {
   async execute(toolName: string, args: Record<string, unknown>): Promise<MCPToolResult> {
     try {
       switch (toolName) {
-        case 'shopify.get_order':
+        case 'shopify_get_order':
           return await this.getOrder(args.order_id as number);
 
-        case 'shopify.check_inventory':
+        case 'shopify_check_inventory':
           return await this.checkInventory(args.variant_ids as number[]);
 
         default:

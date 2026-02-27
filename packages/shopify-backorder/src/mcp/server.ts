@@ -249,11 +249,11 @@ export class MCPServer {
 
     let result: MCPToolResult;
 
-    if (toolName.startsWith('shopify.')) {
+    if (toolName.startsWith('shopify_')) {
       result = await shopifyExec.execute(toolName, args);
-    } else if (toolName.startsWith('gorgias.')) {
+    } else if (toolName.startsWith('gorgias_')) {
       result = await gorgiasExec.execute(toolName, args);
-    } else if (toolName.startsWith('config.')) {
+    } else if (toolName.startsWith('config_')) {
       result = await this.configExecutor.execute(toolName, args);
     } else {
       result = { success: false, error: `Unknown tool: ${toolName}` };

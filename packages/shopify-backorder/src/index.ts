@@ -343,7 +343,7 @@ app.post('/trigger/:orderId', requireApiKey, async (req: Request, res: Response)
 
   try {
     // Use MCP tool to get order
-    const orderResult = await mcpServer.callTool('shopify.get_order', { order_id: orderId });
+    const orderResult = await mcpServer.callTool('shopify_get_order', { order_id: orderId });
 
     if (!orderResult.success) {
       res.status(500).json({ error: orderResult.error });

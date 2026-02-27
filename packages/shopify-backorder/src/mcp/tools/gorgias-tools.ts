@@ -4,7 +4,7 @@ import { GorgiasClient } from '../../clients/gorgias';
 // Tool definitions
 export const gorgiasTools: MCPTool[] = [
   {
-    name: 'gorgias.create_ticket',
+    name: 'gorgias_create_ticket',
     description: 'Create a new support ticket in Gorgias and send an email to the customer',
     inputSchema: {
       type: 'object',
@@ -35,7 +35,7 @@ export const gorgiasTools: MCPTool[] = [
     },
   },
   {
-    name: 'gorgias.add_message',
+    name: 'gorgias_add_message',
     description: 'Add a message to an existing Gorgias ticket',
     inputSchema: {
       type: 'object',
@@ -64,7 +64,7 @@ export class DryRunGorgiasToolExecutor {
     console.log('='.repeat(80));
 
     switch (toolName) {
-      case 'gorgias.create_ticket':
+      case 'gorgias_create_ticket':
         console.log('\n📧 STEP 1: Create Ticket Request');
         console.log('-'.repeat(40));
         console.log('Endpoint: POST /api/tickets');
@@ -104,7 +104,7 @@ export class DryRunGorgiasToolExecutor {
           },
         };
 
-      case 'gorgias.add_message':
+      case 'gorgias_add_message':
         console.log('\n💬 STEP 1: Add Message to Ticket');
         console.log('-'.repeat(40));
         console.log(`Endpoint: POST /api/tickets/${args.ticket_id}/messages`);
@@ -143,10 +143,10 @@ export class GorgiasToolExecutor {
   async execute(toolName: string, args: Record<string, unknown>): Promise<MCPToolResult> {
     try {
       switch (toolName) {
-        case 'gorgias.create_ticket':
+        case 'gorgias_create_ticket':
           return await this.createTicket(args);
 
-        case 'gorgias.add_message':
+        case 'gorgias_add_message':
           return await this.addMessage(args);
 
         default:
