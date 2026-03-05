@@ -1651,8 +1651,7 @@ export class APIGateway {
         await testIntegrationCredentials(integrationKey, credentials, this.config.adapterRegistry);
 
         // Create connection record
-        const { v4: uuidv4 } = await import('uuid');
-        const connectionId = uuidv4();
+        const connectionId = crypto.randomUUID();
 
         await this.config.db.query(
           `INSERT INTO integration_connections (id, user_id, integration_key, display_name, status, last_tested_at)
@@ -1761,7 +1760,11 @@ export class APIGateway {
 
           const stored = config.namedTemplates;
           const namedTemplates = (stored && Object.keys(stored).length > 0) ? stored : template.defaultTemplates;
-          const invokeAction = template.compiledPolicy?.actions?.find((a: any) => a.type === 'invoke' && a.templateKey);
+          const allActions = [
+            ...(template.compiledPolicy?.defaultActions ?? []),
+            ...(template.compiledPolicy?.rules ?? []).flatMap((r: any) => r.actions ?? []),
+          ];
+          const invokeAction = allActions.find((a: any) => a.type === 'invoke' && a.templateKey);
           const templateKey = invokeAction?.templateKey ?? Object.keys(namedTemplates)[0];
           const msgTemplate = namedTemplates[templateKey];
           if (!msgTemplate) return res.status(400).json({ error: 'No message template found in skill configuration' });

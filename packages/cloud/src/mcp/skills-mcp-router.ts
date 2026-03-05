@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import { Pool } from 'pg';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'crypto';
 import { CredentialManager } from './credential-manager';
 import { AdapterRegistry } from '../integrations/adapter-registry';
 import { isWebhookSourceAdapter } from '../integrations/slot-adapter';
@@ -293,7 +293,7 @@ async function dispatchTool(
       // Test first
       await adapter.testCredentials(credentials);
 
-      const connectionId = uuidv4();
+      const connectionId = randomUUID();
       await deps.db.query(
         `INSERT INTO integration_connections (id, user_id, integration_key, display_name, status, last_tested_at)
          VALUES ($1, $2, $3, $4, 'active', NOW())`,

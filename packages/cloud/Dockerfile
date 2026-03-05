@@ -30,8 +30,8 @@ COPY packages/web ./packages/web
 COPY packages/sdk ./packages/sdk
 COPY packages/agent ./packages/agent
 
-# Build all packages (turbo handles dependency order)
-RUN pnpm run build -- --force
+# Build all packages (turbo handles dependency order; --force bypasses turbo cache)
+RUN ./node_modules/.bin/turbo run build --force
 
 # Copy web frontend dist into cloud's public folder for Express to serve
 RUN cp -r packages/web/dist packages/cloud/public
