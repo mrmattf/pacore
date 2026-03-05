@@ -7,6 +7,7 @@ import { MCPServersPage } from './pages/MCPServersPage';
 import { WorkflowBuilderPage } from './pages/WorkflowBuilderPage';
 import { WorkflowsPage } from './pages/WorkflowsPage';
 import { SkillsPage } from './pages/SkillsPage';
+import { TemplatePickerPage } from './pages/TemplatePickerPage';
 import { SkillConfigPage } from './pages/SkillConfigPage';
 import { BillingPage } from './pages/BillingPage';
 import { useAuthStore } from './store/authStore';
@@ -79,7 +80,15 @@ export function App() {
           }
         />
         <Route
-          path="/skills/:skillId/setup/:userSkillId"
+          path="/skills/:typeId/templates"
+          element={
+            <PrivateRoute>
+              <TemplatePickerPage />
+            </PrivateRoute>
+          }
+        />
+        <Route
+          path="/skills/:typeId/templates/:templateId/configure/:userSkillId"
           element={
             <PrivateRoute>
               <SkillConfigPage />

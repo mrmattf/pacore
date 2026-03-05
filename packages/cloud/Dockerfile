@@ -11,10 +11,11 @@ COPY .npmrc ./
 COPY turbo.json ./
 COPY tsconfig.json ./
 
-# Copy package files for all workspaces
+# Copy package.json files for all workspaces (cache layer)
 COPY packages/core/package.json ./packages/core/
 COPY packages/adapters/package.json ./packages/adapters/
 COPY packages/cloud/package.json ./packages/cloud/
+COPY packages/web/package.json ./packages/web/
 COPY packages/sdk/package.json ./packages/sdk/
 COPY packages/agent/package.json ./packages/agent/
 
@@ -25,12 +26,15 @@ RUN pnpm install --frozen-lockfile
 COPY packages/core ./packages/core
 COPY packages/adapters ./packages/adapters
 COPY packages/cloud ./packages/cloud
+COPY packages/web ./packages/web
 COPY packages/sdk ./packages/sdk
 COPY packages/agent ./packages/agent
 
-# Build all packages (turbo will handle dependency order automatically)
-# Force no cache to ensure fresh builds in Docker
+# Build all packages (turbo handles dependency order)
 RUN pnpm run build -- --force
+
+# Copy web frontend dist into cloud's public folder for Express to serve
+RUN cp -r packages/web/dist packages/cloud/public
 
 # Expose port
 EXPOSE 3000

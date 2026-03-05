@@ -128,7 +128,7 @@ export class BillingManager {
     const id = scope.type === 'user' ? scope.userId : scope.orgId;
     const { rows } = await this.db.query(
       `SELECT COUNT(*)::int AS cnt FROM user_skills
-       WHERE ${col} = $1 AND status IN ('pending', 'active')`,
+       WHERE ${col} = $1 AND status = 'active'`,
       [id]
     );
     return rows[0].cnt;

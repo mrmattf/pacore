@@ -1,43 +1,109 @@
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Zap, CheckCircle, ChevronRight, RefreshCw, Trash2 } from 'lucide-react';
-import { useSkills, UserSkill } from '../hooks/useSkills';
+import { Zap, ChevronRight, RefreshCw, Settings, CheckCircle, Clock, Trash2 } from 'lucide-react';
+import { useAuthStore } from '../store/authStore';
+import { UserSkill } from '../hooks/useSkills';
 
-const TRIGGER_LABEL: Record<string, string> = {
-  webhook: 'Webhook',
-  scheduled: 'Scheduled',
-  manual: 'Manual',
-};
+interface SkillTypeCard {
+  id: string;
+  name: string;
+  description: string;
+  category: string;
+  templateCount: number;
+  templateNames: string[];
+}
+
+interface TemplateMeta { name: string; skillTypeId: string; }
 
 export function SkillsPage() {
   const navigate = useNavigate();
-  const { catalog, mySkills, loading, refresh, activateSkill, deleteSkill } = useSkills();
+  const token = useAuthStore(s => s.token)!;
 
-  const activatedIds = new Set(mySkills.map((s) => s.skillId));
+  const [skillTypes, setSkillTypes] = useState<SkillTypeCard[]>([]);
+  const [mySkills, setMySkills] = useState<UserSkill[]>([]);
+  // templateId → { name, skillTypeId } — used to resolve names/routes for older skills
+  // that were created before we stored templateName/skillTypeId in configuration.
+  const [templateMap, setTemplateMap] = useState<Record<string, TemplateMeta>>({});
+  const [loading, setLoading] = useState(true);
+  const [activeCategory, setActiveCategory] = useState<string>('All');
 
-  const findMySkill = (skillId: string): UserSkill | undefined =>
-    mySkills.find((s) => s.skillId === skillId);
-
-  const handleActivate = async (skillId: string) => {
+  async function load() {
+    setLoading(true);
     try {
-      const userSkill = await activateSkill(skillId);
-      navigate(`/skills/${skillId}/setup/${userSkill.id}`);
-    } catch (e: any) {
-      alert(`Failed to activate skill: ${e.message}`);
+      const [typesRes, myRes] = await Promise.all([
+        fetch('/v1/skill-types', { headers: { Authorization: `Bearer ${token}` } }),
+        fetch('/v1/me/skills',   { headers: { Authorization: `Bearer ${token}` } }),
+      ]);
+      const types: SkillTypeCard[] = typesRes.ok ? await typesRes.json() : [];
+      if (typesRes.ok) setSkillTypes(types);
+      if (myRes.ok)   setMySkills(await myRes.json());
+
+      // Build a flat templateId → {name, skillTypeId} map so we can display
+      // and navigate correctly even for older skills that didn't store these fields.
+      const map: Record<string, TemplateMeta> = {};
+      await Promise.all(types.map(async (type) => {
+        try {
+          const res = await fetch(`/v1/skill-types/${type.id}/templates`, {
+            headers: { Authorization: `Bearer ${token}` },
+          });
+          if (res.ok) {
+            const templates: Array<{ id: string; name: string; skillTypeId: string }> = await res.json();
+            for (const t of templates) map[t.id] = { name: t.name, skillTypeId: t.skillTypeId };
+          }
+        } catch { /* non-fatal */ }
+      }));
+      setTemplateMap(map);
+    } finally {
+      setLoading(false);
     }
-  };
+  }
 
-  const handleConfigure = (skillId: string, userSkillId: string) => {
-    navigate(`/skills/${skillId}/setup/${userSkillId}`);
-  };
+  useEffect(() => { load(); }, [token]);
 
-  const handleDelete = async (userSkillId: string) => {
-    if (!confirm('Remove this skill? This will also delete its webhook triggers and history.')) return;
+  const categories = ['All', ...Array.from(new Set(skillTypes.map(t => t.category)))];
+
+  const visibleTypes = activeCategory === 'All'
+    ? skillTypes
+    : skillTypes.filter(t => t.category === activeCategory);
+
+  const groupedByCategory = visibleTypes.reduce<Record<string, SkillTypeCard[]>>((acc, t) => {
+    (acc[t.category] ??= []).push(t);
+    return acc;
+  }, {});
+
+  const activeSkills = mySkills.filter(s => s.status === 'active' || s.status === 'pending');
+
+  async function handleRemoveSkill(skillId: string) {
     try {
-      await deleteSkill(userSkillId);
-    } catch (e: any) {
-      alert(`Failed to remove skill: ${e.message}`);
+      await fetch(`/v1/me/skills/${skillId}`, {
+        method: 'DELETE',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      await load();
+    } catch (e) {
+      console.error('Failed to remove skill', e);
     }
-  };
+  }
+
+  function handleBrowseTemplates(typeId: string) {
+    navigate(`/skills/${typeId}/templates`);
+  }
+
+  function handleConfigure(skill: UserSkill) {
+    const cfg = skill.configuration as any;
+    const templateId = cfg?.templateId ?? '';
+    // Prefer stored skillTypeId; fall back to the template map for older records
+    const typeId = cfg?.skillTypeId ?? templateMap[templateId]?.skillTypeId ?? '';
+    if (!typeId || !templateId) return; // shouldn't happen but guard anyway
+    navigate(`/skills/${typeId}/templates/${templateId}/configure/${skill.id}`);
+  }
+
+  function resolveTemplateName(skill: UserSkill): string {
+    const cfg = skill.configuration as any;
+    if (cfg?.templateName) return cfg.templateName;
+    const templateId = cfg?.templateId ?? '';
+    return templateMap[templateId]?.name ?? templateId ?? 'Skill';
+  }
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -47,117 +113,152 @@ export function SkillsPage() {
           <div>
             <h1 className="text-2xl font-bold">Skills</h1>
             <p className="text-sm text-gray-600 mt-1">
-              Activate and configure automated capabilities for your workspace
+              Browse and activate pre-built automations for your workspace
             </p>
           </div>
           <button
-            onClick={() => refresh()}
+            onClick={load}
             disabled={loading}
-            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded flex items-center gap-2 disabled:opacity-50"
+            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded flex items-center gap-2 disabled:opacity-50 text-sm"
           >
-            <RefreshCw size={16} className={loading ? 'animate-spin' : ''} />
+            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
             Refresh
           </button>
         </div>
       </header>
 
-      {/* Body */}
       <main className="flex-1 overflow-auto p-6">
-        {loading && catalog.length === 0 ? (
-          <div className="flex items-center justify-center h-32 text-gray-400">
-            Loading skills…
-          </div>
-        ) : catalog.length === 0 ? (
-          <div className="text-center py-16 text-gray-400">
-            <Zap size={48} className="mx-auto mb-4 opacity-30" />
-            <p className="text-lg font-medium">No skills available yet</p>
-            <p className="text-sm mt-1">Platform skills will appear here as they are added.</p>
-          </div>
-        ) : (
-          <div className="max-w-3xl mx-auto space-y-4">
-            {catalog.map((skill) => {
-              const mySkill = findMySkill(skill.id);
-              const isActive = activatedIds.has(skill.id);
+        <div className="max-w-3xl mx-auto space-y-8">
 
-              return (
-                <div
-                  key={skill.id}
-                  className="bg-white border rounded-lg p-5 flex items-start gap-4 hover:border-blue-300 transition-colors"
-                >
-                  {/* Icon */}
-                  <div className="flex-shrink-0 w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center text-blue-600">
-                    <Zap size={20} />
-                  </div>
-
-                  {/* Info */}
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2">
-                      <h2 className="font-semibold text-gray-900">{skill.name}</h2>
-                      <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded">
-                        v{skill.version}
-                      </span>
-                      <span className="text-xs bg-blue-50 text-blue-600 px-2 py-0.5 rounded">
-                        {TRIGGER_LABEL[skill.triggerType] ?? skill.triggerType}
-                      </span>
-                      {isActive && mySkill?.status === 'active' && (
-                        <span className="text-xs bg-green-50 text-green-600 px-2 py-0.5 rounded flex items-center gap-1">
-                          <CheckCircle size={11} /> Active
+          {/* My skills (active + pending/incomplete) */}
+          {activeSkills.length > 0 && (
+            <section>
+              <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
+                My Skills
+              </h2>
+              <div className="space-y-2">
+                {activeSkills.map(skill => {
+                  const cfg = skill.configuration as any;
+                  const templateName = resolveTemplateName(skill);
+                  const templateId = cfg?.templateId ?? '';
+                  const typeId = cfg?.skillTypeId ?? templateMap[templateId]?.skillTypeId ?? '';
+                  const canConfigure = Boolean(typeId && templateId);
+                  const isActive = skill.status === 'active';
+                  return (
+                    <div
+                      key={skill.id}
+                      className="bg-white border rounded-lg px-5 py-3 flex items-center justify-between"
+                    >
+                      <div className="flex items-center gap-2 min-w-0">
+                        {isActive
+                          ? <CheckCircle size={15} className="text-green-500 flex-shrink-0" />
+                          : <Clock size={15} className="text-amber-400 flex-shrink-0" />
+                        }
+                        <span className="text-sm font-medium text-gray-900 truncate">{templateName}</span>
+                        <span className={`text-xs px-1.5 py-0.5 rounded-full flex-shrink-0 ${
+                          isActive
+                            ? 'bg-green-50 text-green-700'
+                            : 'bg-amber-50 text-amber-700'
+                        }`}>
+                          {isActive ? 'active' : 'incomplete'}
                         </span>
-                      )}
-                      {isActive && mySkill?.status === 'pending' && (
-                        <span className="text-xs bg-yellow-50 text-yellow-600 px-2 py-0.5 rounded">
-                          Setup required
-                        </span>
-                      )}
-                    </div>
-                    <p className="text-sm text-gray-600 mt-1">{skill.description}</p>
-                    {skill.requiredCapabilities.length > 0 && (
-                      <div className="flex gap-1 mt-2 flex-wrap">
-                        {skill.requiredCapabilities.map((cap) => (
-                          <span
-                            key={cap}
-                            className="text-xs bg-gray-50 border text-gray-500 px-2 py-0.5 rounded"
-                          >
-                            {cap}
-                          </span>
-                        ))}
                       </div>
-                    )}
-                  </div>
-
-                  {/* Actions */}
-                  <div className="flex items-center gap-2 flex-shrink-0">
-                    {isActive && mySkill ? (
-                      <>
+                      <div className="flex items-center gap-2 flex-shrink-0">
                         <button
-                          onClick={() => handleConfigure(skill.id, mySkill.id)}
-                          className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 flex items-center gap-1"
+                          onClick={() => handleConfigure(skill)}
+                          disabled={!canConfigure}
+                          className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-600 border rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
                         >
-                          Configure
-                          <ChevronRight size={14} />
+                          <Settings size={12} /> Configure
                         </button>
                         <button
-                          onClick={() => handleDelete(mySkill.id)}
-                          className="p-1.5 text-gray-400 hover:text-red-500 rounded"
+                          onClick={() => handleRemoveSkill(skill.id)}
+                          className="p-1.5 text-gray-400 hover:text-red-500 rounded hover:bg-red-50 transition-colors"
                           title="Remove skill"
                         >
-                          <Trash2 size={16} />
+                          <Trash2 size={14} />
                         </button>
-                      </>
-                    ) : (
-                      <button
-                        onClick={() => handleActivate(skill.id)}
-                        className="px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700"
-                      >
-                        Add
-                      </button>
-                    )}
-                  </div>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+
+          {/* Category filter */}
+          {categories.length > 2 && (
+            <div className="flex gap-2 flex-wrap">
+              {categories.map(cat => (
+                <button
+                  key={cat}
+                  onClick={() => setActiveCategory(cat)}
+                  className={`px-3 py-1.5 text-sm rounded-full border transition-colors ${
+                    activeCategory === cat
+                      ? 'bg-blue-600 text-white border-blue-600'
+                      : 'bg-white text-gray-600 border-gray-200 hover:border-gray-400'
+                  }`}
+                >
+                  {cat}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Skill type catalog */}
+          {loading && skillTypes.length === 0 ? (
+            <div className="flex items-center justify-center h-32 text-gray-400">
+              Loading skills…
+            </div>
+          ) : visibleTypes.length === 0 ? (
+            <div className="text-center py-16 text-gray-400">
+              <Zap size={48} className="mx-auto mb-4 opacity-30" />
+              <p className="text-lg font-medium">No skills available yet</p>
+              <p className="text-sm mt-1">Platform skills will appear here as they are added.</p>
+            </div>
+          ) : (
+            Object.entries(groupedByCategory).map(([category, types]) => (
+              <section key={category}>
+                <h2 className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">
+                  {category}
+                </h2>
+                <div className="space-y-3">
+                  {types.map(skillType => (
+                    <div
+                      key={skillType.id}
+                      className="bg-white border rounded-lg p-5 hover:border-blue-300 transition-colors"
+                    >
+                      <div className="flex items-start justify-between gap-4">
+                        <div className="flex gap-3 min-w-0">
+                          <div className="flex-shrink-0 w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center text-blue-600">
+                            <Zap size={20} />
+                          </div>
+                          <div className="min-w-0">
+                            <h3 className="font-semibold text-gray-900">{skillType.name}</h3>
+                            <p className="text-sm text-gray-500 mt-0.5">{skillType.description}</p>
+                            {skillType.templateNames.length > 0 && (
+                              <p className="text-xs text-gray-400 mt-1.5">
+                                Templates:{' '}
+                                {skillType.templateNames.join(' · ')}
+                              </p>
+                            )}
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => handleBrowseTemplates(skillType.id)}
+                          className="flex-shrink-0 flex items-center gap-1 px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 whitespace-nowrap"
+                        >
+                          Browse Templates
+                          <ChevronRight size={14} />
+                        </button>
+                      </div>
+                    </div>
+                  ))}
                 </div>
-              );
-            })}
-          </div>
-        )}
+              </section>
+            ))
+          )}
+        </div>
       </main>
     </div>
   );

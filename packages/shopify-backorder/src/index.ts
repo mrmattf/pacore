@@ -44,7 +44,59 @@ const app = express();
 app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
-// API Key authentication middleware
+// ── OAuth security constants ───────────────────────────────────────────────────
+
+// Only Claude Desktop's callback is a valid redirect target.
+// Any other redirect_uri is rejected before the form is shown.
+const ALLOWED_REDIRECT_URIS = new Set([
+  'https://claude.ai/api/mcp/auth_callback',
+]);
+
+// ── Simple in-memory rate limiter (no external dependency) ────────────────────
+
+interface RateLimitBucket { count: number; resetAt: number; }
+const rateLimitStore = new Map<string, RateLimitBucket>();
+
+function isRateLimited(ip: string, limit: number, windowMs: number): boolean {
+  const now = Date.now();
+  const bucket = rateLimitStore.get(ip);
+  if (!bucket || now > bucket.resetAt) {
+    rateLimitStore.set(ip, { count: 1, resetAt: now + windowMs });
+    return false;
+  }
+  if (bucket.count >= limit) return true;
+  bucket.count++;
+  return false;
+}
+
+// Sweep expired buckets every 10 minutes to keep the map bounded
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, bucket] of rateLimitStore) {
+    if (now > bucket.resetAt) rateLimitStore.delete(ip);
+  }
+}, 10 * 60 * 1000);
+
+// ── Auth code + issued token stores ───────────────────────────────────────────
+
+interface PendingCode {
+  codeChallenge: string;
+  redirectUri: string;
+  expiresAt: number;
+}
+const pendingCodes = new Map<string, PendingCode>();   // max 100 entries
+const issuedTokens = new Map<string, number>();         // token → expiresAt (24 h)
+
+// Sweep expired codes and tokens every 10 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, v] of pendingCodes) { if (now > v.expiresAt) pendingCodes.delete(k); }
+  for (const [k, v] of issuedTokens) { if (now > v) issuedTokens.delete(k); }
+}, 10 * 60 * 1000);
+
+// ── API Key authentication middleware ─────────────────────────────────────────
+// Accepts: raw API_SECRET (Postman / direct use) OR a short-lived OAuth token.
+
 function requireApiKey(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.get('Authorization');
 
@@ -60,40 +112,40 @@ function requireApiKey(req: Request, res: Response, next: NextFunction) {
     return;
   }
 
-  // Constant-time comparison to prevent timing attacks
-  const isValid = token.length === config.apiSecret.length &&
+  // Accept raw API_SECRET (constant-time comparison)
+  const matchesSecret =
+    token.length === config.apiSecret.length &&
     crypto.timingSafeEqual(Buffer.from(token), Buffer.from(config.apiSecret));
 
-  if (!isValid) {
+  // Accept a valid short-lived OAuth token
+  const tokenExpiry = issuedTokens.get(token);
+  const matchesToken = tokenExpiry !== undefined && Date.now() <= tokenExpiry;
+
+  if (!matchesSecret && !matchesToken) {
     logger.warn('auth.invalid.api.key', { ip: req.ip });
-    res.status(401).json({ error: 'Invalid API key' });
+    res.status(401).json({ error: 'Invalid or expired token' });
     return;
   }
 
   next();
 }
 
-// ── OAuth 2.0 Authorization Code + PKCE flow ──────────────────────────────────
-//
-// Claude Desktop opens a browser to /oauth/authorize, the user enters the
-// API secret, the server generates an auth code and redirects back to Claude.
-// Claude then exchanges the code for an access token at /oauth/token.
-//
-// The issued access_token is the API_SECRET itself, so the existing
-// requireApiKey middleware accepts it without any changes.
-
-// In-memory auth code store (single-merchant, codes expire in 5 minutes)
-interface PendingCode {
-  codeChallenge: string;
-  codeChallengeMethod: string;
-  redirectUri: string;
-  expiresAt: number;
-}
-const pendingCodes = new Map<string, PendingCode>();
+// ── OAuth HTML helper ─────────────────────────────────────────────────────────
 
 function escapeHtml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
+
+// ── OAuth 2.0 Authorization Code + PKCE flow ──────────────────────────────────
+//
+// Security properties:
+//   - redirect_uri validated against allowlist before any processing
+//   - Only S256 PKCE accepted (plain removed)
+//   - Opaque tokens issued (not the raw API_SECRET)
+//   - Tokens expire after 1 hour; raw API_SECRET still works for direct use
+//   - Rate limiting on authorize (10 req/15 min) and token (20 req/15 min) endpoints
+//   - pendingCodes capped at 100 entries to prevent unbounded growth
+//   - CSP header on the login page
 
 // OAuth metadata discovery
 app.get('/.well-known/oauth-authorization-server', (req: Request, res: Response) => {
@@ -105,10 +157,10 @@ app.get('/.well-known/oauth-authorization-server', (req: Request, res: Response)
     issuer: base,
     authorization_endpoint: `${base}/oauth/authorize`,
     token_endpoint: `${base}/oauth/token`,
-    token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic', 'none'],
+    token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
     grant_types_supported: ['authorization_code'],
     response_types_supported: ['code'],
-    code_challenge_methods_supported: ['S256', 'plain'],
+    code_challenge_methods_supported: ['S256'],
   });
 });
 
@@ -116,11 +168,18 @@ app.get('/.well-known/oauth-authorization-server', (req: Request, res: Response)
 app.get('/oauth/authorize', (req: Request, res: Response) => {
   const { response_type, client_id, redirect_uri, state, code_challenge, code_challenge_method } = req.query as Record<string, string>;
 
+  // Validate redirect_uri against allowlist BEFORE showing any UI
+  if (!redirect_uri || !ALLOWED_REDIRECT_URIS.has(redirect_uri)) {
+    res.status(400).send('invalid_redirect_uri');
+    return;
+  }
+
   if (response_type !== 'code') {
     res.status(400).send('unsupported_response_type');
     return;
   }
 
+  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'");
   res.send(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -141,10 +200,8 @@ app.get('/oauth/authorize', (req: Request, res: Response) => {
                            border-radius: 8px; font-size: 15px; outline: none; }
     input[type=password]:focus { border-color: #1a202c; box-shadow: 0 0 0 3px rgba(26,32,44,.1); }
     button { margin-top: 20px; width: 100%; padding: 12px; background: #1a202c; color: #fff;
-             border: none; border-radius: 8px; font-size: 15px; font-weight: 600;
-             cursor: pointer; }
+             border: none; border-radius: 8px; font-size: 15px; font-weight: 600; cursor: pointer; }
     button:hover { background: #2d3748; }
-    .error { margin-top: 12px; color: #e53e3e; font-size: 13px; display: none; }
   </style>
 </head>
 <body>
@@ -153,10 +210,10 @@ app.get('/oauth/authorize', (req: Request, res: Response) => {
     <p>Enter your API secret to authorize Claude to manage your backorder notification templates.</p>
     <form method="POST" action="/oauth/authorize">
       <input type="hidden" name="client_id"             value="${escapeHtml(client_id ?? '')}">
-      <input type="hidden" name="redirect_uri"          value="${escapeHtml(redirect_uri ?? '')}">
+      <input type="hidden" name="redirect_uri"          value="${escapeHtml(redirect_uri)}">
       <input type="hidden" name="state"                 value="${escapeHtml(state ?? '')}">
       <input type="hidden" name="code_challenge"        value="${escapeHtml(code_challenge ?? '')}">
-      <input type="hidden" name="code_challenge_method" value="${escapeHtml(code_challenge_method ?? 'plain')}">
+      <input type="hidden" name="code_challenge_method" value="${escapeHtml(code_challenge_method ?? 'S256')}">
       <label for="api_secret">API Secret</label>
       <input type="password" id="api_secret" name="api_secret" placeholder="Enter your API secret" autofocus required>
       <button type="submit">Authorize</button>
@@ -170,8 +227,16 @@ app.get('/oauth/authorize', (req: Request, res: Response) => {
 app.post('/oauth/authorize', express.urlencoded({ extended: false }), (req: Request, res: Response) => {
   const { client_id, redirect_uri, state, code_challenge, code_challenge_method, api_secret } = req.body as Record<string, string>;
 
-  if (!redirect_uri) {
-    res.status(400).send('missing redirect_uri');
+  // Validate redirect_uri against allowlist — checked again on POST to prevent tampering
+  if (!redirect_uri || !ALLOWED_REDIRECT_URIS.has(redirect_uri)) {
+    res.status(400).send('invalid_redirect_uri');
+    return;
+  }
+
+  // Rate limit: 10 attempts per IP per 15 minutes
+  if (isRateLimited(req.ip ?? 'unknown', 10, 15 * 60 * 1000)) {
+    logger.warn('oauth.authorize.rate_limited', { ip: req.ip });
+    res.status(429).send('Too many requests. Please try again later.');
     return;
   }
 
@@ -182,7 +247,7 @@ app.post('/oauth/authorize', express.urlencoded({ extended: false }), (req: Requ
 
   if (!isValid) {
     logger.warn('oauth.authorize.invalid_secret', { ip: req.ip });
-    // Redirect back with error so Claude Desktop gets a proper response
+    // redirect_uri is already allowlist-validated above — safe to redirect to it
     const url = new URL(redirect_uri);
     url.searchParams.set('error', 'access_denied');
     if (state) url.searchParams.set('state', state);
@@ -190,11 +255,16 @@ app.post('/oauth/authorize', express.urlencoded({ extended: false }), (req: Requ
     return;
   }
 
+  // Cap store size to prevent unbounded growth from rapid fire requests
+  if (pendingCodes.size >= 100) {
+    // Evict the oldest entry (first inserted)
+    pendingCodes.delete(pendingCodes.keys().next().value as string);
+  }
+
   // Generate one-time auth code (expires in 5 minutes)
   const code = crypto.randomBytes(32).toString('hex');
   pendingCodes.set(code, {
     codeChallenge: code_challenge ?? '',
-    codeChallengeMethod: code_challenge_method ?? 'plain',
     redirectUri: redirect_uri,
     expiresAt: Date.now() + 5 * 60 * 1000,
   });
@@ -207,9 +277,16 @@ app.post('/oauth/authorize', express.urlencoded({ extended: false }), (req: Requ
   res.redirect(url.toString());
 });
 
-// Token endpoint — exchanges auth code for access token
+// Token endpoint — exchanges auth code for a short-lived opaque access token
 app.post('/oauth/token', express.urlencoded({ extended: false }), (req: Request, res: Response) => {
   const { grant_type, code, code_verifier, redirect_uri } = req.body as Record<string, string>;
+
+  // Rate limit: 20 attempts per IP per 15 minutes
+  if (isRateLimited(req.ip ?? 'unknown', 20, 15 * 60 * 1000)) {
+    logger.warn('oauth.token.rate_limited', { ip: req.ip });
+    res.status(429).json({ error: 'slow_down' });
+    return;
+  }
 
   if (grant_type !== 'authorization_code') {
     res.status(400).json({ error: 'unsupported_grant_type' });
@@ -218,28 +295,25 @@ app.post('/oauth/token', express.urlencoded({ extended: false }), (req: Request,
 
   const pending = pendingCodes.get(code);
 
-  if (!pending) {
+  if (!pending || Date.now() > pending.expiresAt) {
+    pendingCodes.delete(code);
     res.status(400).json({ error: 'invalid_grant', error_description: 'Unknown or expired code' });
     return;
   }
 
-  if (Date.now() > pending.expiresAt) {
-    pendingCodes.delete(code);
-    res.status(400).json({ error: 'invalid_grant', error_description: 'Code expired' });
-    return;
-  }
-
-  if (pending.redirectUri !== redirect_uri) {
+  // redirect_uri must match what was used during authorization
+  if (!redirect_uri || !ALLOWED_REDIRECT_URIS.has(redirect_uri) || pending.redirectUri !== redirect_uri) {
     res.status(400).json({ error: 'invalid_grant', error_description: 'redirect_uri mismatch' });
     return;
   }
 
-  // Verify PKCE code_verifier if a code_challenge was sent
+  // Require S256 PKCE — plain is not accepted
   if (pending.codeChallenge) {
-    let computed = code_verifier ?? '';
-    if (pending.codeChallengeMethod === 'S256') {
-      computed = crypto.createHash('sha256').update(code_verifier ?? '').digest('base64url');
+    if (!code_verifier) {
+      res.status(400).json({ error: 'invalid_grant', error_description: 'code_verifier required' });
+      return;
     }
+    const computed = crypto.createHash('sha256').update(code_verifier).digest('base64url');
     if (computed !== pending.codeChallenge) {
       res.status(400).json({ error: 'invalid_grant', error_description: 'PKCE verification failed' });
       return;
@@ -247,12 +321,18 @@ app.post('/oauth/token', express.urlencoded({ extended: false }), (req: Request,
   }
 
   pendingCodes.delete(code); // single-use
+
+  // Issue a short-lived opaque token (not the raw API_SECRET)
+  const accessToken = crypto.randomBytes(32).toString('hex');
+  const expiresIn = 3600; // 1 hour
+  issuedTokens.set(accessToken, Date.now() + expiresIn * 1000);
+
   logger.info('oauth.token.issued', { ip: req.ip });
 
   res.json({
-    access_token: config.apiSecret,
+    access_token: accessToken,
     token_type: 'Bearer',
-    expires_in: 86400,
+    expires_in: expiresIn,
   });
 });
 
@@ -367,13 +447,21 @@ const STYLE_STRING_KEYS = ['brandName', 'signOff', 'footerText'] as const;
 const MSG_STRING_KEYS_PARTIAL = ['subject', 'intro', 'optionsTitle', 'closing'] as const;
 const MSG_STRING_KEYS_ALL = ['subject', 'intro', 'waitMessage', 'cancelMessage', 'closing'] as const;
 
-app.get('/api/template', requireApiKey, (_req: Request, res: Response) => {
-  res.json(getTemplateConfig());
+// Resolve tenant key from PA Core injected headers (org-scoped preferred, then user-scoped, then default)
+function resolveTenantKey(req: Request): string {
+  const orgId  = req.headers['x-org-id']  as string | undefined;
+  const userId = req.headers['x-user-id'] as string | undefined;
+  return orgId ? `org-${orgId}` : userId ? `user-${userId}` : 'default';
+}
+
+app.get('/api/template', requireApiKey, (req: Request, res: Response) => {
+  res.json(getTemplateConfig(resolveTenantKey(req)));
 });
 
 app.put('/api/template', requireApiKey, (req: Request, res: Response) => {
+  const tenantKey = resolveTenantKey(req);
   const body = req.body as Record<string, unknown>;
-  const current = getTemplateConfig();
+  const current = getTemplateConfig(tenantKey);
 
   // ── Validate and merge style ──────────────────────────────────────────────
   const mergedStyle = { ...(current.style ?? {}) };
@@ -537,8 +625,8 @@ app.put('/api/template', requireApiKey, (req: Request, res: Response) => {
     html: Object.keys(mergedHtml).length > 0 ? mergedHtml : undefined,
   };
 
-  setTemplateConfig(merged);
-  logger.info('template.updated', merged as unknown as Record<string, unknown>);
+  setTemplateConfig(tenantKey, merged);
+  logger.info('template.updated', { tenantKey, ...merged as unknown as Record<string, unknown> });
   res.json(merged);
 });
 

@@ -1,5 +1,7 @@
 import express, { Request, Response, NextFunction } from 'express';
 import { createServer, Server } from 'http';
+import path from 'path';
+import fs from 'fs';
 import { WebSocketServer, WebSocket } from 'ws';
 import jwt from 'jsonwebtoken';
 import { Pool } from 'pg';
@@ -9,11 +11,16 @@ import { MCPRegistry, CredentialManager, CredentialScope } from '../mcp';
 import { MCPClient } from '../mcp';
 import { WorkflowManager, WorkflowExecutor, WorkflowBuilder } from '../workflow';
 import { OrgManager } from '../organizations/org-manager';
+import { Router } from 'express';
 import { SkillRegistry } from '../skills/skill-registry';
+import { SkillTemplateRegistry } from '../skills/skill-template-registry';
+import { MCPGateway } from '../mcp/mcp-gateway';
 import { SkillDispatcher } from '../skills/skill-dispatcher';
 import { WebhookTriggerHandler } from '../triggers/webhook-trigger';
 import { BillingManager, PlanLimitError } from '../billing';
-import { BillingScope, MCPServer, PlanTier, WebhookVerification } from '@pacore/core';
+import { AdapterRegistry } from '../integrations/adapter-registry';
+import { isWebhookSourceAdapter } from '../integrations/slot-adapter';
+import { BillingScope, MCPServer, PlanTier, UserSkillConfig, WebhookVerification } from '@pacore/core';
 
 export interface GatewayConfig {
   port: number;
@@ -28,8 +35,15 @@ export interface GatewayConfig {
   orgManager: OrgManager;
   skillRegistry: SkillRegistry;
   skillDispatcher: SkillDispatcher;
+  skillTemplateRegistry?: SkillTemplateRegistry;
   webhookTriggerHandler: WebhookTriggerHandler;
   billingManager?: BillingManager;
+  adapterRegistry?: AdapterRegistry;
+  // Internal MCP sub-routers (mounted at /internal/mcp/*)
+  shopifyMcpRouter?: Router;
+  gorgiasMcpRouter?: Router;
+  zendeskMcpRouter?: Router;
+  skillsMcpRouter?: Router;
 }
 
 interface AuthenticatedRequest extends Request {
@@ -88,11 +102,12 @@ export class APIGateway {
     res: Response,
     next: NextFunction,
   ): any {
-    // Skip auth for health check, auth routes, and webhook triggers
+    // Skip auth for health check, auth routes, webhook triggers, and static assets
     if (
       req.path === '/health' ||
       req.path.startsWith('/v1/auth/') ||
-      req.path.startsWith('/v1/triggers/webhook/')
+      req.path.startsWith('/v1/triggers/webhook/') ||
+      !req.path.startsWith('/v1') && !req.path.startsWith('/internal')
     ) {
       return next();
     }
@@ -149,6 +164,17 @@ export class APIGateway {
       db: this.config.db,
     });
     this.app.use('/v1/auth', authRoutes);
+
+    // -------------------------------------------------------------------------
+    // MCP Gateway — multi-tenant aggregated tool endpoint for AI clients
+    // -------------------------------------------------------------------------
+    const mcpGateway = new MCPGateway({
+      mcpRegistry: this.config.mcpRegistry,
+      credentialManager: this.config.credentialManager,
+      skillRegistry: this.config.skillRegistry,
+      orgManager: this.config.orgManager,
+    });
+    this.app.use('/v1/mcp', mcpGateway.getRouter());
 
     // -------------------------------------------------------------------------
     // Webhook trigger (unauthenticated — token in path is the identity)
@@ -1356,6 +1382,13 @@ export class APIGateway {
           }
         }
 
+        // Reuse any existing pending record for this user+skill to avoid accumulating orphans
+        const existing = await this.config.skillRegistry.findPendingSkill(userId, req.params.skillId);
+        if (existing) {
+          res.json(existing);
+          return;
+        }
+
         const userSkill = await this.config.skillRegistry.activateSkill(
           { type: 'user', userId },
           req.params.skillId
@@ -1377,12 +1410,26 @@ export class APIGateway {
       }
     });
 
+    // Get a single personal skill (for config page pre-population on refresh)
+    this.app.get('/v1/me/skills/:userSkillId', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const skill = await this.config.skillRegistry.getUserSkill(req.params.userSkillId);
+        if (!skill) return res.status(404).json({ error: 'Skill not found' });
+        res.json(skill);
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
     // Configure a personal skill
     this.app.put('/v1/me/skills/:userSkillId/configure', async (req: AuthenticatedRequest, res: Response) => {
       try {
+        const { status, ...configuration } = req.body;
+        const activate = status === 'active';
         const updated = await this.config.skillRegistry.configureSkill(
           req.params.userSkillId,
-          req.body
+          configuration,
+          activate
         );
         res.json(updated);
       } catch (error: any) {
@@ -1404,13 +1451,33 @@ export class APIGateway {
     // Create a webhook trigger for a personal skill
     this.app.post('/v1/me/skills/:userSkillId/triggers', async (req: AuthenticatedRequest, res: Response) => {
       try {
-        const trigger = await this.config.skillRegistry.createWebhookTrigger(
-          req.params.userSkillId,
+        const { userSkillId } = req.params;
+        const userId = req.user!.id;
+
+        let trigger = await this.config.skillRegistry.createWebhookTrigger(
+          userSkillId,
           req.body.verification
         );
+
+        // Auto-register webhook with the source platform (e.g. Shopify) if possible
+        trigger = await this.autoRegisterWebhook(trigger, userSkillId, { type: 'user', userId });
+
         res.status(201).json(trigger);
       } catch (error: any) {
         console.error('Create trigger error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Delete a webhook trigger for a personal skill (deregisters from source platform)
+    this.app.delete('/v1/me/skills/:userSkillId/triggers/:triggerId', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { userSkillId, triggerId } = req.params;
+        const userId = req.user!.id;
+        await this.deregisterAndDeleteTrigger(triggerId, userSkillId, { type: 'user', userId });
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error('Delete trigger error:', error);
         res.status(500).json({ error: error.message });
       }
     });
@@ -1445,6 +1512,295 @@ export class APIGateway {
         await this.config.skillRegistry.deleteUserSkill(req.params.userSkillId);
         res.json({ success: true });
       } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // -------------------------------------------------------------------------
+    // Skill Template Registry endpoints
+    // -------------------------------------------------------------------------
+
+    // Internal MCP sub-routers (credentials resolved per-request via headers)
+    if (this.config.shopifyMcpRouter) {
+      this.app.use('/internal/mcp/shopify', this.config.shopifyMcpRouter);
+    }
+    if (this.config.gorgiasMcpRouter) {
+      this.app.use('/internal/mcp/gorgias', this.config.gorgiasMcpRouter);
+    }
+    if (this.config.zendeskMcpRouter) {
+      this.app.use('/internal/mcp/zendesk', this.config.zendeskMcpRouter);
+    }
+    if (this.config.skillsMcpRouter) {
+      this.app.use('/internal/mcp/skills', this.config.skillsMcpRouter);
+    }
+
+    // List all SkillTypes with template counts
+    this.app.get('/v1/skill-types', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        if (!this.config.skillTemplateRegistry) return res.json([]);
+        const types = this.config.skillTemplateRegistry.getSkillTypes().map(type => ({
+          ...type,
+          templateCount: this.config.skillTemplateRegistry!.getTemplatesForType(type.id).length,
+          templateNames: this.config.skillTemplateRegistry!.getTemplatesForType(type.id).map(t => t.name),
+        }));
+        res.json(types);
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // List SkillTemplates for a skill type
+    this.app.get('/v1/skill-types/:typeId/templates', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        if (!this.config.skillTemplateRegistry) return res.json([]);
+        const { typeId } = req.params;
+        const skillType = this.config.skillTemplateRegistry.getSkillType(typeId);
+        if (!skillType) return res.status(404).json({ error: 'Skill type not found' });
+        const templates = this.config.skillTemplateRegistry.getTemplatesForType(typeId).map(t => ({
+          id: t.id,
+          skillTypeId: t.skillTypeId,
+          name: t.name,
+          version: t.version,
+          author: t.author,
+          price: t.price,
+          slots: t.slots,
+          editableFields: t.editableFields,
+          // compiledPolicy and enrichmentSpec are not exposed to end users
+        }));
+        res.json(templates);
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Vote/request a template combo
+    this.app.post('/v1/skill-types/:typeId/template-requests', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { typeId } = req.params;
+        const { integrationCombo, description } = req.body as { integrationCombo: string; description?: string };
+        if (!integrationCombo) return res.status(400).json({ error: 'integrationCombo is required' });
+
+        await this.config.db.query(
+          `INSERT INTO skill_template_requests (skill_type_id, integration_combo, description, vote_count)
+           VALUES ($1, $2, $3, 1)
+           ON CONFLICT (skill_type_id, integration_combo)
+           DO UPDATE SET vote_count = skill_template_requests.vote_count + 1`,
+          [typeId, integrationCombo, description ?? '']
+        );
+        res.json({ success: true });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // ---- Integration Connections ----
+
+    // Credential fields + setup guide for a given integrationKey.
+    // Used by ConnectionPicker to dynamically render the credential form.
+    // No auth required — field schemas are not sensitive.
+    this.app.get('/v1/integrations/:key/fields', (req: Request, res: Response) => {
+      const { key } = req.params;
+      const adapterRegistry = this.config.adapterRegistry;
+      if (!adapterRegistry) {
+        return res.status(503).json({ error: 'AdapterRegistry not configured' });
+      }
+      const meta = adapterRegistry.getCredentialFields(key);
+      if (!meta) {
+        return res.status(404).json({ error: `No adapter registered for integration '${key}'` });
+      }
+      res.json(meta);
+    });
+
+    // List user's integration connections
+    this.app.get('/v1/me/connections', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const result = await this.config.db.query(
+          `SELECT id, integration_key, display_name, status, last_tested_at, created_at
+           FROM integration_connections WHERE user_id = $1 ORDER BY created_at DESC`,
+          [userId]
+        );
+        res.json(result.rows.map(r => ({
+          id: r.id,
+          integrationKey: r.integration_key,
+          displayName: r.display_name,
+          status: r.status,
+          lastTestedAt: r.last_tested_at,
+          createdAt: r.created_at,
+        })));
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Create a new integration connection (test → save pattern)
+    this.app.post('/v1/me/connections', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const { integrationKey, displayName, credentials } = req.body as {
+          integrationKey: string;
+          displayName: string;
+          credentials: Record<string, unknown>;
+        };
+
+        if (!integrationKey || !displayName || !credentials) {
+          return res.status(400).json({ error: 'integrationKey, displayName, and credentials are required' });
+        }
+
+        // Test credentials before saving — delegates to adapter if registered
+        await testIntegrationCredentials(integrationKey, credentials, this.config.adapterRegistry);
+
+        // Create connection record
+        const { v4: uuidv4 } = await import('uuid');
+        const connectionId = uuidv4();
+
+        await this.config.db.query(
+          `INSERT INTO integration_connections (id, user_id, integration_key, display_name, status, last_tested_at)
+           VALUES ($1, $2, $3, $4, 'active', NOW())`,
+          [connectionId, userId, integrationKey, displayName]
+        );
+
+        // Store credentials in CredentialManager keyed by connection UUID
+        await this.config.credentialManager.storeCredentials(
+          { type: 'user', userId },
+          connectionId,
+          credentials as any
+        );
+
+        res.status(201).json({ connectionId, displayName, status: 'active' });
+      } catch (error: any) {
+        console.error('Create connection error:', error);
+        res.status(400).json({ error: error.message });
+      }
+    });
+
+    // Delete an integration connection
+    this.app.delete('/v1/me/connections/:id', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const { id } = req.params;
+
+        await this.config.db.query(
+          `DELETE FROM integration_connections WHERE id = $1 AND user_id = $2`,
+          [id, userId]
+        );
+        await this.config.credentialManager.deleteCredentials({ type: 'user', userId }, id);
+        res.json({ success: true });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // ---- Skill template management ----
+
+    // Get namedTemplates for a user skill (for editing)
+    this.app.get('/v1/me/skills/:id/templates', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userSkill = await this.config.skillRegistry.getUserSkill(req.params.id);
+        if (!userSkill) return res.status(404).json({ error: 'Skill not found' });
+        const config = userSkill.configuration as any;
+        res.json(config.namedTemplates ?? {});
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Update namedTemplates for a user skill
+    this.app.put('/v1/me/skills/:id/templates', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userSkill = await this.config.skillRegistry.getUserSkill(req.params.id);
+        if (!userSkill) return res.status(404).json({ error: 'Skill not found' });
+        const config = userSkill.configuration as Record<string, unknown>;
+        const updated = { ...config, namedTemplates: req.body };
+        await this.config.skillRegistry.configureSkill(req.params.id, updated);
+        res.json({ success: true });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Test event (dry run) for a skill
+    this.app.post('/v1/me/skills/:id/test-event', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const userSkill = await this.config.skillRegistry.getUserSkill(req.params.id);
+        if (!userSkill) return res.status(404).json({ error: 'Skill not found' });
+
+        const config = userSkill.configuration as any;
+        if (!config.templateId || !this.config.skillTemplateRegistry) {
+          return res.status(400).json({ error: 'Skill is not configured with a template' });
+        }
+
+        const { runBackorderDetectionV2 } = await import('../chains/backorder-detection');
+
+        // Use caller-supplied orderId, or auto-discover the most recent order from the store
+        let testOrderId: number | undefined = req.body?.mockOrderId as number | undefined;
+        if (!testOrderId) {
+          testOrderId = (await this.fetchMostRecentShopifyOrderId(config, userId)) ?? undefined;
+        }
+
+        if (testOrderId) {
+          // Real order found — run against it
+          const result = await runBackorderDetectionV2(
+            testOrderId,
+            config,
+            userId,
+            {
+              credentialManager: this.config.credentialManager,
+              skillTemplateRegistry: this.config.skillTemplateRegistry,
+              adapterRegistry: this.config.adapterRegistry!,
+            },
+            { dryRun: true }
+          );
+          res.json({ orderId: testOrderId, ...(result.dryRun ?? { wouldSkip: true }) });
+        } else {
+          // No real orders — fall back to fully synthetic preview using the configured template
+          const { renderTemplate, renderSubject } = await import('../skills/backorder-templates');
+          const template = this.config.skillTemplateRegistry!.getTemplate(config.templateId);
+          if (!template) return res.status(400).json({ error: `Template not found: ${config.templateId}` });
+
+          const stored = config.namedTemplates;
+          const namedTemplates = (stored && Object.keys(stored).length > 0) ? stored : template.defaultTemplates;
+          const invokeAction = template.compiledPolicy?.actions?.find((a: any) => a.type === 'invoke' && a.templateKey);
+          const templateKey = invokeAction?.templateKey ?? Object.keys(namedTemplates)[0];
+          const msgTemplate = namedTemplates[templateKey];
+          if (!msgTemplate) return res.status(400).json({ error: 'No message template found in skill configuration' });
+
+          const syntheticCtx = {
+            orderId: 99999,
+            orderNumber: 9001,
+            customerEmail: 'test.customer@example.com',
+            customerName: 'Test Customer',
+            orderTotal: 149.99,
+            backorderedItems: [{
+              title: 'Sample Product (Blue / L)',
+              sku: 'SAMPLE-BLU-L',
+              orderedQty: 2,
+              availableQty: 0,
+              backorderedQty: 2,
+              variantId: '0',
+            }],
+            allItemsBackordered: true,
+            someItemsBackordered: true,
+            threshold: 0,
+          };
+
+          const branding = {
+            companyName: (config.fieldOverrides?.['companyName'] as string) || '',
+            logoUrl:     (config.fieldOverrides?.['logoUrl']     as string) || '',
+            signature:   (config.fieldOverrides?.['signature']   as string) || '',
+          };
+          const subject = renderSubject(msgTemplate.subject, syntheticCtx as any);
+          const message = renderTemplate(msgTemplate, { ...syntheticCtx, ...branding } as any);
+
+          res.json({
+            synthetic: true,
+            note: 'No orders found in your Shopify store — showing a preview using sample data.',
+            wouldCreateTicket: { subject, message, priority: invokeAction?.params?.priority ?? 'normal' },
+          });
+        }
+      } catch (error: any) {
+        console.error('Test event error:', error);
         res.status(500).json({ error: error.message });
       }
     });
@@ -1489,12 +1845,26 @@ export class APIGateway {
       }
     });
 
+    // Get a single org skill (for config page pre-population on refresh)
+    this.app.get('/v1/organizations/:orgId/skills/:userSkillId', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { orgId, userSkillId } = req.params;
+        await this.config.orgManager.assertMember(orgId, req.user!.id);
+        const skill = await this.config.skillRegistry.getUserSkill(userSkillId);
+        if (!skill) return res.status(404).json({ error: 'Skill not found' });
+        res.json(skill);
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
     // Configure an org skill (admin only)
     this.app.put('/v1/organizations/:orgId/skills/:userSkillId/configure', async (req: AuthenticatedRequest, res: Response) => {
       try {
         const { orgId, userSkillId } = req.params;
         await this.config.orgManager.assertAdmin(orgId, req.user!.id);
-        const updated = await this.config.skillRegistry.configureSkill(userSkillId, req.body);
+        const { status, ...configuration } = req.body;
+        const updated = await this.config.skillRegistry.configureSkill(userSkillId, configuration, status === 'active');
         res.json(updated);
       } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -1518,12 +1888,26 @@ export class APIGateway {
       try {
         const { orgId, userSkillId } = req.params;
         await this.config.orgManager.assertAdmin(orgId, req.user!.id);
-        const trigger = await this.config.skillRegistry.createWebhookTrigger(
+        let trigger = await this.config.skillRegistry.createWebhookTrigger(
           userSkillId,
           req.body.verification
         );
+        trigger = await this.autoRegisterWebhook(trigger, userSkillId, { type: 'org', orgId });
         res.status(201).json(trigger);
       } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // Delete a webhook trigger for an org skill (deregisters from source platform)
+    this.app.delete('/v1/organizations/:orgId/skills/:userSkillId/triggers/:triggerId', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { orgId, userSkillId, triggerId } = req.params;
+        await this.config.orgManager.assertAdmin(orgId, req.user!.id);
+        await this.deregisterAndDeleteTrigger(triggerId, userSkillId, { type: 'org', orgId });
+        res.json({ success: true });
+      } catch (error: any) {
+        console.error('Delete org trigger error:', error);
         res.status(500).json({ error: error.message });
       }
     });
@@ -1716,6 +2100,18 @@ export class APIGateway {
         res.status(error.message.includes('Admin') ? 403 : 500).json({ error: error.message });
       }
     });
+
+    // -------------------------------------------------------------------------
+    // Static web frontend (SPA) — served only when the public/ dir exists
+    // -------------------------------------------------------------------------
+    const publicDir = path.join(process.cwd(), 'public');
+    if (fs.existsSync(publicDir)) {
+      this.app.use(express.static(publicDir));
+      // SPA fallback: any non-API path returns index.html
+      this.app.get(/^(?!\/v1|\/internal|\/health|\/ws).*/, (_req, res) => {
+        res.sendFile(path.join(publicDir, 'index.html'));
+      });
+    }
   }
 
   /** Convert a PlanLimitError into a structured HTTP 402 response. */
@@ -1829,6 +2225,166 @@ export class APIGateway {
     });
   }
 
+  /**
+   * Fetches the most recent Shopify order ID from the store connected to the skill's 'shopify' slot.
+   * Used by the test event endpoint when no explicit mockOrderId is provided.
+   * Returns null if credentials are unavailable or no orders exist.
+   */
+  private async fetchMostRecentShopifyOrderId(
+    config: UserSkillConfig,
+    userId: string
+  ): Promise<number | null> {
+    try {
+      const shopifyConnectionId = config.slotConnections?.['shopify'];
+      if (!shopifyConnectionId) return null;
+
+      const creds = await this.config.credentialManager.getCredentials(
+        { type: 'user', userId },
+        shopifyConnectionId
+      ) as Record<string, unknown> | null;
+      if (!creds) return null;
+
+      const storeDomain  = creds.storeDomain  as string;
+      const clientId     = creds.clientId     as string;
+      const clientSecret = creds.clientSecret as string;
+      if (!storeDomain || !clientSecret) return null;
+
+      // Get a fresh access token
+      const tokenRes = await fetch(`https://${storeDomain}/admin/oauth/access_token`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, grant_type: 'client_credentials' }),
+      });
+      if (!tokenRes.ok) return null;
+      const { access_token } = await tokenRes.json() as { access_token: string };
+
+      // Fetch the single most recent order (any status)
+      const ordersRes = await fetch(
+        `https://${storeDomain}/admin/api/2026-01/orders.json?limit=1&status=any&fields=id`,
+        { headers: { 'X-Shopify-Access-Token': access_token } }
+      );
+      if (!ordersRes.ok) return null;
+
+      const data = await ordersRes.json() as { orders: Array<{ id: number }> };
+      return data.orders[0]?.id ?? null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * After creating a trigger, finds any slots in the user skill's template that implement
+   * WebhookSourceAdapter and auto-registers the webhook with the source platform (e.g. Shopify).
+   * Also auto-configures HMAC verification using the platform's clientSecret.
+   * Returns the updated trigger (with externalWebhookId set if registration succeeded).
+   * Non-fatal: logs and continues if auto-registration fails (customer can configure manually).
+   */
+  private async autoRegisterWebhook(
+    trigger: import('@pacore/core').SkillTrigger,
+    userSkillId: string,
+    scope: CredentialScope
+  ): Promise<import('@pacore/core').SkillTrigger> {
+    const { skillRegistry, skillTemplateRegistry, adapterRegistry, credentialManager } = this.config;
+    if (!skillTemplateRegistry || !adapterRegistry) return trigger;
+
+    try {
+      const userSkill = await skillRegistry.getUserSkill(userSkillId);
+      if (!userSkill?.configuration) return trigger;
+
+      const config = userSkill.configuration as unknown as UserSkillConfig;
+      const template = skillTemplateRegistry.getTemplate(config.templateId);
+      if (!template) return trigger;
+
+      const webhookBaseUrl = process.env.WEBHOOK_BASE_URL?.replace(/\/$/, '') ?? '';
+      if (!webhookBaseUrl) {
+        console.warn('[autoRegisterWebhook] WEBHOOK_BASE_URL not set — skipping auto-registration');
+        return trigger;
+      }
+
+      const webhookUrl = `${webhookBaseUrl}/v1/triggers/webhook/${trigger.endpointToken}`;
+
+      for (const slot of template.slots) {
+        const adapter = adapterRegistry.getAdapter(slot.integrationKey);
+        if (!adapter || !isWebhookSourceAdapter(adapter)) continue;
+
+        const topic = adapter.webhookTopics[template.skillTypeId];
+        if (!topic) continue;
+
+        const connectionId = config.slotConnections[slot.key];
+        if (!connectionId) continue;
+
+        const creds = await credentialManager.getCredentials(scope, connectionId);
+        if (!creds) continue;
+
+        const { externalWebhookId } = await adapter.registerWebhook(topic, webhookUrl, creds as Record<string, unknown>);
+        await skillRegistry.setTriggerExternalWebhookId(trigger.id, externalWebhookId);
+
+        // Auto-configure HMAC verification using clientSecret (Shopify: secret is the app's clientSecret)
+        const clientSecret = (creds as Record<string, unknown>).clientSecret as string | undefined;
+        if (clientSecret) {
+          const verification: import('@pacore/core').WebhookVerification = {
+            type: 'hmac_sha256',
+            header: 'x-shopify-hmac-sha256',
+            secret: clientSecret,
+          };
+          await skillRegistry.updateTriggerVerification(trigger.id, verification);
+        }
+
+        console.log(`[autoRegisterWebhook] Registered ${slot.integrationKey} webhook GID=${externalWebhookId} for trigger ${trigger.id}`);
+        // Return updated trigger with externalWebhookId
+        return { ...trigger, externalWebhookId };
+      }
+    } catch (err: any) {
+      // Non-fatal: customer can register manually
+      console.warn(`[autoRegisterWebhook] Auto-registration failed for trigger ${trigger.id}: ${err.message}`);
+    }
+
+    return trigger;
+  }
+
+  /**
+   * Deregisters a webhook from the source platform (if auto-registered) then deletes the trigger row.
+   */
+  private async deregisterAndDeleteTrigger(
+    triggerId: string,
+    userSkillId: string,
+    scope: CredentialScope
+  ): Promise<void> {
+    const { skillRegistry, skillTemplateRegistry, adapterRegistry, credentialManager } = this.config;
+
+    const trigger = await skillRegistry.getTrigger(triggerId);
+    if (!trigger) return;
+
+    if (trigger.externalWebhookId && skillTemplateRegistry && adapterRegistry) {
+      try {
+        const userSkill = await skillRegistry.getUserSkill(userSkillId);
+        const config = userSkill?.configuration as unknown as UserSkillConfig | undefined;
+        const template = config?.templateId ? skillTemplateRegistry.getTemplate(config.templateId) : null;
+
+        if (template) {
+          for (const slot of template.slots) {
+            const adapter = adapterRegistry.getAdapter(slot.integrationKey);
+            if (!adapter || !isWebhookSourceAdapter(adapter)) continue;
+
+            const connectionId = config!.slotConnections[slot.key];
+            if (!connectionId) continue;
+
+            const creds = await credentialManager.getCredentials(scope, connectionId);
+            if (!creds) continue;
+
+            await adapter.deregisterWebhook(trigger.externalWebhookId, creds as Record<string, unknown>);
+            console.log(`[deregisterAndDeleteTrigger] Deregistered ${slot.integrationKey} webhook GID=${trigger.externalWebhookId}`);
+            break;
+          }
+        }
+      } catch (err: any) {
+        console.warn(`[deregisterAndDeleteTrigger] Deregistration failed for trigger ${triggerId}: ${err.message}`);
+      }
+    }
+
+    await skillRegistry.deleteTrigger(triggerId);
+  }
+
   start(): Promise<void> {
     return new Promise((resolve) => {
       this.server.listen(this.config.port, () => {
@@ -1848,3 +2404,17 @@ export class APIGateway {
     });
   }
 }
+
+/** Test integration credentials before saving. Throws a user-friendly error if auth fails. */
+async function testIntegrationCredentials(
+  integrationKey: string,
+  credentials: Record<string, unknown>,
+  adapterRegistry?: AdapterRegistry
+): Promise<void> {
+  const adapter = adapterRegistry?.getAdapter(integrationKey);
+  if (adapter) {
+    await adapter.testCredentials(credentials);
+  }
+  // Unknown integration — skip test, allow save
+}
+

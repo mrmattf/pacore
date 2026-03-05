@@ -1,222 +1,277 @@
-import { MCPRegistry } from '../mcp/mcp-registry';
-import { CredentialScope } from '../mcp/credential-manager';
-import { MCPClient } from '../mcp/mcp-client';
-import { PLATFORM_SERVER_IDS } from '../mcp/platform-servers';
+import crypto from 'crypto';
+import type { UserSkillConfig, AdapterAction } from '@pacore/core';
+import type {
+  BackorderPolicyEvalContext,
+  BackorderedItemContext,
+} from './backorder-types';
+import { CredentialManager } from '../mcp/credential-manager';
+import { ShopifyOrderAdapter } from '../integrations/shopify/shopify-order-adapter';
+import { AdapterRegistry } from '../integrations/adapter-registry';
+import { evaluatePolicy, runEnrichmentSteps, MCPToolCaller } from '../skills/logic-compiler';
+import { renderTemplate, renderSubject } from '../skills/backorder-templates';
+import { SkillTemplateRegistry } from '../skills/skill-template-registry';
 
-export interface BackorderDetectionConfig {
-  scope: CredentialScope;            // user or org running this skill
-  shopifyDomain: string;
-  shopifyClientId: string;
-  shopifyClientSecret: string;
-  gorgiasApiKey: string;
-  gorgiasEmail: string;              // Gorgias account email for Basic Auth
-  gorgiasFromEmail?: string;         // optional sender email for tickets
-  notificationToolName: string;      // e.g. 'gorgias.create_ticket'
-  inventoryThreshold: number;        // default 0 (negative = backordered)
-  subjectTemplate: string;           // e.g. 'Order #{orderNumber} — Backorder Update'
+export interface BackorderChainDeps {
+  credentialManager: CredentialManager;
+  skillTemplateRegistry: SkillTemplateRegistry;
+  adapterRegistry: AdapterRegistry;
 }
 
-export interface BackorderedItem {
-  title: string;
-  sku: string;
-  orderedQty: number;
-  availableQty: number;
-  backorderedQty: number;
-}
-
-export interface BackorderDetectionResult {
+export interface BackorderChainResult {
   orderId: number;
   orderNumber: number;
   hasBackorders: boolean;
-  backorderedItems: BackorderedItem[];
-  notificationSent: boolean;
-  notificationResult?: unknown;
+  backorderedCount: number;
+  actions: string[];
+  invokeResults: unknown[];
+  dryRun?: {
+    wouldCreateTicket?: { subject: string; message: string; priority: string };
+    wouldSkip?: boolean;
+  };
 }
 
 /**
- * Backorder Detection tool chain — platform implementation.
+ * Verifies Shopify HMAC webhook signature.
+ * MUST be called before any processing. Throws if invalid.
  *
- * Uses the platform-hosted Shopify+Gorgias MCP server (registered at startup
- * from PLATFORM_MCP_SHOPIFY_GORGIAS_URL). Per-user credentials are injected
- * as custom headers on each request — the MCP server builds per-request clients
- * from those headers, so no user credentials are stored in the service itself.
- *
- * Steps:
- * 1. Build credential headers from config
- * 2. Fetch order via shopify.get_order MCP tool
- * 3. Check inventory for all line items
- * 4. Identify backordered items (available ≤ threshold)
- * 5. If backordered: call gorgias.create_ticket MCP tool
- * 6. Return structured result
+ * PLATFORM SECURITY REQUIREMENT: All Shopify webhooks must pass this check.
  */
-export async function runBackorderDetection(
+export function verifyShopifyWebhookHmac(
+  rawBody: Buffer,
+  hmacHeader: string,
+  clientSecret: string
+): void {
+  const computed = crypto
+    .createHmac('sha256', clientSecret)
+    .update(rawBody)
+    .digest('base64');
+
+  if (!crypto.timingSafeEqual(Buffer.from(computed), Buffer.from(hmacHeader))) {
+    throw new Error('Shopify webhook HMAC verification failed');
+  }
+}
+
+/**
+ * Backorder Detection tool chain — AdapterRegistry-based implementation.
+ *
+ * Execution path:
+ * 1. Verify Shopify HMAC signature (platform security requirement)
+ * 2. Resolve slot credentials from CredentialManager via connection IDs
+ * 3. Get order + check inventory via ShopifyOrderAdapter
+ * 4. Build BackorderPolicyEvalContext with backordered items
+ * 5. Run DataEnrichmentSpec steps (e.g., fetch ETA from metafields)
+ * 6. Evaluate CompiledPolicy → Action[]
+ * 7. Dispatch all invoke actions via AdapterRegistry (supports N notification targets)
+ *    — only 'skip' terminates the loop early
+ */
+export async function runBackorderDetectionV2(
   orderId: number,
-  config: BackorderDetectionConfig,
-  deps: { mcpRegistry: MCPRegistry }
-): Promise<BackorderDetectionResult> {
-  const { mcpRegistry } = deps;
+  userSkillConfig: UserSkillConfig,
+  userId: string,
+  deps: BackorderChainDeps,
+  options: { dryRun?: boolean; hmacHeader?: string; rawBody?: Buffer } = {}
+): Promise<BackorderChainResult> {
+  const { credentialManager, skillTemplateRegistry, adapterRegistry } = deps;
 
-  // ---- Resolve the platform MCP server ----
-  const platformServer = await mcpRegistry.getServer(PLATFORM_SERVER_IDS.shopifyGorgias);
-  if (!platformServer) {
-    throw new Error(
-      'Platform Shopify+Gorgias MCP server not registered. ' +
-      'Set PLATFORM_MCP_SHOPIFY_GORGIAS_URL in the cloud service environment.'
-    );
+  // ---- Resolve template ----
+  const template = skillTemplateRegistry.getTemplate(userSkillConfig.templateId);
+  if (!template) {
+    throw new Error(`SkillTemplate not found: ${userSkillConfig.templateId}`);
   }
 
-  // ---- Build credential headers injected into every MCP request ----
-  const customHeaders: Record<string, string> = {
-    'X-Shopify-Domain': config.shopifyDomain,
-    'X-Shopify-Client-Id': config.shopifyClientId,
-    'X-Shopify-Client-Secret': config.shopifyClientSecret,
-    'X-Gorgias-Api-Key': config.gorgiasApiKey,
-    'X-Gorgias-Email': config.gorgiasEmail,
-  };
-  if (config.gorgiasFromEmail) {
-    customHeaders['X-Gorgias-From-Email'] = config.gorgiasFromEmail;
+  // ---- Resolve Shopify credentials ----
+  const shopifyConnectionId = userSkillConfig.slotConnections['shopify'];
+  if (!shopifyConnectionId) {
+    throw new Error('No Shopify connection configured for this skill');
   }
 
-  const mcpClient = new MCPClient(platformServer, { customHeaders });
-
-  // ---- Step 1: Fetch order ----
-  const orderResult = await mcpClient.callTool({
-    serverId: platformServer.id,
-    toolName: 'shopify.get_order',
-    parameters: { order_id: orderId },
-  });
-
-  if (!orderResult.success || !orderResult.data) {
-    throw new Error(`Failed to fetch order ${orderId}: ${orderResult.error}`);
+  const shopifyCreds = await credentialManager.getCredentials(
+    { type: 'user', userId },
+    shopifyConnectionId
+  );
+  if (!shopifyCreds) {
+    throw new Error(`No credentials found for Shopify connection: ${shopifyConnectionId}`);
   }
 
-  const order = orderResult.data as {
-    id: number;
-    order_number: number;
-    email: string;
-    customer?: { first_name: string | null; last_name: string | null };
-    line_items: Array<{
-      title: string;
-      sku: string;
-      quantity: number;
-      variant_id: number;
-    }>;
-  };
+  // ---- HMAC verification (platform security requirement) ----
+  if (options.hmacHeader && options.rawBody) {
+    const clientSecret = shopifyCreds.clientSecret as string;
+    if (!clientSecret) {
+      throw new Error('Shopify clientSecret missing from credentials — cannot verify webhook');
+    }
+    verifyShopifyWebhookHmac(options.rawBody, options.hmacHeader, clientSecret);
+  }
 
-  const result: BackorderDetectionResult = {
-    orderId: order.id,
-    orderNumber: order.order_number,
-    hasBackorders: false,
-    backorderedItems: [],
-    notificationSent: false,
-  };
+  const shopifyCredsMap = shopifyCreds as unknown as Record<string, unknown>;
 
-  // ---- Step 2: Check inventory for each line item ----
-  const inventoryMap = new Map<number, number>();
+  // ---- Fetch order + inventory ----
+  const shopifyAdapter = new ShopifyOrderAdapter();
+  const order = await shopifyAdapter.getOrder(orderId, shopifyCredsMap);
 
-  for (const item of order.line_items) {
-    if (item.variant_id == null) continue;
+  const threshold = (userSkillConfig.fieldOverrides['threshold'] as number) ?? 0;
+  const variantIds = order.lineItems.map(li => li.variantId).filter(Boolean);
+  const inventoryResults = await shopifyAdapter.checkInventory(variantIds, shopifyCredsMap);
 
-    const invResult = await mcpClient.callTool({
-      serverId: platformServer.id,
-      toolName: 'shopify.check_inventory',
-      parameters: { variant_id: item.variant_id },
+  const inventoryMap = new Map(inventoryResults.map(r => [r.variantId, r.available]));
+
+  // ---- Build backordered items list ----
+  const backorderedItems: BackorderedItemContext[] = order.lineItems
+    .filter(li => {
+      const available = inventoryMap.get(li.variantId) ?? 0;
+      return available <= threshold;
+    })
+    .map(li => {
+      const available = Math.max(0, inventoryMap.get(li.variantId) ?? 0);
+      return {
+        title:          li.title,
+        sku:            li.sku,
+        orderedQty:     li.quantity,
+        availableQty:   available,
+        backorderedQty: Math.max(0, li.quantity - available),
+        variantId:      li.variantId,
+      };
     });
 
-    if (invResult.success && invResult.data != null) {
-      inventoryMap.set(item.variant_id, (invResult.data as { available: number }).available);
-    } else {
-      inventoryMap.set(item.variant_id, 0);
-    }
-  }
+  const result: BackorderChainResult = {
+    orderId:          order.id,
+    orderNumber:      order.orderNumber,
+    hasBackorders:    backorderedItems.length > 0,
+    backorderedCount: backorderedItems.length,
+    actions:          [],
+    invokeResults:    [],
+  };
 
-  // ---- Step 3: Identify backordered items ----
-  const backordered: BackorderedItem[] = [];
-
-  for (const item of order.line_items) {
-    const available = inventoryMap.get(item.variant_id) ?? 0;
-    if (available <= config.inventoryThreshold) {
-      backordered.push({
-        title: item.title,
-        sku: item.sku,
-        orderedQty: item.quantity,
-        availableQty: Math.max(0, available),
-        backorderedQty: Math.max(0, item.quantity - Math.max(0, available)),
-      });
-    }
-  }
-
-  if (backordered.length === 0) {
+  if (backorderedItems.length === 0) {
+    result.actions.push('skip');
     return result;
   }
 
-  result.hasBackorders = true;
-  result.backorderedItems = backordered;
+  const customerName = order.customer
+    ? [order.customer.firstName, order.customer.lastName].filter(Boolean).join(' ') || 'Valued Customer'
+    : 'Valued Customer';
 
-  // ---- Step 4: Send notification via Gorgias ----
-  try {
-    const subject = config.subjectTemplate.replace('{orderNumber}', String(order.order_number));
-    const customerName = order.customer
-      ? [order.customer.first_name, order.customer.last_name].filter(Boolean).join(' ') || 'Valued Customer'
-      : 'Valued Customer';
+  // ---- Build evaluation context ----
+  let ctx: BackorderPolicyEvalContext = {
+    orderId:              order.id,
+    orderNumber:          order.orderNumber,
+    customerEmail:        order.email,
+    customerName,
+    orderTotal:           parseFloat(order.totalPrice) || 0,
+    backorderedItems,
+    allItemsBackordered:  backorderedItems.length === order.lineItems.length,
+    someItemsBackordered: backorderedItems.length > 0,
+    threshold,
+  };
 
-    const notificationPayload = buildNotificationPayload(
-      subject,
-      customerName,
-      order.email,
-      order.order_number,
-      backordered
-    );
+  // ---- Run enrichment steps ----
+  // Enrichment tool calls route through AdapterRegistry for consistency.
+  const mcpCaller: MCPToolCaller = {
+    async callTool(tool, params) {
+      if (tool.startsWith('shopify__')) {
+        const capability = tool.replace('shopify__', '');
+        return adapterRegistry.invokeCapability('shopify', capability, params, shopifyCredsMap);
+      }
+      throw new Error(`Unknown enrichment tool: ${tool}`);
+    },
+  };
 
-    const notifResult = await mcpClient.callTool({
-      serverId: platformServer.id,
-      toolName: config.notificationToolName,
-      parameters: notificationPayload,
-    });
+  ctx = await runEnrichmentSteps(
+    template.enrichmentSpec,
+    ctx as any,
+    mcpCaller
+  ) as BackorderPolicyEvalContext;
 
-    result.notificationSent = true;
-    result.notificationResult = notifResult;
-  } catch (error) {
-    console.error('[BackorderDetection] Notification failed:', error);
-    // Don't re-throw — detection succeeded, notification is best-effort
-    result.notificationSent = false;
+  // ---- Evaluate policy ----
+  const actions = evaluatePolicy(template.compiledPolicy, ctx as any);
+
+  // ---- Dispatch actions ----
+  // ALL invoke actions execute. Only 'skip' terminates the loop early.
+  for (const action of actions) {
+    if (action.type === 'skip') {
+      result.actions.push('skip');
+      break;
+    }
+
+    if (action.type === 'escalate') {
+      console.warn(`[BackorderChain] escalate: ${action.message ?? '(no message)'}`);
+      result.actions.push('escalate');
+      continue;
+    }
+
+    if (action.type === 'invoke') {
+      const invokeAction = action as AdapterAction;
+
+      // Resolve the slot → integrationKey from the template definition
+      const slot = template.slots.find(s => s.key === invokeAction.targetSlot);
+      if (!slot) {
+        throw new Error(`No slot '${invokeAction.targetSlot}' defined in template '${template.id}'`);
+      }
+
+      const slotConnectionId = userSkillConfig.slotConnections[invokeAction.targetSlot];
+      if (!slotConnectionId) {
+        throw new Error(`No connection configured for slot '${invokeAction.targetSlot}'`);
+      }
+
+      const slotCreds = await credentialManager.getCredentials(
+        { type: 'user', userId },
+        slotConnectionId
+      );
+      if (!slotCreds) {
+        throw new Error(`No credentials for ${slot.integrationKey} connection: ${slotConnectionId}`);
+      }
+
+      // Build params — start with action.params, add context fields
+      let invokeParams: Record<string, unknown> = {
+        orderId:       String(ctx.orderId),
+        customerEmail: ctx.customerEmail,
+        customerName:  ctx.customerName,
+        tags:          ['backorder', 'automated'],
+        ...invokeAction.params,
+      };
+
+      // If templateKey is set, render subject+message and merge into params
+      if (invokeAction.templateKey) {
+        const stored = userSkillConfig.namedTemplates;
+        const namedTemplates = (stored && Object.keys(stored).length > 0) ? stored : template.defaultTemplates;
+        const msgTemplate = namedTemplates[invokeAction.templateKey];
+        if (!msgTemplate) {
+          throw new Error(`Message template not found: ${invokeAction.templateKey}`);
+        }
+
+        const branding = {
+          companyName: (userSkillConfig.fieldOverrides['companyName'] as string) || '',
+          logoUrl:     (userSkillConfig.fieldOverrides['logoUrl']     as string) || '',
+          signature:   (userSkillConfig.fieldOverrides['signature']   as string) || '',
+        };
+        const subject = renderSubject(msgTemplate.subject, ctx as any);
+        const message = renderTemplate(msgTemplate, { ...ctx, ...branding } as any);
+
+        if (options.dryRun) {
+          result.dryRun = {
+            wouldCreateTicket: {
+              subject,
+              message,
+              priority: String(invokeAction.params.priority ?? 'normal'),
+            },
+          };
+          result.actions.push('dry_run');
+          break;
+        }
+
+        invokeParams = { ...invokeParams, subject, message };
+      }
+
+      const invokeResult = await adapterRegistry.invokeCapability(
+        slot.integrationKey,
+        invokeAction.capability,
+        invokeParams,
+        slotCreds as unknown as Record<string, unknown>
+      );
+
+      result.actions.push(`${slot.integrationKey}:${invokeAction.capability}`);
+      result.invokeResults.push(invokeResult);
+    }
   }
 
   return result;
-}
-
-function buildNotificationPayload(
-  subject: string,
-  customerName: string,
-  customerEmail: string,
-  orderNumber: number,
-  backordered: BackorderedItem[]
-): Record<string, unknown> {
-  const bodyHtml = `
-<p>Hi ${customerName},</p>
-<p>Thank you for your order <strong>#${orderNumber}</strong>. Some items are temporarily out of stock:</p>
-<ul>
-  ${backordered.map(item => `
-    <li>
-      <strong>${item.title}</strong> — ordered ${item.orderedQty},
-      ${item.backorderedQty} unit(s) backordered
-      ${item.sku ? `(SKU: ${item.sku})` : ''}
-    </li>
-  `).join('')}
-</ul>
-<p>Please reply with your preference:</p>
-<p>
-  <strong>A</strong> — Ship available items now; send backordered items when ready (separate shipments)<br>
-  <strong>B</strong> — Wait until everything is in stock and ship together
-</p>
-<p>We apologize for the inconvenience and appreciate your patience.</p>
-`.trim();
-
-  return {
-    customer_email: customerEmail,
-    customer_name: customerName,
-    subject,
-    message: bodyHtml,
-    tags: ['backorder', 'automated'],
-  };
 }

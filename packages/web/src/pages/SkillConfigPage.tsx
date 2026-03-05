@@ -1,466 +1,433 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import {
-  CheckCircle,
-  ArrowLeft,
-  ArrowRight,
-  Copy,
-  Check,
-  Loader2,
-} from 'lucide-react';
-import { useSkills, SkillTrigger } from '../hooks/useSkills';
+import { ArrowLeft, CheckCircle, Copy, Check, Zap } from 'lucide-react';
+import { useAuthStore } from '../store/authStore';
+import { ConnectionPicker } from '../components/ConnectionPicker';
 
-// ─── JSON Schema helpers ──────────────────────────────────────────────────────
-
-interface SchemaProperty {
-  type: 'string' | 'number' | 'boolean';
-  title?: string;
-  description?: string;
-  format?: string;
-  default?: unknown;
-  'x-group'?: string;
-  'x-group-label'?: string;
-}
-
-interface ConfigSchema {
-  type: 'object';
-  properties?: Record<string, SchemaProperty>;
-  required?: string[];
-}
-
-interface WizardStep {
-  id: string;
+interface SkillSlot {
+  key: string;
   label: string;
-  fields: Array<{ key: string; schema: SchemaProperty; required: boolean }>;
-}
-
-/**
- * Build the ordered list of dynamic steps from configSchema.
- * One step per unique x-group value, in first-occurrence order.
- */
-function buildDynamicSteps(schema: ConfigSchema | undefined): WizardStep[] {
-  if (!schema?.properties) return [];
-
-  const groupOrder: string[] = [];
-  const groupLabel: Record<string, string> = {};
-  const groupFields: Record<string, WizardStep['fields']> = {};
-  const required = new Set(schema.required ?? []);
-
-  for (const [key, prop] of Object.entries(schema.properties)) {
-    const group = prop['x-group'];
-    if (!group) continue;
-
-    if (!groupOrder.includes(group)) {
-      groupOrder.push(group);
-      groupLabel[group] = prop['x-group-label'] ?? group;
-      groupFields[group] = [];
-    }
-
-    groupFields[group].push({ key, schema: prop, required: required.has(key) });
-  }
-
-  return groupOrder.map((g) => ({
-    id: g,
-    label: groupLabel[g],
-    fields: groupFields[g],
-  }));
-}
-
-// ─── Helper components ────────────────────────────────────────────────────────
-
-function StepIndicator({ current, steps }: { current: number; steps: Array<{ id: string; label: string }> }) {
-  return (
-    <ol className="flex items-center gap-1">
-      {steps.map((step, i) => (
-        <li key={step.id} className="flex items-center gap-1">
-          <span
-            className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold
-              ${i < current ? 'bg-blue-600 text-white' :
-                i === current ? 'border-2 border-blue-600 text-blue-600' :
-                'border border-gray-300 text-gray-400'}`}
-          >
-            {i < current ? <Check size={14} /> : i + 1}
-          </span>
-          <span
-            className={`text-xs hidden sm:block ${
-              i === current ? 'text-blue-600 font-medium' : 'text-gray-400'
-            }`}
-          >
-            {step.label}
-          </span>
-          {i < steps.length - 1 && (
-            <span className="w-6 h-px bg-gray-200 mx-1" />
-          )}
-        </li>
-      ))}
-    </ol>
-  );
-}
-
-function Field({
-  label,
-  required,
-  children,
-  hint,
-}: {
-  label: string;
-  required?: boolean;
-  children: React.ReactNode;
-  hint?: string;
-}) {
-  return (
-    <div>
-      <label className="block text-sm font-medium text-gray-700 mb-1">
-        {label} {required && <span className="text-red-500">*</span>}
-      </label>
-      {children}
-      {hint && <p className="text-xs text-gray-500 mt-1">{hint}</p>}
-    </div>
-  );
-}
-
-function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <input
-      {...props}
-      className={`w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 ${props.className ?? ''}`}
-    />
-  );
-}
-
-/** Render a single schema-driven field as the appropriate input control. */
-function SchemaField({
-  fieldKey,
-  prop,
-  required,
-  values,
-  onChange,
-}: {
-  fieldKey: string;
-  prop: SchemaProperty;
+  integrationKey: string;
   required: boolean;
-  values: Record<string, unknown>;
-  onChange: (key: string, value: unknown) => void;
-}) {
-  const value = values[fieldKey] ?? prop.default ?? (prop.type === 'number' ? 0 : prop.type === 'boolean' ? false : '');
-
-  if (prop.type === 'boolean') {
-    return (
-      <Field label={prop.title ?? fieldKey} required={required} hint={prop.description}>
-        <label className="flex items-center gap-2 cursor-pointer">
-          <input
-            type="checkbox"
-            checked={value as boolean}
-            onChange={(e) => onChange(fieldKey, e.target.checked)}
-            className="w-4 h-4 rounded border-gray-300 text-blue-600 focus:ring-blue-400"
-          />
-          <span className="text-sm text-gray-700">{prop.title ?? fieldKey}</span>
-        </label>
-      </Field>
-    );
-  }
-
-  if (prop.type === 'number') {
-    return (
-      <Field label={prop.title ?? fieldKey} required={required} hint={prop.description}>
-        <Input
-          type="number"
-          value={value as number}
-          onChange={(e) => onChange(fieldKey, parseFloat(e.target.value) || 0)}
-        />
-      </Field>
-    );
-  }
-
-  return (
-    <Field label={prop.title ?? fieldKey} required={required} hint={prop.description}>
-      <Input
-        type={prop.format === 'password' ? 'password' : 'text'}
-        value={value as string}
-        placeholder={prop.format === 'password' ? '••••••••••••••••' : undefined}
-        onChange={(e) => onChange(fieldKey, e.target.value)}
-      />
-    </Field>
-  );
 }
 
-// ─── Main Component ───────────────────────────────────────────────────────────
+interface EditableField {
+  key: string;
+  label: string;
+  type: 'text' | 'textarea' | 'number';
+  defaultValue: unknown;
+  hint?: string;
+}
+
+interface SkillTemplate {
+  id: string;
+  skillTypeId: string;
+  name: string;
+  slots: SkillSlot[];
+  editableFields: EditableField[];
+}
+
+type Panel = 'connections' | 'customize' | 'activate';
 
 export function SkillConfigPage() {
-  const { skillId, userSkillId } = useParams<{ skillId: string; userSkillId: string }>();
+  const { typeId, templateId, userSkillId } = useParams<{
+    typeId: string;
+    templateId: string;
+    userSkillId: string;
+  }>();
   const navigate = useNavigate();
-  const { catalog, mySkills, configureSkill, createTrigger, getTriggers } = useSkills();
+  const token = useAuthStore(s => s.token)!;
 
-  const skill = catalog.find((s) => s.id === skillId);
-  const userSkill = mySkills.find((s) => s.id === userSkillId);
-
-  // ── Build wizard steps from configSchema ────────────────────────────────
-  const configSchema = skill?.configSchema as ConfigSchema | undefined;
-  const dynamicSteps = useMemo(() => buildDynamicSteps(configSchema), [configSchema]);
-
-  const showWebhookStep = skill?.triggerType === 'webhook';
-
-  const allSteps = useMemo(() => [
-    { id: 'scope', label: 'Scope' },
-    ...dynamicSteps,
-    ...(showWebhookStep ? [{ id: 'webhook', label: 'Webhook URL' }] : []),
-  ], [dynamicSteps, showWebhookStep]);
-
-  // ── State ────────────────────────────────────────────────────────────────
-  const [step, setStep] = useState(0);
-  const [saving, setSaving] = useState(false);
-  const [trigger, setTrigger] = useState<SkillTrigger | null>(null);
+  const [template, setTemplate] = useState<SkillTemplate | null>(null);
+  const [slotConnections, setSlotConnections] = useState<Record<string, string>>({});
+  const [fieldOverrides, setFieldOverrides] = useState<Record<string, unknown>>({});
+  const [activePanel, setActivePanel] = useState<Panel>('connections');
+  const [webhookUrl, setWebhookUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
-  const [scope, setScope] = useState<'personal' | 'org'>('personal');
+  const [saving, setSaving] = useState(false);
+  const [activating, setActivating] = useState(false);
+  const [testResult, setTestResult] = useState<any>(null);
+  const [testLoading, setTestLoading] = useState(false);
+  const [testError, setTestError] = useState<string | null>(null);
 
-  // Generic form values for schema-driven fields
-  const [fieldValues, setFieldValues] = useState<Record<string, unknown>>({});
-
-  const setField = (key: string, value: unknown) =>
-    setFieldValues((prev) => ({ ...prev, [key]: value }));
-
-  // Pre-fill from existing config if re-visiting
   useEffect(() => {
-    if (!userSkill?.configuration) return;
-    const c = userSkill.configuration as Record<string, unknown>;
-    setFieldValues(c);
-  }, [userSkill]);
+    if (!typeId || !templateId || !token) return;
+    loadTemplate();
+    loadExistingConfig();
+    loadWebhook();
+  }, [typeId, templateId, userSkillId, token]);
 
-  // Load trigger on the last (webhook) step
-  useEffect(() => {
-    const lastStepIdx = allSteps.length - 1;
-    if (step === lastStepIdx && showWebhookStep && userSkillId && !trigger) {
-      getTriggers(userSkillId).then((ts) => {
-        if (ts.length > 0) setTrigger(ts[0]);
-      });
+  async function loadTemplate() {
+    const res = await fetch(`/v1/skill-types/${typeId}/templates`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) {
+      const templates: SkillTemplate[] = await res.json();
+      const found = templates.find(t => t.id === templateId);
+      if (found) setTemplate(found);
     }
-  }, [step, allSteps.length, showWebhookStep, userSkillId, trigger, getTriggers]);
-
-  if (!skill || !userSkill) {
-    return (
-      <div className="flex items-center justify-center h-screen text-gray-400">
-        Loading…
-      </div>
-    );
   }
 
-  const webhookUrl = trigger
-    ? `${window.location.origin}/v1/triggers/webhook/${trigger.endpointToken}`
-    : null;
-
-  // ── Validation for current step ──────────────────────────────────────────
-  const canProceed = (): boolean => {
-    const currentStepDef = allSteps[step];
-    if (!currentStepDef || currentStepDef.id === 'scope' || currentStepDef.id === 'webhook') {
-      return true;
+  async function loadExistingConfig() {
+    if (!userSkillId) return;
+    const res = await fetch(`/v1/me/skills/${userSkillId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    // If skill has existing config, pre-populate
+    if (res.ok) {
+      const skill = await res.json();
+      const cfg = skill.configuration ?? {};
+      if (cfg.slotConnections) setSlotConnections(cfg.slotConnections);
+      if (cfg.fieldOverrides) setFieldOverrides(cfg.fieldOverrides);
     }
-    const dynStep = dynamicSteps.find((s) => s.id === currentStepDef.id);
-    if (!dynStep) return true;
-    return dynStep.fields
-      .filter((f) => f.required)
-      .every((f) => {
-        const v = fieldValues[f.key];
-        return v !== undefined && v !== null && String(v).trim() !== '';
-      });
-  };
+  }
 
-  // ── Navigation ───────────────────────────────────────────────────────────
-  const isSaveStep = step === allSteps.length - (showWebhookStep ? 2 : 1);
-
-  const handleSaveAndNext = async () => {
-    if (isSaveStep) {
-      setSaving(true);
-      try {
-        await configureSkill(userSkillId!, fieldValues);
-
-        if (showWebhookStep) {
-          const existing = await getTriggers(userSkillId!);
-          if (existing.length === 0) {
-            const t = await createTrigger(userSkillId!);
-            setTrigger(t);
-          } else {
-            setTrigger(existing[0]);
-          }
-        }
-
-        setStep((s) => s + 1);
-      } catch (e: unknown) {
-        alert(`Save failed: ${(e as Error).message}`);
-      } finally {
-        setSaving(false);
+  async function loadWebhook() {
+    if (!userSkillId) return;
+    const res = await fetch(`/v1/me/skills/${userSkillId}/triggers`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (res.ok) {
+      const triggers = await res.json();
+      if (triggers.length > 0) {
+        const origin = window.location.origin.replace(':3001', ':3000');
+        setWebhookUrl(`${origin}/v1/triggers/webhook/${triggers[0].endpointToken}`);
       }
-    } else {
-      setStep((s) => s + 1);
     }
-  };
+  }
 
-  const handleCopy = () => {
-    if (webhookUrl) {
-      navigator.clipboard.writeText(webhookUrl).then(() => {
-        setCopied(true);
-        setTimeout(() => setCopied(false), 2000);
+  async function saveConfig() {
+    if (!userSkillId) return;
+    setSaving(true);
+    try {
+      await fetch(`/v1/me/skills/${userSkillId}/configure`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          templateId,
+          slotConnections,
+          fieldOverrides,
+        }),
       });
+    } finally {
+      setSaving(false);
     }
-  };
+  }
 
-  const currentStepDef = allSteps[step];
-  const currentDynStep = dynamicSteps.find((s) => s.id === currentStepDef?.id);
+  async function handleActivate() {
+    if (!userSkillId) return;
+    setActivating(true);
+    try {
+      await saveConfig();
+
+      // Create webhook trigger if not yet created
+      if (!webhookUrl) {
+        const res = await fetch(`/v1/me/skills/${userSkillId}/triggers`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ verification: { type: 'none' } }),
+        });
+        if (res.ok) {
+          const trigger = await res.json();
+          const origin = window.location.origin.replace(':3001', ':3000');
+          setWebhookUrl(`${origin}/v1/triggers/webhook/${trigger.endpointToken}`);
+        }
+      }
+
+      // Mark skill as active
+      await fetch(`/v1/me/skills/${userSkillId}/configure`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          templateId,
+          slotConnections,
+          fieldOverrides,
+          status: 'active',
+        }),
+      });
+
+      navigate('/skills');
+    } finally {
+      setActivating(false);
+    }
+  }
+
+  async function handleTestEvent() {
+    if (!userSkillId) return;
+    setTestLoading(true);
+    setTestResult(null);
+    setTestError(null);
+    try {
+      await saveConfig();
+      const res = await fetch(`/v1/me/skills/${userSkillId}/test-event`, {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? 'Test failed');
+      setTestResult(data);
+    } catch (err: any) {
+      setTestError(err.message);
+    } finally {
+      setTestLoading(false);
+    }
+  }
+
+  function handleCopyWebhook() {
+    if (!webhookUrl) return;
+    navigator.clipboard.writeText(webhookUrl);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  const allSlotsConnected = template?.slots
+    .filter(s => s.required)
+    .every(s => slotConnections[s.key]) ?? false;
+
+  const notificationSlot = template?.slots.find(s => s.key !== 'shopify');
+  const notificationName = notificationSlot
+    ? notificationSlot.integrationKey.charAt(0).toUpperCase() + notificationSlot.integrationKey.slice(1)
+    : 'support tool';
+
+  function getFieldValue(field: EditableField): string {
+    const override = fieldOverrides[field.key];
+    return override !== undefined ? String(override) : String(field.defaultValue ?? '');
+  }
+
+  function setFieldValue(key: string, value: string | number) {
+    setFieldOverrides(prev => ({ ...prev, [key]: value }));
+  }
+
+  const panels: { id: Panel; label: string }[] = [
+    { id: 'connections', label: '1. Connect' },
+    { id: 'customize',   label: '2. Customize' },
+    { id: 'activate',    label: '3. Activate' },
+  ];
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <button
-              onClick={() => navigate('/skills')}
-              className="text-gray-400 hover:text-gray-600"
-            >
-              <ArrowLeft size={20} />
-            </button>
-            <div>
-              <h1 className="text-xl font-bold">{skill.name}</h1>
-              <p className="text-sm text-gray-500">Setup wizard</p>
-            </div>
-          </div>
-          <StepIndicator current={step} steps={allSteps} />
-        </div>
+        <button
+          onClick={() => navigate(`/skills/${typeId}/templates`)}
+          className="flex items-center gap-2 text-sm text-gray-500 hover:text-gray-800 mb-2"
+        >
+          <ArrowLeft size={14} /> Back to Templates
+        </button>
+        <h1 className="text-xl font-bold">{template?.name ?? 'Configure Skill'}</h1>
       </header>
 
-      {/* Body */}
-      <main className="flex-1 overflow-auto flex items-start justify-center p-8">
-        <div className="bg-white rounded-xl border shadow-sm w-full max-w-lg p-8">
+      {/* Panel tabs */}
+      <div className="bg-white border-b px-6 flex gap-6">
+        {panels.map(p => (
+          <button
+            key={p.id}
+            onClick={() => setActivePanel(p.id)}
+            className={`py-3 text-sm border-b-2 transition-colors ${
+              activePanel === p.id
+                ? 'border-blue-600 text-blue-600 font-medium'
+                : 'border-transparent text-gray-500 hover:text-gray-800'
+            }`}
+          >
+            {p.label}
+            {p.id === 'connections' && allSlotsConnected && (
+              <CheckCircle size={12} className="inline ml-1 text-green-500" />
+            )}
+          </button>
+        ))}
+      </div>
 
-          {/* Step: Scope (always first) */}
-          {currentStepDef?.id === 'scope' && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-lg font-semibold">Where should this skill run?</h2>
-                <p className="text-sm text-gray-500 mt-1">
-                  Skills can run in your personal space or be shared with your organization.
-                </p>
-              </div>
-              <div className="grid grid-cols-2 gap-3">
-                {(['personal', 'org'] as const).map((s) => (
-                  <button
-                    key={s}
-                    onClick={() => setScope(s)}
-                    className={`p-4 border-2 rounded-lg text-left transition-colors ${
-                      scope === s
-                        ? 'border-blue-500 bg-blue-50'
-                        : 'border-gray-200 hover:border-gray-300'
-                    }`}
-                  >
-                    <div className="font-medium capitalize">{s === 'org' ? 'Organization' : 'Personal'}</div>
-                    <div className="text-xs text-gray-500 mt-1">
-                      {s === 'personal'
-                        ? 'Only visible to you'
-                        : 'Shared with all org members'}
-                    </div>
-                  </button>
-                ))}
-              </div>
-              <p className="text-xs text-gray-400">
-                Organization activation requires admin access and can be changed later.
-              </p>
-            </div>
-          )}
+      <main className="flex-1 overflow-auto p-6">
+        <div className="max-w-2xl mx-auto space-y-6">
 
-          {/* Dynamic steps driven by configSchema x-group */}
-          {currentDynStep && (
+          {/* Panel 1: Connections */}
+          {activePanel === 'connections' && template && (
             <div className="space-y-6">
-              <div>
-                <h2 className="text-lg font-semibold">{currentDynStep.label}</h2>
-              </div>
-              <div className="space-y-4">
-                {currentDynStep.fields.map(({ key, schema: prop, required }) => (
-                  <SchemaField
-                    key={key}
-                    fieldKey={key}
-                    prop={prop}
-                    required={required}
-                    values={fieldValues}
-                    onChange={setField}
+              {template.slots.map(slot => (
+                <div key={slot.key} className="bg-white border rounded-lg p-5">
+                  <ConnectionPicker
+                    integrationKey={slot.integrationKey}
+                    slotLabel={slot.label}
+                    selectedConnectionId={slotConnections[slot.key] ?? null}
+                    onSelect={connId =>
+                      setSlotConnections(prev => ({ ...prev, [slot.key]: connId }))
+                    }
+                    token={token}
                   />
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Step: Webhook URL (always last, only for webhook-triggered skills) */}
-          {currentStepDef?.id === 'webhook' && (
-            <div className="space-y-6">
-              <div>
-                <div className="flex items-center gap-2 mb-1">
-                  <CheckCircle size={20} className="text-green-500" />
-                  <h2 className="text-lg font-semibold">Skill is configured!</h2>
                 </div>
-                <p className="text-sm text-gray-500">
-                  Copy the webhook URL below and paste it into your Shopify store's webhook settings.
-                  Shopify will call this URL whenever an order is created or updated.
-                </p>
-              </div>
+              ))}
 
-              {webhookUrl ? (
-                <div className="space-y-3">
-                  <div className="bg-gray-50 border rounded-lg p-3 flex items-center gap-2">
-                    <code className="flex-1 text-xs text-gray-700 break-all">{webhookUrl}</code>
-                    <button
-                      onClick={handleCopy}
-                      className="flex-shrink-0 p-2 hover:bg-gray-200 rounded text-gray-500"
-                      title="Copy URL"
-                    >
-                      {copied ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
-                    </button>
-                  </div>
-                  <div className="text-xs text-gray-500 space-y-1">
-                    <p className="font-medium text-gray-700">Next steps in Shopify:</p>
-                    <ol className="list-decimal pl-4 space-y-1">
-                      <li>Go to Settings → Notifications → Webhooks</li>
-                      <li>Click "Create webhook"</li>
-                      <li>Event: <strong>Order creation</strong></li>
-                      <li>Format: <strong>JSON</strong></li>
-                      <li>Paste the URL above and click Save</li>
-                    </ol>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 text-gray-400">
-                  <Loader2 size={16} className="animate-spin" />
-                  <span className="text-sm">Generating webhook URL…</span>
-                </div>
-              )}
-
-              <div className="pt-2">
+              <div className="flex justify-end">
                 <button
-                  onClick={() => navigate('/skills')}
-                  className="w-full py-2.5 bg-blue-600 text-white rounded-lg text-sm font-medium hover:bg-blue-700"
+                  onClick={() => setActivePanel('customize')}
+                  disabled={!allSlotsConnected}
+                  className="px-5 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-40"
                 >
-                  Done — Go to Skills
+                  Next: Customize →
                 </button>
               </div>
             </div>
           )}
 
-          {/* Navigation — shown on all steps except the final webhook step */}
-          {currentStepDef?.id !== 'webhook' && (
-            <div className="flex justify-between mt-8 pt-4 border-t">
-              <button
-                onClick={() => (step === 0 ? navigate('/skills') : setStep((s) => s - 1))}
-                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 flex items-center gap-1"
-              >
-                <ArrowLeft size={14} />
-                {step === 0 ? 'Cancel' : 'Back'}
-              </button>
-              <button
-                onClick={handleSaveAndNext}
-                disabled={!canProceed() || saving}
-                className="px-5 py-2 bg-blue-600 text-white text-sm rounded-lg hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2"
-              >
-                {saving && <Loader2 size={14} className="animate-spin" />}
-                {isSaveStep ? 'Save & finish' : 'Next'}
-                {!saving && <ArrowRight size={14} />}
-              </button>
+          {/* Panel 2: Customize */}
+          {activePanel === 'customize' && template && (
+            <div className="space-y-4">
+              <div className="bg-white border rounded-lg p-5 space-y-4">
+                {template.editableFields.map(field => (
+                  <div key={field.key}>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      {field.label}
+                    </label>
+                    {field.type === 'textarea' ? (
+                      <textarea
+                        value={getFieldValue(field)}
+                        onChange={e => setFieldValue(field.key, e.target.value)}
+                        rows={3}
+                        className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    ) : field.type === 'number' ? (
+                      <input
+                        type="number"
+                        value={getFieldValue(field)}
+                        onChange={e => setFieldValue(field.key, parseInt(e.target.value) || 0)}
+                        className="w-32 border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    ) : (
+                      <input
+                        type="text"
+                        value={getFieldValue(field)}
+                        onChange={e => setFieldValue(field.key, e.target.value)}
+                        className="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    )}
+                    {field.hint && (
+                      <p className="text-xs text-gray-400 mt-1">{field.hint}</p>
+                    )}
+                  </div>
+                ))}
+
+                <p className="text-xs text-gray-400 border-t pt-3">
+                  ℹ {notificationName} will email your customer when a ticket is created — PA Core never sends email directly.
+                </p>
+              </div>
+
+              <div className="flex justify-between">
+                <button
+                  onClick={() => setActivePanel('connections')}
+                  className="px-4 py-2 text-sm border rounded text-gray-600 hover:bg-gray-50"
+                >
+                  ← Back
+                </button>
+                <button
+                  onClick={async () => { await saveConfig(); setActivePanel('activate'); }}
+                  disabled={saving}
+                  className="px-5 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {saving ? 'Saving…' : 'Next: Activate →'}
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* Panel 3: Activate */}
+          {activePanel === 'activate' && (
+            <div className="space-y-4">
+              {/* Test event */}
+              <div className="bg-white border rounded-lg p-5 space-y-3">
+                <h3 className="font-medium text-gray-900">Dry Run</h3>
+                <p className="text-sm text-gray-500">
+                  Fire a test event against a synthetic order — nothing will be sent to {notificationName}.
+                </p>
+                <button
+                  onClick={handleTestEvent}
+                  disabled={testLoading}
+                  className="px-4 py-2 text-sm border rounded text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+                >
+                  {testLoading ? 'Running…' : '▶ Fire Test Event'}
+                </button>
+
+                {testError && (
+                  <div className="text-xs text-red-600 bg-red-50 rounded p-2">{testError}</div>
+                )}
+
+                {testResult?.wouldCreateTicket && (
+                  <div className="bg-gray-50 rounded p-3 text-xs space-y-1">
+                    {testResult.synthetic && (
+                      <div className="text-amber-600 bg-amber-50 rounded px-2 py-1 mb-2">
+                        {testResult.note}
+                      </div>
+                    )}
+                    <div className="font-medium text-gray-700">Would create {notificationName} ticket:</div>
+                    <div><span className="text-gray-500">Subject:</span> {testResult.wouldCreateTicket.subject}</div>
+                    <div><span className="text-gray-500">Priority:</span> {testResult.wouldCreateTicket.priority}</div>
+                    <details className="mt-1">
+                      <summary className="cursor-pointer text-blue-600">Preview message body</summary>
+                      <iframe
+                        srcDoc={testResult.wouldCreateTicket.message}
+                        className="mt-2 w-full border rounded bg-white"
+                        style={{ height: '280px' }}
+                        sandbox="allow-same-origin"
+                        title="Email preview"
+                      />
+                    </details>
+                  </div>
+                )}
+
+                {testResult?.wouldSkip && (
+                  <div className="text-xs text-gray-500 bg-gray-50 rounded p-2">
+                    No backordered items in test order — skill would skip (no ticket created).
+                  </div>
+                )}
+              </div>
+
+              {/* Webhook URL */}
+              <div className="bg-white border rounded-lg p-5 space-y-3">
+                <h3 className="font-medium text-gray-900">Webhook URL</h3>
+                {webhookUrl ? (
+                  <>
+                    <div className="flex gap-2 items-center">
+                      <code className="flex-1 bg-gray-50 border rounded px-3 py-2 text-xs break-all">
+                        {webhookUrl}
+                      </code>
+                      <button onClick={handleCopyWebhook} className="p-2 text-gray-500 hover:text-gray-800">
+                        {copied ? <Check size={16} className="text-green-500" /> : <Copy size={16} />}
+                      </button>
+                    </div>
+                    <div className="text-xs text-gray-500 space-y-1">
+                      <p className="font-medium">Shopify webhook setup:</p>
+                      <ol className="list-decimal list-inside space-y-0.5 text-gray-400">
+                        <li>Shopify Admin → Settings → Notifications → Webhooks</li>
+                        <li>Create webhook → Event: <strong>Orders: Created</strong></li>
+                        <li>Format: <strong>JSON</strong> → URL: paste the URL above</li>
+                        <li>Save</li>
+                      </ol>
+                    </div>
+                  </>
+                ) : (
+                  <p className="text-sm text-gray-400">
+                    Webhook URL will be generated when you activate the skill.
+                  </p>
+                )}
+              </div>
+
+              {/* Activate */}
+              <div className="flex justify-between items-center">
+                <button
+                  onClick={() => setActivePanel('customize')}
+                  className="px-4 py-2 text-sm border rounded text-gray-600 hover:bg-gray-50"
+                >
+                  ← Back
+                </button>
+                <button
+                  onClick={handleActivate}
+                  disabled={activating || !allSlotsConnected}
+                  className="flex items-center gap-2 px-6 py-2 bg-green-600 text-white text-sm rounded hover:bg-green-700 disabled:opacity-50"
+                >
+                  <Zap size={14} />
+                  {activating ? 'Activating…' : 'Activate Skill'}
+                </button>
+              </div>
             </div>
           )}
         </div>

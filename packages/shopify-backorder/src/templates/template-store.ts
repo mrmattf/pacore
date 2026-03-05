@@ -45,26 +45,50 @@ export interface TemplateConfig {
   html?: HtmlConfig;  // raw HTML overrides; takes priority over generated template
 }
 
-const CONFIG_PATH = path.resolve(process.cwd(), 'template-config.json');
+// ─── Tenant-keyed store ────────────────────────────────────────────────────────
+//
+// tenantKey format:
+//   'default'       → single-tenant / backward-compat (template-config.json)
+//   'org-{orgId}'   → org-scoped  (template-config-org-{orgId}.json)
+//   'user-{userId}' → user-scoped (template-config-user-{userId}.json)
+//
+// Keys are sanitized before use in file names to prevent path traversal.
 
-let current: TemplateConfig = {};
+function sanitizeKey(key: string): string {
+  return key.replace(/[^a-zA-Z0-9_-]/g, '_').slice(0, 128);
+}
 
-// Load persisted config on startup (best-effort — missing file is fine)
-try {
-  if (fs.existsSync(CONFIG_PATH)) {
-    const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
-    current = JSON.parse(raw) as TemplateConfig;
+function configFilePath(tenantKey: string): string {
+  const safe = sanitizeKey(tenantKey);
+  const filename = safe === 'default' ? 'template-config.json' : `template-config-${safe}.json`;
+  return path.resolve(process.cwd(), filename);
+}
+
+const cache = new Map<string, TemplateConfig>();
+
+function loadFromDisk(tenantKey: string): TemplateConfig {
+  const filePath = configFilePath(tenantKey);
+  try {
+    if (fs.existsSync(filePath)) {
+      const raw = fs.readFileSync(filePath, 'utf8');
+      return JSON.parse(raw) as TemplateConfig;
+    }
+  } catch {
+    // Ignore parse errors — start with defaults
   }
-} catch {
-  // Ignore parse errors — start with defaults
+  return {};
 }
 
-export function getTemplateConfig(): TemplateConfig {
-  return current;
+export function getTemplateConfig(tenantKey = 'default'): TemplateConfig {
+  if (!cache.has(tenantKey)) {
+    cache.set(tenantKey, loadFromDisk(tenantKey));
+  }
+  return cache.get(tenantKey)!;
 }
 
-export function setTemplateConfig(config: TemplateConfig): void {
-  current = config;
+export function setTemplateConfig(tenantKey: string = 'default', config: TemplateConfig): void {
+  cache.set(tenantKey, config);
   // Persist asynchronously — don't block the response
-  fs.writeFile(CONFIG_PATH, JSON.stringify(config, null, 2), 'utf8', () => {});
+  const filePath = configFilePath(tenantKey);
+  fs.writeFile(filePath, JSON.stringify(config, null, 2), 'utf8', () => {});
 }

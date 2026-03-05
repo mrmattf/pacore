@@ -11,9 +11,21 @@ import { WorkflowManager, WorkflowExecutor, WorkflowBuilder } from './workflow';
 import { OrgManager } from './organizations/org-manager';
 import { SkillRegistry } from './skills/skill-registry';
 import { SkillDispatcher } from './skills/skill-dispatcher';
+import { SkillTemplateRegistry } from './skills/skill-template-registry';
 import { WebhookTriggerHandler } from './triggers/webhook-trigger';
 import { BackorderDetectionSkill } from './skills/definitions/backorder-detection';
 import { BillingManager } from './billing';
+import { AdapterRegistry } from './integrations/adapter-registry';
+import { ShopifyOrderAdapter } from './integrations/shopify/shopify-order-adapter';
+import { GorgiasNotificationAdapter } from './integrations/gorgias/gorgias-notification-adapter';
+import { ZendeskNotificationAdapter } from './integrations/zendesk/zendesk-notification-adapter';
+import { ReamazeNotificationAdapter } from './integrations/reamaze/reamaze-notification-adapter';
+import { SlackAlertAdapter } from './integrations/slack/slack-alert-adapter';
+import { AfterShipTrackingAdapter } from './integrations/aftership/aftership-tracking-adapter';
+import { createShopifyMcpRouter } from './integrations/shopify/shopify-mcp-router';
+import { createGorgiasMcpRouter } from './integrations/gorgias/gorgias-mcp-router';
+import { createZendeskMcpRouter } from './integrations/zendesk/zendesk-mcp-router';
+import { createSkillsMcpRouter } from './mcp/skills-mcp-router';
 
 /**
  * Main entry point for the cloud service
@@ -117,19 +129,54 @@ async function main() {
   await billingManager.initialize();
   console.log('Billing manager initialized');
 
+  // Initialize Skill Template Registry first (needed to register stubs in SkillRegistry)
+  const skillTemplateRegistry = new SkillTemplateRegistry();
+  console.log('Skill template registry initialized, skill types:', skillTemplateRegistry.getSkillTypes().map(t => t.id));
+
   // Initialize Skill Registry + register platform skills
   const skillRegistry = new SkillRegistry(dbPool, billingManager);
   skillRegistry.registerSkill(BackorderDetectionSkill);
+  // Register a stub SkillDefinition for each template skill type so that:
+  //   1. SkillRegistry.activateSkill() passes the catalog.has() check
+  //   2. user_skills.skill_id FK constraint (→ skills.id) is satisfied
+  for (const skillType of skillTemplateRegistry.getSkillTypes()) {
+    skillRegistry.registerSkill({
+      id: skillType.id,
+      name: skillType.name,
+      version: '1.0.0',
+      description: skillType.description,
+      triggerType: 'webhook',
+      toolChain: skillType.id,
+      requiredCapabilities: [],
+      configSchema: {},
+    });
+  }
   await skillRegistry.initialize(); // syncs in-memory catalog to the skills DB table
   console.log('Skill registry initialized, registered skills:', skillRegistry.listSkills().map(s => s.id));
 
+  // Initialize AdapterRegistry — central dispatch hub for all integrations
+  const adapterRegistry = new AdapterRegistry();
+  adapterRegistry.register(new ShopifyOrderAdapter());
+  adapterRegistry.register(new GorgiasNotificationAdapter());
+  adapterRegistry.register(new ZendeskNotificationAdapter());
+  adapterRegistry.register(new ReamazeNotificationAdapter());
+  adapterRegistry.register(new SlackAlertAdapter());
+  adapterRegistry.register(new AfterShipTrackingAdapter());
+  console.log('Adapter registry initialized, adapters:', adapterRegistry.getAllAdapters().map(a => a.integrationKey));
+
   // Initialize Skill Dispatcher
-  const skillDispatcher = new SkillDispatcher(skillRegistry, mcpRegistry, credentialManager);
+  const skillDispatcher = new SkillDispatcher(skillRegistry, mcpRegistry, credentialManager, skillTemplateRegistry, adapterRegistry);
   console.log('Skill dispatcher initialized');
 
   // Initialize Webhook Trigger Handler
   const webhookTriggerHandler = new WebhookTriggerHandler(skillRegistry, skillDispatcher, dbPool, billingManager);
   console.log('Webhook trigger handler initialized');
+
+  // Build internal MCP sub-routers (mounted by APIGateway)
+  const shopifyMcpRouter  = createShopifyMcpRouter(credentialManager, adapterRegistry);
+  const gorgiasMcpRouter  = createGorgiasMcpRouter(credentialManager, adapterRegistry);
+  const zendeskMcpRouter  = createZendeskMcpRouter(credentialManager, adapterRegistry);
+  const skillsMcpRouter   = createSkillsMcpRouter(dbPool, credentialManager, adapterRegistry, skillRegistry, skillTemplateRegistry);
 
   // Initialize API Gateway
   const gateway = new APIGateway(orchestrator, {
@@ -145,8 +192,14 @@ async function main() {
     orgManager,
     skillRegistry,
     skillDispatcher,
+    skillTemplateRegistry,
     webhookTriggerHandler,
     billingManager,
+    adapterRegistry,
+    shopifyMcpRouter,
+    gorgiasMcpRouter,
+    zendeskMcpRouter,
+    skillsMcpRouter,
   });
 
   await gateway.start();

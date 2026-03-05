@@ -45,6 +45,8 @@ export interface SkillTrigger {
   endpointToken: string;
   verificationConfig: WebhookVerification;
   status: TriggerStatus;
+  /** GID of the webhook registered with the source platform (e.g. Shopify GID). Null if manually registered. */
+  externalWebhookId: string | null;
   createdAt: Date;
 }
 

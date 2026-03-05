@@ -32,10 +32,17 @@ Build standalone solutions for customers to validate concepts and fund developme
 | **We Gain** | Infrastructure know-how, integration patterns, architecture validation |
 | **Example** | Yota Xpedition Backorder Detection (standalone app) |
 
-**Key Principle**: Customer engagements are separate from the platform. We don't embed customer-owned code into PA Core. Instead, we:
-1. Build the solution they need
-2. Learn patterns and techniques
-3. Re-implement similar capabilities in the platform (clean-room)
+**Key Principle**: Customer engagements are completely separate from the platform — in code, in deployment, and in operation. We:
+1. Build the solution they need (standalone app, customer owns it)
+2. Learn patterns and techniques from building it
+3. Re-implement similar capabilities in the platform (clean-room, no shared code)
+
+**Hard constraints:**
+- PA Core never connects to, calls, or depends on a customer-owned app
+- Customer deliverable code is never imported into or deployed as part of PA Core
+- Platform integrations (Shopify, Gorgias, etc.) are built from scratch inside PA Core using know-how gained from customer engagements
+
+See [ADR-006](decisions/006-deliverable-separation.md) for the full architectural decision.
 
 ### Track 2: Platform Building (Product)
 

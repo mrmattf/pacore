@@ -19,19 +19,20 @@ import { logger } from '../logger';
 interface PerRequestExecutors {
   shopify: ShopifyToolExecutor;
   gorgias: GorgiasToolExecutor | DryRunGorgiasToolExecutor;
+  config: ConfigToolExecutor;
 }
 
 export class MCPServer {
   private tools: MCPTool[];
   private shopifyExecutor: ShopifyToolExecutor;
   private gorgiasExecutor: GorgiasToolExecutor | DryRunGorgiasToolExecutor;
-  private configExecutor: ConfigToolExecutor;
+  private defaultConfigExecutor: ConfigToolExecutor;
   private gorgiasEnabled: boolean;
   private sessions = new Map<string, Response>();
 
   constructor(shopifyClient: ShopifyClient, gorgiasClient: GorgiasClient | null, gorgiasEnabled: boolean = false) {
     this.tools = [...shopifyTools, ...gorgiasTools, ...configTools];
-    this.configExecutor = new ConfigToolExecutor();
+    this.defaultConfigExecutor = new ConfigToolExecutor('default');
     this.shopifyExecutor = new ShopifyToolExecutor(shopifyClient);
     this.gorgiasEnabled = gorgiasEnabled;
 
@@ -53,7 +54,7 @@ export class MCPServer {
       const perRequest = this.buildPerRequestExecutors(req);
 
       try {
-        const response = await this.handleRequest(request, perRequest ?? undefined);
+        const response = await this.handleRequest(request, perRequest);
         res.json(response);
       } catch (error) {
         res.json(this.errorResponse(request.id, -32603, (error as Error).message));
@@ -70,7 +71,7 @@ export class MCPServer {
       const args = req.body;
       const perRequest = this.buildPerRequestExecutors(req);
 
-      const result = await this.callTool(toolName, args, perRequest ?? undefined);
+      const result = await this.callTool(toolName, args, perRequest);
       res.json(result);
     });
 
@@ -131,7 +132,7 @@ export class MCPServer {
 
       try {
         const perRequest = this.buildPerRequestExecutors(req);
-        const response = await this.handleRequest(request, perRequest ?? undefined);
+        const response = await this.handleRequest(request, perRequest);
         sseRes.write(`event: message\ndata: ${JSON.stringify(response)}\n\n`);
       } catch (error) {
         const errResponse: JSONRPCResponse = {
@@ -149,10 +150,13 @@ export class MCPServer {
   }
 
   /**
-   * Build per-request Shopify/Gorgias executors from credential headers injected by PA Core cloud.
-   * Returns null if the required Shopify headers are absent (falls back to static executors).
+   * Build per-request executors from credential headers injected by PA Core cloud.
+   * Always returns executors — config is always tenant-scoped, Shopify/Gorgias fall
+   * back to the static (env-var) clients when per-request headers are absent.
    *
    * Expected headers (set via MCPClient.customHeaders):
+   *   X-Org-Id               — PA Core org ID (preferred tenant scope)
+   *   X-User-Id              — PA Core user ID (used when no org scope)
    *   X-Shopify-Domain       — e.g. my-store.myshopify.com
    *   X-Shopify-Client-Id    — Shopify OAuth client ID
    *   X-Shopify-Client-Secret — Shopify OAuth client secret
@@ -161,28 +165,36 @@ export class MCPServer {
    *   X-Gorgias-Email        — Gorgias account email used for Basic Auth (optional)
    *   X-Gorgias-From-Email   — sender email for tickets (optional)
    */
-  private buildPerRequestExecutors(req: Request): PerRequestExecutors | null {
-    const shopifyDomain = req.headers['x-shopify-domain'] as string | undefined;
-    const shopifyClientId = req.headers['x-shopify-client-id'] as string | undefined;
+  private buildPerRequestExecutors(req: Request): PerRequestExecutors {
+    // ── Tenant key resolution ────────────────────────────────────────────────
+    const orgId  = req.headers['x-org-id']  as string | undefined;
+    const userId = req.headers['x-user-id'] as string | undefined;
+    const tenantKey = orgId ? `org-${orgId}` : userId ? `user-${userId}` : 'default';
+    const config = new ConfigToolExecutor(tenantKey);
+
+    // ── Shopify executor ─────────────────────────────────────────────────────
+    const shopifyDomain     = req.headers['x-shopify-domain']        as string | undefined;
+    const shopifyClientId   = req.headers['x-shopify-client-id']     as string | undefined;
     const shopifyClientSecret = req.headers['x-shopify-client-secret'] as string | undefined;
 
-    if (!shopifyDomain || !shopifyClientId || !shopifyClientSecret) {
-      return null;
+    let shopify: ShopifyToolExecutor;
+    if (shopifyDomain && shopifyClientId && shopifyClientSecret) {
+      const shopifyConfig = {
+        shopifyStoreDomain: shopifyDomain,
+        shopifyClientId,
+        shopifyClientSecret,
+      } as unknown as Config;
+      const tokenManager = new ShopifyTokenManager(shopifyConfig);
+      const shopifyClient = new ShopifyClient(shopifyConfig, tokenManager);
+      shopify = new ShopifyToolExecutor(shopifyClient);
+    } else {
+      shopify = this.shopifyExecutor;
     }
 
-    const shopifyConfig = {
-      shopifyStoreDomain: shopifyDomain,
-      shopifyClientId,
-      shopifyClientSecret,
-    } as unknown as Config;
-
-    const tokenManager = new ShopifyTokenManager(shopifyConfig);
-    const shopifyClient = new ShopifyClient(shopifyConfig, tokenManager);
-    const shopify = new ShopifyToolExecutor(shopifyClient);
-
-    const gorgiasDomain = req.headers['x-gorgias-domain'] as string | undefined;
-    const gorgiasApiKey = req.headers['x-gorgias-api-key'] as string | undefined;
-    const gorgiasEmail = req.headers['x-gorgias-email'] as string | undefined;
+    // ── Gorgias executor ─────────────────────────────────────────────────────
+    const gorgiasDomain   = req.headers['x-gorgias-domain']     as string | undefined;
+    const gorgiasApiKey   = req.headers['x-gorgias-api-key']    as string | undefined;
+    const gorgiasEmail    = req.headers['x-gorgias-email']      as string | undefined;
     const gorgiasFromEmail = req.headers['x-gorgias-from-email'] as string | undefined;
 
     let gorgias: GorgiasToolExecutor | DryRunGorgiasToolExecutor;
@@ -195,13 +207,13 @@ export class MCPServer {
       } as unknown as Config;
       const gorgiasClient = new GorgiasClient(gorgiasConfig);
       gorgias = new GorgiasToolExecutor(gorgiasClient);
-      logger.info('mcp.per_request.credentials', { shopifyDomain, gorgiasEnabled: true });
     } else {
-      gorgias = new DryRunGorgiasToolExecutor();
-      logger.info('mcp.per_request.credentials', { shopifyDomain, gorgiasEnabled: false });
+      gorgias = this.gorgiasExecutor;
     }
 
-    return { shopify, gorgias };
+    logger.info('mcp.per_request.executors', { tenantKey, shopifyDomain, gorgiasEnabled: !!(gorgiasDomain && gorgiasApiKey) });
+
+    return { shopify, gorgias, config };
   }
 
   async handleRequest(request: JSONRPCRequest, executors?: PerRequestExecutors): Promise<JSONRPCResponse> {
@@ -246,6 +258,7 @@ export class MCPServer {
 
     const shopifyExec = executors?.shopify ?? this.shopifyExecutor;
     const gorgiasExec = executors?.gorgias ?? this.gorgiasExecutor;
+    const configExec  = executors?.config  ?? this.defaultConfigExecutor;
 
     let result: MCPToolResult;
 
@@ -254,7 +267,7 @@ export class MCPServer {
     } else if (toolName.startsWith('gorgias_')) {
       result = await gorgiasExec.execute(toolName, args);
     } else if (toolName.startsWith('config_')) {
-      result = await this.configExecutor.execute(toolName, args);
+      result = await configExec.execute(toolName, args);
     } else {
       result = { success: false, error: `Unknown tool: ${toolName}` };
     }

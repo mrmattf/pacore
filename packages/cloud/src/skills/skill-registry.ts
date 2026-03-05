@@ -77,6 +77,14 @@ export class SkillRegistry {
     return this.rowToUserSkill(result.rows[0]);
   }
 
+  async findPendingSkill(userId: string, skillId: string): Promise<UserSkill | null> {
+    const result = await this.db.query(
+      `SELECT * FROM user_skills WHERE user_id = $1 AND skill_id = $2 AND status = 'pending' LIMIT 1`,
+      [userId, skillId]
+    );
+    return result.rows[0] ? this.rowToUserSkill(result.rows[0]) : null;
+  }
+
   async getUserSkill(userSkillId: string): Promise<UserSkill | null> {
     const result = await this.db.query(
       'SELECT * FROM user_skills WHERE id = $1',
@@ -101,12 +109,17 @@ export class SkillRegistry {
     return result.rows.map(this.rowToUserSkill);
   }
 
-  async configureSkill(userSkillId: string, configuration: Record<string, unknown>): Promise<UserSkill> {
+  async configureSkill(userSkillId: string, configuration: Record<string, unknown>, activate = false): Promise<UserSkill> {
     const result = await this.db.query(
-      `UPDATE user_skills
-       SET configuration = $2, status = 'active', activated_at = COALESCE(activated_at, NOW())
-       WHERE id = $1
-       RETURNING *`,
+      activate
+        ? `UPDATE user_skills
+           SET configuration = $2, status = 'active', activated_at = COALESCE(activated_at, NOW())
+           WHERE id = $1
+           RETURNING *`
+        : `UPDATE user_skills
+           SET configuration = $2
+           WHERE id = $1
+           RETURNING *`,
       [userSkillId, JSON.stringify(configuration)]
     );
     if (result.rows.length === 0) throw new Error('UserSkill not found');
@@ -141,6 +154,26 @@ export class SkillRegistry {
     );
 
     return this.rowToTrigger(result.rows[0]);
+  }
+
+  async getTrigger(triggerId: string): Promise<SkillTrigger | null> {
+    const result = await this.db.query(
+      'SELECT * FROM skill_triggers WHERE id = $1',
+      [triggerId]
+    );
+    return result.rows[0] ? this.rowToTrigger(result.rows[0]) : null;
+  }
+
+  /** Stores the external webhook GID after registering with the source platform (e.g. Shopify). */
+  async setTriggerExternalWebhookId(triggerId: string, externalWebhookId: string): Promise<void> {
+    await this.db.query(
+      'UPDATE skill_triggers SET external_webhook_id = $2 WHERE id = $1',
+      [triggerId, externalWebhookId]
+    );
+  }
+
+  async deleteTrigger(triggerId: string): Promise<void> {
+    await this.db.query('DELETE FROM skill_triggers WHERE id = $1', [triggerId]);
   }
 
   async getTriggerByToken(token: string): Promise<SkillTrigger | null> {
@@ -247,6 +280,7 @@ export class SkillRegistry {
       endpointToken: row.endpoint_token as string,
       verificationConfig: row.verification_config as WebhookVerification,
       status: row.status as SkillTrigger['status'],
+      externalWebhookId: (row.external_webhook_id as string | null) ?? null,
       createdAt: new Date(row.created_at as string),
     };
   }

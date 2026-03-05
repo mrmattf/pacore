@@ -9,3 +9,7 @@ export * from './mcp';
 export * from './workflow';
 export * from './organization';
 export * from './skill';
+export * from './skill-template';
+export * from './integration-connection';
+export * from './adapters';
+export * from './policy';

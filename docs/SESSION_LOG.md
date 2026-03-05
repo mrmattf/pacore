@@ -4,6 +4,13 @@ Brief tracking of significant changes. Keep entries to 1-2 sentences. Delete ent
 
 ---
 
+## 2026-02-28
+- Built multi-tenant PA Core MCP Gateway (`/v1/mcp`): aggregates tools from user's active-skill servers, namespaces as `{server}__{tool}`, injects per-tenant credentials, exposes `list_skills`/`activate_skill`/`deactivate_skill` meta-tools.
+- Added tenant keying to shopify-backorder (multi-store config via `X-Org-Id`/`X-User-Id` headers) as a standalone feature; shopify-backorder has zero PA Core dependencies.
+- Architecture decision: shopify-backorder is a customer deliverable with no deployment relationship to PA Core — PA Core will build native Shopify/Gorgias integrations clean-room (ADR-006).
+- Designed and implemented native PA Core Backorder Detection skill: two-layer SkillTemplate architecture (skill developer pre-compiles ECA policy + enrichment spec; end users configure credentials only), IntegrationConnection named credential sets, and three templates (Shopify→Gorgias/Zendesk/Freshdesk).
+- Established four platform-level security requirements (non-optional): Shopify HMAC webhook verification, read-only tool restriction in NL compiler, HTML escaping in template rendering, and enrichment iterateOver iteration cap (50).
+
 ## 2025-01-28
 - Created WorkflowsPage for viewing/editing saved workflows. Fixed API array response handling.
 - Added 2-minute timeout and status message for workflow build endpoint.
@@ -17,10 +24,6 @@ Brief tracking of significant changes. Keep entries to 1-2 sentences. Delete ent
 ## 2025-01-26
 - Visual workflow builder with React Flow and NodeConfigPanel.
 - Workflow execution engine with DAG traversal.
-
-## 2025-01-25
-- MCP server registration and tool discovery.
-- Basic workflow CRUD operations.
 
 ---
 

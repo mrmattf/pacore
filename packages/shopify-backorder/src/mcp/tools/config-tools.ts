@@ -93,6 +93,8 @@ export const configTools = [
 // ─── Executor ─────────────────────────────────────────────────────────────────
 
 export class ConfigToolExecutor {
+  constructor(private tenantKey: string = 'default') {}
+
   async execute(toolName: string, args: Record<string, unknown>): Promise<MCPToolResult> {
     try {
       switch (toolName) {
@@ -115,11 +117,11 @@ export class ConfigToolExecutor {
   }
 
   private getTemplate(): MCPToolResult {
-    return { success: true, data: getTemplateConfig() };
+    return { success: true, data: getTemplateConfig(this.tenantKey) };
   }
 
   private updateStyle(args: Record<string, unknown>): MCPToolResult {
-    const current = getTemplateConfig();
+    const current = getTemplateConfig(this.tenantKey);
     const style = { ...(current.style ?? {}) };
 
     const stringKeys = ['brandName', 'logoUrl', 'primaryColor', 'accentColor', 'signOff', 'footerText'] as const;
@@ -138,7 +140,7 @@ export class ConfigToolExecutor {
       ...current,
       style: Object.keys(style).length > 0 ? style : undefined,
     };
-    setTemplateConfig(updated);
+    setTemplateConfig(this.tenantKey, updated);
     return { success: true, data: updated };
   }
 
@@ -148,7 +150,7 @@ export class ConfigToolExecutor {
       return { success: false, error: 'scenario must be "partialBackorder" or "allBackordered"' };
     }
 
-    const current = getTemplateConfig();
+    const current = getTemplateConfig(this.tenantKey);
     const messages = {
       partialBackorder: { ...(current.messages?.partialBackorder ?? {}) },
       allBackordered:   { ...(current.messages?.allBackordered ?? {}) },
@@ -175,7 +177,7 @@ export class ConfigToolExecutor {
         allBackordered:   Object.keys(messages.allBackordered).length > 0 ? messages.allBackordered : undefined,
       },
     };
-    setTemplateConfig(updated);
+    setTemplateConfig(this.tenantKey, updated);
     return { success: true, data: updated };
   }
 
@@ -187,7 +189,7 @@ export class ConfigToolExecutor {
       return { success: false, error: 'scenario must be "partialBackorder" or "allBackordered"' };
     }
 
-    const current = getTemplateConfig();
+    const current = getTemplateConfig(this.tenantKey);
     const htmlConfig = { ...(current.html ?? {}) };
 
     if (html === '' || html === null || html === undefined) {
@@ -200,7 +202,7 @@ export class ConfigToolExecutor {
       ...current,
       html: Object.keys(htmlConfig).length > 0 ? htmlConfig : undefined,
     };
-    setTemplateConfig(updated);
+    setTemplateConfig(this.tenantKey, updated);
     return { success: true, data: { scenario, cleared: !html, message: html ? 'Custom HTML set.' : 'Custom HTML cleared — using generated template.' } };
   }
 
@@ -210,7 +212,7 @@ export class ConfigToolExecutor {
       return { success: false, error: 'scenario must be "partialBackorder" or "allBackordered"' };
     }
 
-    const config = getTemplateConfig();
+    const config = getTemplateConfig(this.tenantKey);
 
     // Mock order data
     const mockOrder: ShopifyOrder = {
