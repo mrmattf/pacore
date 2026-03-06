@@ -6,7 +6,10 @@ import { WebSocketServer, WebSocket } from 'ws';
 import jwt from 'jsonwebtoken';
 import { Pool } from 'pg';
 import { Orchestrator } from '../orchestration';
+import { createHash } from 'crypto';
 import { createAuthRoutes } from './auth-routes';
+import { createOAuthRoutes } from './oauth-routes';
+import { createMcpCredentialRoutes } from './mcp-credential-routes';
 import { MCPRegistry, CredentialManager, CredentialScope } from '../mcp';
 import { MCPClient } from '../mcp';
 import { WorkflowManager, WorkflowExecutor, WorkflowBuilder } from '../workflow';
@@ -24,7 +27,8 @@ import { BillingScope, MCPServer, PlanTier, UserSkillConfig, WebhookVerification
 
 export interface GatewayConfig {
   port: number;
-  jwtSecret: string;
+  jwtPublicKey: string;   // ES256 PEM public key — verifies access tokens
+  jwtPrivateKey: string;  // ES256 PEM private key — signs access tokens (used by auth routes)
   corsOrigins?: string[];
   db: Pool;
   mcpRegistry: MCPRegistry;
@@ -93,38 +97,64 @@ export class APIGateway {
       next();
     });
 
-    // Authentication middleware
-    this.app.use(this.authenticateRequest.bind(this));
+    // OAuth + metadata endpoints — public, mounted before auth middleware
+    this.app.use(createOAuthRoutes(this.config.db));
+
+    // Authentication middleware (async to support opaque token DB lookup)
+    this.app.use((req, res, next) => {
+      this.authenticateRequest(req as AuthenticatedRequest, res, next).catch(next);
+    });
   }
 
-  private authenticateRequest(
+  private async authenticateRequest(
     req: AuthenticatedRequest,
     res: Response,
     next: NextFunction,
-  ): any {
-    // Skip auth for health check, auth routes, webhook triggers, and static assets
+  ): Promise<void> {
+    // Skip auth for: health, auth routes, webhook triggers, OAuth endpoints, static assets
     if (
       req.path === '/health' ||
       req.path.startsWith('/v1/auth/') ||
       req.path.startsWith('/v1/triggers/webhook/') ||
-      !req.path.startsWith('/v1') && !req.path.startsWith('/internal')
+      req.path.startsWith('/oauth/') ||
+      req.path.startsWith('/.well-known/') ||
+      (!req.path.startsWith('/v1') && !req.path.startsWith('/internal'))
     ) {
       return next();
     }
 
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
-      return res.status(401).json({ error: 'Unauthorized' });
+      res.status(401).json({ error: 'Unauthorized' });
+      return;
     }
 
     const token = authHeader.slice(7);
 
+    // Opaque token (no dots) → look up in oauth_access_tokens table
+    if (!token.includes('.')) {
+      const tokenHash = createHash('sha256').update(token).digest('hex');
+      const result = await this.config.db.query(
+        `SELECT oat.user_id, u.email
+         FROM oauth_access_tokens oat JOIN users u ON u.id = oat.user_id
+         WHERE oat.token_hash = $1 AND oat.expires_at > NOW()`,
+        [tokenHash],
+      );
+      if (!result.rows[0]) {
+        res.status(401).json({ error: 'Invalid or expired token' });
+        return;
+      }
+      req.user = { id: result.rows[0].user_id, email: result.rows[0].email, type: 'oauth' };
+      return next();
+    }
+
+    // JWT → verify with ES256 public key
     try {
-      const decoded = jwt.verify(token, this.config.jwtSecret) as any;
+      const decoded = jwt.verify(token, this.config.jwtPublicKey, { algorithms: ['ES256'] }) as any;
       req.user = decoded;
       next();
-    } catch (error) {
-      return res.status(401).json({ error: 'Invalid token' });
+    } catch {
+      res.status(401).json({ error: 'Invalid token' });
     }
   }
 
@@ -160,10 +190,14 @@ export class APIGateway {
 
     // Auth routes
     const authRoutes = createAuthRoutes({
-      jwtSecret: this.config.jwtSecret,
+      jwtPrivateKey: this.config.jwtPrivateKey,
+      jwtPublicKey: this.config.jwtPublicKey,
       db: this.config.db,
     });
     this.app.use('/v1/auth', authRoutes);
+
+    // MCP client credential management (per-user client_id + secret pairs)
+    this.app.use(createMcpCredentialRoutes(this.config.db));
 
     // -------------------------------------------------------------------------
     // MCP Gateway — multi-tenant aggregated tool endpoint for AI clients
@@ -2139,7 +2173,7 @@ export class APIGateway {
           return;
         }
 
-        const decoded = jwt.verify(token, this.config.jwtSecret) as any;
+        const decoded = jwt.verify(token, this.config.jwtPublicKey, { algorithms: ['ES256'] }) as any;
 
         if (decoded.type === 'agent') {
           // Handle agent connection (future implementation)

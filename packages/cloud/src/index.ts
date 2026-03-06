@@ -79,11 +79,9 @@ async function main() {
   await registerPlatformMCPServers(dbPool);
   console.log('MCP registry initialized');
 
-  // Initialize Credential Manager
-  const credentialManager = new CredentialManager(
-    dbPool,
-    process.env.JWT_SECRET || 'your-secret-key-change-in-production'
-  );
+  // Initialize Credential Manager (uses a separate encryption secret, not the JWT signing key)
+  const encryptionSecret = process.env.ENCRYPTION_SECRET || process.env.JWT_SECRET || 'your-secret-key-change-in-production';
+  const credentialManager = new CredentialManager(dbPool, encryptionSecret);
   await credentialManager.initialize();
   console.log('Credential manager initialized');
 
@@ -178,10 +176,24 @@ async function main() {
   const zendeskMcpRouter  = createZendeskMcpRouter(credentialManager, adapterRegistry);
   const skillsMcpRouter   = createSkillsMcpRouter(dbPool, credentialManager, adapterRegistry, skillRegistry, skillTemplateRegistry);
 
+  // Load ES256 keypair (base64-encoded PEM in env vars)
+  const jwtPrivateKey = process.env.JWT_PRIVATE_KEY_B64
+    ? Buffer.from(process.env.JWT_PRIVATE_KEY_B64, 'base64').toString('utf8')
+    : (process.env.JWT_PRIVATE_KEY ?? '');
+  const jwtPublicKey = process.env.JWT_PUBLIC_KEY_B64
+    ? Buffer.from(process.env.JWT_PUBLIC_KEY_B64, 'base64').toString('utf8')
+    : (process.env.JWT_PUBLIC_KEY ?? '');
+
+  if (!jwtPrivateKey || !jwtPublicKey) {
+    console.error('JWT_PRIVATE_KEY_B64 and JWT_PUBLIC_KEY_B64 are required. Generate with: openssl ecparam -name prime256v1 -genkey -noout | openssl pkcs8 -topk8 -nocrypt');
+    process.exit(1);
+  }
+
   // Initialize API Gateway
   const gateway = new APIGateway(orchestrator, {
     port: parseInt(process.env.PORT || '3000'),
-    jwtSecret: process.env.JWT_SECRET || 'your-secret-key-change-in-production',
+    jwtPrivateKey,
+    jwtPublicKey,
     corsOrigins: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:3001'],
     db: dbPool,
     mcpRegistry,

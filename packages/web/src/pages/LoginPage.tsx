@@ -17,8 +17,8 @@ export function LoginPage() {
     setError('');
 
     try {
-      const { token, user } = await login(email, password);
-      setAuth(token, user);
+      const { token, refreshToken, user } = await login(email, password);
+      setAuth(token, user, refreshToken);
       navigate('/chat');
     } catch (err) {
       setError('Invalid credentials');

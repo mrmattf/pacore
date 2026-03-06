@@ -1,11 +1,13 @@
 import { Request, Response, Router, NextFunction } from 'express';
 import jwt from 'jsonwebtoken';
 import bcrypt from 'bcrypt';
+import { createHash, randomBytes } from 'crypto';
 import { Pool } from 'pg';
 import { nanoid } from 'nanoid';
 
 export interface AuthConfig {
-  jwtSecret: string;
+  jwtPrivateKey: string;  // PEM EC private key — signs access tokens
+  jwtPublicKey: string;   // PEM EC public key — verifies access tokens
   db: Pool;
 }
 
@@ -17,84 +19,93 @@ interface AuthenticatedRequest extends Request {
   };
 }
 
+function hashToken(token: string): string {
+  return createHash('sha256').update(token).digest('hex');
+}
+
+function generateRefreshToken(): string {
+  return randomBytes(48).toString('hex'); // 96 hex chars, 384 bits
+}
+
+function issueAccessToken(payload: object, privateKey: string): string {
+  return jwt.sign(payload, privateKey, { algorithm: 'ES256', expiresIn: '1h' });
+}
+
+async function storeRefreshToken(
+  db: Pool,
+  userId: string,
+  token: string,
+): Promise<void> {
+  const tokenHash = hashToken(token);
+  const now = new Date();
+  const idleExpiry = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);    // 30 days sliding
+  const absoluteExpiry = new Date(now.getTime() + 365 * 24 * 60 * 60 * 1000); // 1 year absolute
+  await db.query(
+    `INSERT INTO refresh_tokens (token_hash, user_id, expires_at, idle_expires_at)
+     VALUES ($1, $2, $3, $4)`,
+    [tokenHash, userId, absoluteExpiry, idleExpiry],
+  );
+}
+
 /**
- * Authentication routes for user registration and login
+ * Authentication routes: register, login, refresh, logout, me
  */
 export function createAuthRoutes(config: AuthConfig): Router {
   const router = Router();
 
-  // Middleware to verify JWT for protected auth routes
   const requireAuth = (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
       return res.status(401).json({ error: 'Unauthorized' });
     }
-
-    const token = authHeader.slice(7);
-
     try {
-      const decoded = jwt.verify(token, config.jwtSecret) as any;
+      const decoded = jwt.verify(
+        authHeader.slice(7),
+        config.jwtPublicKey,
+        { algorithms: ['ES256'] },
+      ) as any;
       req.user = decoded;
       next();
-    } catch (error) {
+    } catch {
       return res.status(401).json({ error: 'Invalid token' });
     }
   };
 
-  // Register a new user
+  // ---------------------------------------------------------------------------
+  // POST /register
+  // ---------------------------------------------------------------------------
   router.post('/register', async (req: Request, res: Response) => {
     try {
       const { email, password, name } = req.body;
-
-      // Validation
       if (!email || !password) {
         return res.status(400).json({ error: 'Email and password are required' });
       }
-
       if (password.length < 8) {
         return res.status(400).json({ error: 'Password must be at least 8 characters' });
       }
 
-      // Check if user already exists
-      const existingUser = await config.db.query(
-        'SELECT id FROM users WHERE email = $1',
-        [email]
-      );
-
-      if (existingUser.rows.length > 0) {
+      const existing = await config.db.query('SELECT id FROM users WHERE email = $1', [email]);
+      if (existing.rows.length > 0) {
         return res.status(409).json({ error: 'User already exists' });
       }
 
-      // Hash password
       const passwordHash = await bcrypt.hash(password, 10);
-
-      // Create user
       const userId = nanoid();
       await config.db.query(
         `INSERT INTO users (id, email, password_hash, name, created_at, updated_at)
          VALUES ($1, $2, $3, $4, NOW(), NOW())`,
-        [userId, email, passwordHash, name || null]
+        [userId, email, passwordHash, name || null],
       );
 
-      // Generate JWT token
-      const token = jwt.sign(
-        {
-          id: userId,
-          email,
-          type: 'user'
-        },
-        config.jwtSecret,
-        { expiresIn: '7d' }
-      );
+      const accessToken = issueAccessToken({ id: userId, email, type: 'user' }, config.jwtPrivateKey);
+      const refreshToken = generateRefreshToken();
+      await storeRefreshToken(config.db, userId, refreshToken);
 
       res.status(201).json({
         success: true,
-        user: {
-          id: userId,
-          email,
-          name: name || null
-        },
-        token
+        user: { id: userId, email, name: name || null },
+        token: accessToken,
+        refreshToken,
       });
     } catch (error: any) {
       console.error('Registration error:', error);
@@ -102,53 +113,42 @@ export function createAuthRoutes(config: AuthConfig): Router {
     }
   });
 
-  // Login
+  // ---------------------------------------------------------------------------
+  // POST /login
+  // ---------------------------------------------------------------------------
   router.post('/login', async (req: Request, res: Response) => {
     try {
       const { email, password } = req.body;
-
-      // Validation
       if (!email || !password) {
         return res.status(400).json({ error: 'Email and password are required' });
       }
 
-      // Find user
       const result = await config.db.query(
         'SELECT id, email, password_hash, name FROM users WHERE email = $1',
-        [email]
+        [email],
       );
-
       if (result.rows.length === 0) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
       const user = result.rows[0];
-
-      // Verify password
       const isValid = await bcrypt.compare(password, user.password_hash);
       if (!isValid) {
         return res.status(401).json({ error: 'Invalid credentials' });
       }
 
-      // Generate JWT token
-      const token = jwt.sign(
-        {
-          id: user.id,
-          email: user.email,
-          type: 'user'
-        },
-        config.jwtSecret,
-        { expiresIn: '7d' }
+      const accessToken = issueAccessToken(
+        { id: user.id, email: user.email, type: 'user' },
+        config.jwtPrivateKey,
       );
+      const refreshToken = generateRefreshToken();
+      await storeRefreshToken(config.db, user.id, refreshToken);
 
       res.json({
         success: true,
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name
-        },
-        token
+        user: { id: user.id, email: user.email, name: user.name },
+        token: accessToken,
+        refreshToken,
       });
     } catch (error: any) {
       console.error('Login error:', error);
@@ -156,22 +156,91 @@ export function createAuthRoutes(config: AuthConfig): Router {
     }
   });
 
-  // Get current user info (protected route)
+  // ---------------------------------------------------------------------------
+  // POST /refresh — rotate refresh token, issue new access token
+  // ---------------------------------------------------------------------------
+  router.post('/refresh', async (req: Request, res: Response) => {
+    try {
+      const { refreshToken } = req.body;
+      if (!refreshToken) {
+        return res.status(400).json({ error: 'refreshToken required' });
+      }
+
+      const tokenHash = hashToken(refreshToken);
+      const result = await config.db.query(
+        `SELECT rt.user_id, rt.expires_at, rt.idle_expires_at, u.email
+         FROM refresh_tokens rt JOIN users u ON u.id = rt.user_id
+         WHERE rt.token_hash = $1`,
+        [tokenHash],
+      );
+
+      if (!result.rows[0]) {
+        return res.status(401).json({ error: 'Invalid or expired refresh token' });
+      }
+
+      const row = result.rows[0];
+      const now = new Date();
+
+      if (new Date(row.expires_at) < now || new Date(row.idle_expires_at) < now) {
+        await config.db.query('DELETE FROM refresh_tokens WHERE token_hash = $1', [tokenHash]);
+        return res.status(401).json({ error: 'Refresh token expired, please log in again' });
+      }
+
+      // Rotate: delete old token, issue new one (sliding window resets)
+      await config.db.query('DELETE FROM refresh_tokens WHERE token_hash = $1', [tokenHash]);
+      const newRefreshToken = generateRefreshToken();
+      const newHash = hashToken(newRefreshToken);
+      const newIdle = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
+      await config.db.query(
+        `INSERT INTO refresh_tokens (token_hash, user_id, expires_at, idle_expires_at)
+         VALUES ($1, $2, $3, $4)`,
+        [newHash, row.user_id, row.expires_at, newIdle], // keep original absolute expiry
+      );
+
+      const accessToken = issueAccessToken(
+        { id: row.user_id, email: row.email, type: 'user' },
+        config.jwtPrivateKey,
+      );
+
+      res.json({ token: accessToken, refreshToken: newRefreshToken });
+    } catch (error: any) {
+      console.error('Refresh error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // POST /logout — revoke refresh token
+  // ---------------------------------------------------------------------------
+  router.post('/logout', async (req: Request, res: Response) => {
+    try {
+      const { refreshToken } = req.body;
+      if (refreshToken) {
+        await config.db.query(
+          'DELETE FROM refresh_tokens WHERE token_hash = $1',
+          [hashToken(refreshToken)],
+        );
+      }
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error('Logout error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // GET /me — return current user info
+  // ---------------------------------------------------------------------------
   router.get('/me', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const userId = req.user?.id;
-      if (!userId) {
-        return res.status(401).json({ error: 'Unauthorized' });
-      }
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
       const result = await config.db.query(
         'SELECT id, email, name, created_at FROM users WHERE id = $1',
-        [userId]
+        [userId],
       );
-
-      if (result.rows.length === 0) {
-        return res.status(404).json({ error: 'User not found' });
-      }
+      if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
 
       res.json({ user: result.rows[0] });
     } catch (error: any) {

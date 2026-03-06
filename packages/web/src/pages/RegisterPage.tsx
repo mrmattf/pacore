@@ -28,8 +28,8 @@ export function RegisterPage() {
 
     setLoading(true);
     try {
-      const { token, user } = await register(email, password);
-      setAuth(token, user);
+      const { token, refreshToken, user } = await register(email, password);
+      setAuth(token, user, refreshToken);
       navigate('/chat');
     } catch (err) {
       setError('Registration failed. That email may already be in use.');

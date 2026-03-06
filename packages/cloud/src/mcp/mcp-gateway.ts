@@ -1,4 +1,5 @@
 import { Router, Request, Response } from 'express';
+import { randomBytes } from 'crypto';
 import { MCPTool } from '@pacore/core';
 import { MCPRegistry } from './mcp-registry';
 import { MCPClient } from './mcp-client';
@@ -34,6 +35,9 @@ interface AuthenticatedRequest extends Request {
  */
 export class MCPGateway {
   private router = Router();
+  /** In-memory SSE sessions: sessionId → active SSE Response.
+   *  ⚠ Single-instance only. Use Redis Pub/Sub when scaling horizontally. */
+  private sseSessions = new Map<string, Response>();
 
   constructor(private config: MCPGatewayConfig) {
     this.setupRoutes();
@@ -52,6 +56,106 @@ export class MCPGateway {
         protocolVersion: '2024-11-05',
         transport: 'streamable-http',
       });
+    });
+
+    // GET /sse — open an SSE session for streaming MCP (used by Claude Desktop)
+    this.router.get('/sse', (req: AuthenticatedRequest, res: Response) => {
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const sessionId = randomBytes(16).toString('hex');
+
+      res.setHeader('Content-Type', 'text/event-stream');
+      res.setHeader('Cache-Control', 'no-cache');
+      res.setHeader('Connection', 'keep-alive');
+      res.flushHeaders();
+
+      // Send session ID so the client knows where to POST messages
+      res.write(`data: ${JSON.stringify({ type: 'session', sessionId })}\n\n`);
+
+      this.sseSessions.set(sessionId, res);
+
+      // 30s keepalive to prevent proxy timeouts
+      const keepalive = setInterval(() => {
+        res.write(': keepalive\n\n');
+      }, 30_000);
+
+      req.on('close', () => {
+        clearInterval(keepalive);
+        this.sseSessions.delete(sessionId);
+      });
+    });
+
+    // POST /message?sessionId=<id> — receive JSON-RPC 2.0, respond via SSE stream
+    this.router.post('/message', async (req: AuthenticatedRequest, res: Response) => {
+      const sessionId = req.query.sessionId as string;
+      const sseRes = this.sseSessions.get(sessionId);
+      if (!sseRes) {
+        res.status(400).json({ error: 'Unknown or expired sessionId' });
+        return;
+      }
+
+      const userId = req.user?.id;
+      if (!userId) {
+        res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      const body = req.body;
+      if (!body || body.jsonrpc !== '2.0') {
+        res.status(400).json({ error: 'Expected JSON-RPC 2.0 request' });
+        return;
+      }
+
+      const { id, method, params } = body;
+
+      const sendResult = (result: unknown) => {
+        sseRes.write(`data: ${JSON.stringify({ jsonrpc: '2.0', id, result })}\n\n`);
+      };
+      const sendError = (code: number, message: string) => {
+        sseRes.write(`data: ${JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } })}\n\n`);
+      };
+
+      try {
+        let result: unknown;
+
+        switch (method) {
+          case 'initialize':
+            result = {
+              protocolVersion: '2024-11-05',
+              capabilities: { tools: {} },
+              serverInfo: { name: 'PA Core MCP Gateway', version: '1.0.0' },
+            };
+            break;
+          case 'notifications/initialized':
+            result = {};
+            break;
+          case 'tools/list':
+            result = { tools: await this.listTools(userId, req) };
+            break;
+          case 'tools/call': {
+            const toolName = params?.name as string;
+            const toolArgs = (params?.arguments ?? {}) as Record<string, unknown>;
+            if (!toolName) throw new Error('tools/call requires params.name');
+            result = await this.callTool(userId, toolName, toolArgs, req);
+            break;
+          }
+          default:
+            sendError(-32601, `Method not found: ${method}`);
+            res.json({ ok: true });
+            return;
+        }
+
+        sendResult(result);
+        res.json({ ok: true });
+      } catch (error: any) {
+        console.error('[MCPGateway/SSE] Error handling method', method, ':', error.message);
+        sendError(-32603, error.message);
+        res.json({ ok: true });
+      }
     });
 
     // POST: JSON-RPC 2.0 over HTTP
