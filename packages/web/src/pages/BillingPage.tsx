@@ -99,10 +99,10 @@ function StepDetail({ detail }: { detail: unknown }) {
       {topHtml && <HtmlPreview html={topHtml} />}
       {previews && previews.map((p, i) => (
         <div key={i} className="space-y-1">
-          {(p.subject || p.orderNumber) && (
+          {(p.subject != null || p.orderNumber != null) && (
             <div className="text-xs text-gray-500 font-medium">
-              {p.orderNumber && <span>Order #{String(p.orderNumber)} — </span>}
-              {p.subject && <span>{String(p.subject)}</span>}
+              {p.orderNumber != null && <span>Order #{String(p.orderNumber)} — </span>}
+              {p.subject != null && <span>{String(p.subject)}</span>}
             </div>
           )}
           {typeof p.messageHtml === 'string' && <HtmlPreview html={p.messageHtml} />}
