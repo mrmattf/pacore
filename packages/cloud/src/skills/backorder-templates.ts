@@ -91,12 +91,26 @@ function buildVarMap(ctx: PolicyEvalContext): Record<string, unknown> {
   };
 }
 
+/** Coerces an eta value (string or API response object) to a display string. */
+function etaToString(eta: unknown): string {
+  if (!eta) return '';
+  if (typeof eta === 'string') return eta;
+  if (typeof eta === 'object') {
+    const obj = eta as Record<string, unknown>;
+    for (const key of ['value', 'date', 'eta', 'estimated_delivery']) {
+      if (typeof obj[key] === 'string') return obj[key] as string;
+    }
+  }
+  return '';
+}
+
 function buildBackorderedItemsHtml(ctx: PolicyEvalContext): string {
   if (ctx.backorderedItems.length === 0) return '';
 
   const rows = ctx.backorderedItems.map(item => {
-    const etaCell = item.eta
-      ? `<td style="padding: 4px 8px;">Est. ${escapeHtml(String(item.eta))}</td>`
+    const etaStr = etaToString(item.eta);
+    const etaCell = etaStr
+      ? `<td style="padding: 4px 8px;">Est. ${escapeHtml(etaStr)}</td>`
       : '';
     return `
     <tr>
@@ -107,7 +121,7 @@ function buildBackorderedItemsHtml(ctx: PolicyEvalContext): string {
     </tr>`;
   }).join('');
 
-  const etaHeader = ctx.backorderedItems.some(i => i.eta)
+  const etaHeader = ctx.backorderedItems.some(i => etaToString(i.eta))
     ? '<th style="padding: 4px 8px; text-align: left;">Est. Availability</th>'
     : '';
 
