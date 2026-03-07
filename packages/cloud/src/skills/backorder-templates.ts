@@ -97,8 +97,14 @@ function etaToString(eta: unknown): string {
   if (typeof eta === 'string') return eta;
   if (typeof eta === 'object') {
     const obj = eta as Record<string, unknown>;
+    // Try common property names first
     for (const key of ['value', 'date', 'eta', 'estimated_delivery']) {
-      if (typeof obj[key] === 'string') return obj[key] as string;
+      if (typeof obj[key] === 'string' && obj[key]) return obj[key] as string;
+    }
+    // Fallback: first non-empty string value in the object
+    // Handles metafields maps like { "custom.backorder_eta": "2024-01-15" }
+    for (const val of Object.values(obj)) {
+      if (typeof val === 'string' && val) return val;
     }
   }
   return '';
