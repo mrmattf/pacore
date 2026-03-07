@@ -3,9 +3,9 @@
 -- external MCP clients using the OAuth 2.0 Client Credentials grant.
 
 CREATE TABLE IF NOT EXISTS mcp_clients (
-  id            UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id       UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-  org_id        UUID REFERENCES organizations(id) ON DELETE SET NULL,
+  id            TEXT PRIMARY KEY DEFAULT gen_random_uuid()::TEXT,
+  user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  org_id        TEXT REFERENCES organizations(id) ON DELETE SET NULL,
   name          TEXT NOT NULL DEFAULT 'Claude Desktop',
   client_id     TEXT NOT NULL UNIQUE,     -- "mcp_" + 8 random bytes hex
   secret_hash   TEXT NOT NULL,            -- SHA-256 of the client_secret (never stored plaintext)
@@ -16,7 +16,7 @@ CREATE TABLE IF NOT EXISTS mcp_clients (
 CREATE TABLE IF NOT EXISTS oauth_access_tokens (
   token_hash  TEXT PRIMARY KEY,           -- SHA-256 of the opaque 32-byte token
   client_id   TEXT NOT NULL REFERENCES mcp_clients(client_id) ON DELETE CASCADE,
-  user_id     UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expires_at  TIMESTAMPTZ NOT NULL,       -- 1 hour from issuance
   created_at  TIMESTAMPTZ DEFAULT NOW()
 );

@@ -72,45 +72,10 @@ export function createAuthRoutes(config: AuthConfig): Router {
   };
 
   // ---------------------------------------------------------------------------
-  // POST /register
+  // POST /register — disabled, invite-only
   // ---------------------------------------------------------------------------
-  router.post('/register', async (req: Request, res: Response) => {
-    try {
-      const { email, password, name } = req.body;
-      if (!email || !password) {
-        return res.status(400).json({ error: 'Email and password are required' });
-      }
-      if (password.length < 8) {
-        return res.status(400).json({ error: 'Password must be at least 8 characters' });
-      }
-
-      const existing = await config.db.query('SELECT id FROM users WHERE email = $1', [email]);
-      if (existing.rows.length > 0) {
-        return res.status(409).json({ error: 'User already exists' });
-      }
-
-      const passwordHash = await bcrypt.hash(password, 10);
-      const userId = nanoid();
-      await config.db.query(
-        `INSERT INTO users (id, email, password_hash, name, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, NOW(), NOW())`,
-        [userId, email, passwordHash, name || null],
-      );
-
-      const accessToken = issueAccessToken({ id: userId, email, type: 'user' }, config.jwtPrivateKey);
-      const refreshToken = generateRefreshToken();
-      await storeRefreshToken(config.db, userId, refreshToken);
-
-      res.status(201).json({
-        success: true,
-        user: { id: userId, email, name: name || null },
-        token: accessToken,
-        refreshToken,
-      });
-    } catch (error: any) {
-      console.error('Registration error:', error);
-      res.status(500).json({ error: 'Internal server error' });
-    }
+  router.post('/register', (_req: Request, res: Response) => {
+    res.status(403).json({ error: 'Registration is invite-only. Contact an administrator.' });
   });
 
   // ---------------------------------------------------------------------------
@@ -124,7 +89,7 @@ export function createAuthRoutes(config: AuthConfig): Router {
       }
 
       const result = await config.db.query(
-        'SELECT id, email, password_hash, name FROM users WHERE email = $1',
+        'SELECT id, email, password_hash, name, must_change_password FROM users WHERE email = $1',
         [email],
       );
       if (result.rows.length === 0) {
@@ -149,6 +114,7 @@ export function createAuthRoutes(config: AuthConfig): Router {
         user: { id: user.id, email: user.email, name: user.name },
         token: accessToken,
         refreshToken,
+        mustChangePassword: user.must_change_password === true,
       });
     } catch (error: any) {
       console.error('Login error:', error);
@@ -224,6 +190,44 @@ export function createAuthRoutes(config: AuthConfig): Router {
       res.json({ success: true });
     } catch (error: any) {
       console.error('Logout error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // POST /change-password — authenticated, change own password
+  // ---------------------------------------------------------------------------
+  router.post('/change-password', requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user?.id;
+      if (!userId) return res.status(401).json({ error: 'Unauthorized' });
+
+      const { currentPassword, newPassword } = req.body;
+      if (!currentPassword || !newPassword) {
+        return res.status(400).json({ error: 'currentPassword and newPassword are required' });
+      }
+      if (newPassword.length < 8) {
+        return res.status(400).json({ error: 'New password must be at least 8 characters' });
+      }
+
+      const result = await config.db.query(
+        'SELECT password_hash FROM users WHERE id = $1',
+        [userId],
+      );
+      if (!result.rows[0]) return res.status(404).json({ error: 'User not found' });
+
+      const isValid = await bcrypt.compare(currentPassword, result.rows[0].password_hash);
+      if (!isValid) return res.status(401).json({ error: 'Current password is incorrect' });
+
+      const newHash = await bcrypt.hash(newPassword, 10);
+      await config.db.query(
+        'UPDATE users SET password_hash = $1, must_change_password = false, updated_at = NOW() WHERE id = $2',
+        [newHash, userId],
+      );
+
+      res.json({ success: true });
+    } catch (error: any) {
+      console.error('Change password error:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });

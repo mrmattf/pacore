@@ -2,7 +2,85 @@ import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { apiFetch } from '../services/auth';
-import { ArrowLeft, Copy, RotateCcw, Trash2, Plus, Check } from 'lucide-react';
+import { ArrowLeft, Copy, RotateCcw, Trash2, Plus, Check, KeyRound } from 'lucide-react';
+
+function ChangePassword() {
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirm, setConfirm] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+  const [success, setSuccess] = useState(false);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setError('');
+    setSuccess(false);
+    if (newPassword !== confirm) { setError('Passwords do not match'); return; }
+    if (newPassword.length < 8) { setError('Password must be at least 8 characters'); return; }
+    setLoading(true);
+    try {
+      const res = await apiFetch('/v1/auth/change-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ currentPassword, newPassword }),
+      });
+      if (!res.ok) {
+        const data = await res.json();
+        setError(data.error || 'Failed to change password');
+        return;
+      }
+      setSuccess(true);
+      setCurrentPassword(''); setNewPassword(''); setConfirm('');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="bg-white rounded-lg shadow p-6 mt-6">
+      <div className="flex items-center gap-2 mb-3">
+        <KeyRound size={18} className="text-gray-500" />
+        <h2 className="text-lg font-semibold">Change Password</h2>
+      </div>
+      <form onSubmit={handleSubmit} className="space-y-3">
+        <input
+          type="password"
+          placeholder="Current password"
+          value={currentPassword}
+          onChange={(e) => setCurrentPassword(e.target.value)}
+          className="w-full px-4 py-2 border rounded text-sm"
+          required
+        />
+        <input
+          type="password"
+          placeholder="New password (min 8 characters)"
+          value={newPassword}
+          onChange={(e) => setNewPassword(e.target.value)}
+          className="w-full px-4 py-2 border rounded text-sm"
+          required
+        />
+        <input
+          type="password"
+          placeholder="Confirm new password"
+          value={confirm}
+          onChange={(e) => setConfirm(e.target.value)}
+          className="w-full px-4 py-2 border rounded text-sm"
+          required
+        />
+        {error && <p className="text-red-500 text-sm">{error}</p>}
+        {success && <p className="text-green-600 text-sm">Password changed successfully.</p>}
+        <button
+          type="submit"
+          disabled={loading}
+          className="px-4 py-2 bg-blue-600 text-white text-sm rounded hover:bg-blue-700 disabled:opacity-50"
+        >
+          {loading ? 'Saving...' : 'Update password'}
+        </button>
+      </form>
+    </div>
+  );
+}
 
 interface McpClient {
   id: string;
@@ -18,7 +96,7 @@ interface NewCredential {
   name: string;
 }
 
-function DeveloperCredentials({ token }: { token: string | null }) {
+function DeveloperCredentials() {
   const [clients, setClients] = useState<McpClient[]>([]);
   const [loading, setLoading] = useState(true);
   const [newCredential, setNewCredential] = useState<NewCredential | null>(null);
@@ -398,7 +476,8 @@ export function SettingsPage() {
           </div>
         </div>
 
-        <DeveloperCredentials token={token} />
+        <DeveloperCredentials />
+        <ChangePassword />
       </div>
     </div>
   );

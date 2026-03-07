@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { useNavigate, Link } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
 import { login } from '../services/auth';
 
@@ -17,9 +17,9 @@ export function LoginPage() {
     setError('');
 
     try {
-      const { token, refreshToken, user } = await login(email, password);
-      setAuth(token, user, refreshToken);
-      navigate('/chat');
+      const { token, refreshToken, user, mustChangePassword } = await login(email, password);
+      setAuth(token, user, refreshToken, mustChangePassword);
+      navigate(mustChangePassword ? '/change-password' : '/skills');
     } catch (err) {
       setError('Invalid credentials');
     } finally {
@@ -30,7 +30,7 @@ export function LoginPage() {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50">
       <div className="max-w-md w-full bg-white p-8 rounded-lg shadow">
-        <h1 className="text-2xl font-bold mb-6 text-center">PA Core</h1>
+        <h1 className="text-2xl font-bold mb-6 text-center">Clarissi</h1>
         <form onSubmit={handleSubmit} className="space-y-4">
           <input
             type="email"
@@ -57,11 +57,8 @@ export function LoginPage() {
             {loading ? 'Logging in...' : 'Login'}
           </button>
         </form>
-        <p className="mt-4 text-center text-sm text-gray-600">
-          Don't have an account?{' '}
-          <Link to="/register" className="text-blue-600 hover:underline">
-            Sign up
-          </Link>
+        <p className="mt-4 text-center text-sm text-gray-500">
+          Access is by invitation only.
         </p>
       </div>
     </div>

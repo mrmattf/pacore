@@ -10,6 +10,7 @@ import { SkillsPage } from './pages/SkillsPage';
 import { TemplatePickerPage } from './pages/TemplatePickerPage';
 import { SkillConfigPage } from './pages/SkillConfigPage';
 import { BillingPage } from './pages/BillingPage';
+import { ChangePasswordPage } from './pages/ChangePasswordPage';
 import { useAuthStore } from './store/authStore';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
@@ -103,7 +104,15 @@ export function App() {
             </PrivateRoute>
           }
         />
-        <Route path="/" element={<Navigate to="/chat" />} />
+        <Route
+          path="/change-password"
+          element={
+            <PrivateRoute>
+              <ChangePasswordPage />
+            </PrivateRoute>
+          }
+        />
+        <Route path="/" element={<Navigate to="/skills" />} />
       </Routes>
     </BrowserRouter>
   );

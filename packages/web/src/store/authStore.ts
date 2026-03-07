@@ -5,8 +5,10 @@ interface AuthState {
   token: string | null;
   refreshToken: string | null;
   user: any | null;
-  setAuth: (token: string, user: any, refreshToken?: string) => void;
+  mustChangePassword: boolean;
+  setAuth: (token: string, user: any, refreshToken?: string, mustChangePassword?: boolean) => void;
   updateToken: (token: string, refreshToken: string) => void;
+  clearMustChangePassword: () => void;
   logout: () => void;
 }
 
@@ -16,9 +18,12 @@ export const useAuthStore = create<AuthState>()(
       token: null,
       refreshToken: null,
       user: null,
-      setAuth: (token, user, refreshToken) => set({ token, user, refreshToken: refreshToken ?? null }),
+      mustChangePassword: false,
+      setAuth: (token, user, refreshToken, mustChangePassword) =>
+        set({ token, user, refreshToken: refreshToken ?? null, mustChangePassword: mustChangePassword ?? false }),
       updateToken: (token, refreshToken) => set({ token, refreshToken }),
-      logout: () => set({ token: null, refreshToken: null, user: null }),
+      clearMustChangePassword: () => set({ mustChangePassword: false }),
+      logout: () => set({ token: null, refreshToken: null, user: null, mustChangePassword: false }),
     }),
     {
       name: 'pacore-auth',

@@ -10,6 +10,7 @@ import { createHash } from 'crypto';
 import { createAuthRoutes } from './auth-routes';
 import { createOAuthRoutes } from './oauth-routes';
 import { createMcpCredentialRoutes } from './mcp-credential-routes';
+import { createAdminRoutes } from './admin-routes';
 import { MCPRegistry, CredentialManager, CredentialScope } from '../mcp';
 import { MCPClient } from '../mcp';
 import { WorkflowManager, WorkflowExecutor, WorkflowBuilder } from '../workflow';
@@ -115,6 +116,7 @@ export class APIGateway {
     if (
       req.path === '/health' ||
       req.path.startsWith('/v1/auth/') ||
+      req.path.startsWith('/v1/admin/') ||
       req.path.startsWith('/v1/triggers/webhook/') ||
       req.path.startsWith('/oauth/') ||
       req.path.startsWith('/.well-known/') ||
@@ -198,6 +200,9 @@ export class APIGateway {
 
     // MCP client credential management (per-user client_id + secret pairs)
     this.app.use(createMcpCredentialRoutes(this.config.db));
+
+    // Admin routes — protected by X-Admin-Secret header, bypass JWT auth
+    this.app.use('/v1/admin', createAdminRoutes(this.config.db));
 
     // -------------------------------------------------------------------------
     // MCP Gateway — multi-tenant aggregated tool endpoint for AI clients

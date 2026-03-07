@@ -3,7 +3,7 @@
 
 CREATE TABLE IF NOT EXISTS refresh_tokens (
   token_hash      TEXT PRIMARY KEY,         -- SHA-256 of the opaque 48-byte token
-  user_id         UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  user_id         TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   expires_at      TIMESTAMPTZ NOT NULL,     -- absolute ceiling: 1 year from creation
   idle_expires_at TIMESTAMPTZ NOT NULL,     -- sliding window: 30 days from last use
   created_at      TIMESTAMPTZ DEFAULT NOW(),

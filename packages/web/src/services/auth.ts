@@ -13,7 +13,7 @@ export async function login(email: string, password: string) {
     throw new Error('Login failed');
   }
 
-  return response.json(); // { token, refreshToken, user }
+  return response.json(); // { token, refreshToken, user, mustChangePassword }
 }
 
 export async function register(email: string, password: string, name?: string) {

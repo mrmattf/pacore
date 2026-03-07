@@ -1,4 +1,6 @@
 import 'dotenv/config';
+import fs from 'fs';
+import path from 'path';
 import { LLMProviderRegistry } from '@pacore/core';
 import { AnthropicProvider, OpenAIProvider, OllamaProvider, CustomEndpointProvider } from '@pacore/adapters';
 import { VectorMemoryStore, PgVectorStore, MemoryManager } from './memory';
@@ -28,6 +30,33 @@ import { createZendeskMcpRouter } from './integrations/zendesk/zendesk-mcp-route
 import { createSkillsMcpRouter } from './mcp/skills-mcp-router';
 
 /**
+ * Run all SQL migrations in db/ directory in filename order.
+ * Uses a migrations table to track which have been applied.
+ * All migration files must be idempotent (IF NOT EXISTS / IF EXISTS).
+ */
+async function runMigrations(pool: Pool): Promise<void> {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS _migrations (
+      filename TEXT PRIMARY KEY,
+      applied_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `);
+  const dbDir = path.join(__dirname, '..', 'db');
+  if (!fs.existsSync(dbDir)) return;
+  const files = fs.readdirSync(dbDir).filter(f => f.endsWith('.sql')).sort();
+  const { rows: applied } = await pool.query('SELECT filename FROM _migrations');
+  const appliedSet = new Set(applied.map((r: { filename: string }) => r.filename));
+  for (const file of files) {
+    if (appliedSet.has(file)) continue;
+    console.log(`[migration] Applying ${file}...`);
+    const sql = fs.readFileSync(path.join(dbDir, file), 'utf8');
+    await pool.query(sql);
+    await pool.query('INSERT INTO _migrations (filename) VALUES ($1)', [file]);
+    console.log(`[migration] ${file} done.`);
+  }
+}
+
+/**
  * Main entry point for the cloud service
  */
 async function main() {
@@ -48,6 +77,10 @@ async function main() {
   const dbPool = new Pool({
     connectionString: process.env.DATABASE_URL || 'postgresql://localhost/pacore',
   });
+
+  // Run pending DB migrations on startup
+  await runMigrations(dbPool);
+  console.log('Migrations up to date.');
 
   // Determine which vector store to use
   const vectorStoreType = process.env.VECTOR_STORE || 'pgvector';
