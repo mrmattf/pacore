@@ -4,7 +4,7 @@
  * tags are stripped. Common HTML entities are decoded. Excess whitespace
  * is collapsed.
  */
-export function toPlainText(html: string, maxLen = 600): string {
+export function toPlainText(html: string): string {
   return html
     .replace(/<br\s*\/?>/gi, '\n')
     .replace(/<\/(?:p|div|tr|li|h[1-6]|table|thead|tbody|section|article)>/gi, '\n')
@@ -17,6 +17,5 @@ export function toPlainText(html: string, maxLen = 600): string {
     .replace(/[ \t]+/g, ' ')
     .replace(/\n[ \t]+/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
-    .trim()
-    .slice(0, maxLen);
+    .trim();
 }
