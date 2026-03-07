@@ -4,6 +4,7 @@ import { BillingScope, SkillTrigger, WebhookVerification } from '@pacore/core';
 import { SkillRegistry } from '../skills/skill-registry';
 import { SkillDispatcher } from '../skills/skill-dispatcher';
 import { BillingManager } from '../billing';
+import { isSandboxPlan } from '../billing/plan-definitions';
 import { Pool } from 'pg';
 
 export class WebhookTriggerHandler {
@@ -47,7 +48,8 @@ export class WebhookTriggerHandler {
       return { status: 400, body: 'Invalid JSON body' };
     }
 
-    // Check execution quota before accepting the job (returns 429 for external callers)
+    // Check execution quota and determine sandbox mode
+    let sandboxMode = false;
     if (this.billingManager && this.db) {
       const scopeRow = await this.db.query<{ user_id: string | null; org_id: string | null }>(
         'SELECT user_id, org_id FROM user_skills WHERE id = $1',
@@ -58,23 +60,28 @@ export class WebhookTriggerHandler {
         const scope: BillingScope = org_id
           ? { type: 'org', orgId: org_id }
           : { type: 'user', userId: user_id! };
-        const overLimit = await this.billingManager.isOverLimit(scope, 'skillExecutionsPerMonth');
-        if (overLimit) {
-          return { status: 429, body: 'Monthly execution limit reached. Upgrade your plan.' };
+        const plan = await this.billingManager.getEffectivePlan(scope);
+        sandboxMode = isSandboxPlan(plan);
+        if (!sandboxMode) {
+          const overLimit = await this.billingManager.isOverLimit(scope, 'skillExecutionsPerMonth');
+          if (overLimit) {
+            return { status: 429, body: 'Monthly execution limit reached. Upgrade your plan.' };
+          }
         }
       }
     }
 
-    // Start execution record
+    // Start execution record (sandbox flag controls billing increment + dry-run)
     const execution = await this.skillRegistry.createExecution(
       trigger.userSkillId,
       trigger.id,
-      parsedPayload
+      parsedPayload,
+      { sandbox: sandboxMode }
     );
 
     // Dispatch asynchronously — caller gets 200 immediately
     this.skillDispatcher
-      .dispatch(execution.id, trigger.userSkillId, parsedPayload)
+      .dispatch(execution.id, trigger.userSkillId, parsedPayload, { dryRun: sandboxMode })
       .catch(err => {
         console.error(`[WebhookTrigger] Dispatch error for execution ${execution.id}:`, err);
       });

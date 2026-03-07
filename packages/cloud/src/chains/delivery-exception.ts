@@ -1,4 +1,4 @@
-import type { UserSkillConfig, AdapterAction, Action, CompiledPolicy } from '@pacore/core';
+import type { UserSkillConfig, AdapterAction, Action, CompiledPolicy, ExecutionStep } from '@pacore/core';
 import type {
   DeliveryExceptionPolicyEvalContext,
   DeliveryExceptionCondition,
@@ -27,10 +27,18 @@ export interface DeliveryExceptionChainResult {
   exceptionMessage: string;
   actions: string[];
   invokeResults: unknown[];
+  steps: ExecutionStep[];
   skipped?: boolean;
   skipReason?: string;
   dryRun?: {
     wouldNotify: Array<{ slot: string; capability: string; subject: string; message: string }>;
+  };
+}
+
+function stepTimer(steps: ExecutionStep[], name: string) {
+  const start = Date.now();
+  return (status: ExecutionStep['status'], summary: string, detail?: unknown) => {
+    steps.push({ name, status, summary, detail, duration_ms: Date.now() - start });
   };
 }
 
@@ -129,8 +137,11 @@ export async function runDeliveryExceptionChain(
   options: { dryRun?: boolean } = {}
 ): Promise<DeliveryExceptionChainResult> {
   const { credentialManager, skillTemplateRegistry, adapterRegistry } = deps;
+  const steps: ExecutionStep[] = [];
 
+  const doneParse = stepTimer(steps, 'Parse Tracking Event');
   const afterShipPayload = extractAfterShipPayload(rawPayload);
+  doneParse('ok', `Parsed AfterShip event: tag=${afterShipPayload.tag}, tracking=${afterShipPayload.trackingNumber}`, { tag: afterShipPayload.tag, trackingNumber: afterShipPayload.trackingNumber });
 
   const baseResult: Omit<DeliveryExceptionChainResult, 'orderId' | 'orderNumber'> & { orderId: number; orderNumber: number } = {
     trackingNumber:  afterShipPayload.trackingNumber,
@@ -141,16 +152,20 @@ export async function runDeliveryExceptionChain(
     exceptionMessage: afterShipPayload.exceptionMessage,
     actions:         [],
     invokeResults:   [],
+    steps,
   };
 
   // ---- Skip if not an exception event ----
+  const doneEventType = stepTimer(steps, 'Check Event Type');
   if (afterShipPayload.tag !== 'Exception') {
+    doneEventType('skipped', `Not a delivery exception (tag=${afterShipPayload.tag}) — no action needed`, { tag: afterShipPayload.tag });
     return {
       ...baseResult,
       skipped: true,
       skipReason: `Not a delivery exception (tag=${afterShipPayload.tag}) — no action needed`,
     };
   }
+  doneEventType('ok', `Event is a delivery exception (tag=Exception)`, { tag: afterShipPayload.tag });
 
   // ---- Resolve template ----
   const template = skillTemplateRegistry.getTemplate(userSkillConfig.templateId);
@@ -185,11 +200,13 @@ export async function runDeliveryExceptionChain(
     };
   }
 
+  const doneOrder = stepTimer(steps, 'Fetch Order');
   const order = await shopifyAdapter.getOrder(shopifyOrderId, shopifyCredsMap) as {
     id: number; orderNumber: number; email: string;
     customer: { id: number; firstName: string | null; lastName: string | null } | null;
     totalPrice: string;
   };
+  doneOrder('ok', `Fetched order #${order.orderNumber} (id=${order.id})`, { orderId: order.id, orderNumber: order.orderNumber });
 
   const customerName = order.customer
     ? [order.customer.firstName, order.customer.lastName].filter(Boolean).join(' ') || 'Valued Customer'
@@ -214,9 +231,12 @@ export async function runDeliveryExceptionChain(
     estimatedDelivery: afterShipPayload.estimatedDelivery,
   };
 
+  const donePolicy = stepTimer(steps, 'Evaluate Policy');
   const actions = evaluateDeliveryExceptionPolicy(template.compiledPolicy, ctx);
+  donePolicy('ok', `Policy evaluated: ${actions.length} action(s)`, { actionCount: actions.length });
 
   if (options.dryRun) {
+    const doneSend = stepTimer(steps, 'Send Notifications');
     const previews: DeliveryExceptionChainResult['dryRun'] = { wouldNotify: [] };
 
     for (const action of actions) {
@@ -241,6 +261,7 @@ export async function runDeliveryExceptionChain(
       }
     }
 
+    doneSend('sandbox', `Dry run — would notify ${previews.wouldNotify.length} order(s)`, { count: previews.wouldNotify.length });
     result.dryRun = previews;
     return result;
   }
@@ -299,15 +320,21 @@ export async function runDeliveryExceptionChain(
         invokeParams = { ...invokeParams, subject, message };
       }
 
-      const invokeResult = await adapterRegistry.invokeCapability(
-        slot.integrationKey,
-        invokeAction.capability,
-        invokeParams,
-        slotCreds as unknown as Record<string, unknown>
-      );
-
-      result.actions.push(`${slot.integrationKey}:${invokeAction.capability}`);
-      result.invokeResults.push(invokeResult);
+      const doneAction = stepTimer(steps, `Dispatch Action: ${invokeAction.capability}`);
+      try {
+        const invokeResult = await adapterRegistry.invokeCapability(
+          slot.integrationKey,
+          invokeAction.capability,
+          invokeParams,
+          slotCreds as unknown as Record<string, unknown>
+        );
+        doneAction('ok', `Dispatched ${slot.integrationKey}:${invokeAction.capability} for order #${order.orderNumber}`, { orderId: order.id });
+        result.actions.push(`${slot.integrationKey}:${invokeAction.capability}`);
+        result.invokeResults.push(invokeResult);
+      } catch (err) {
+        doneAction('error', `Failed to dispatch ${slot.integrationKey}:${invokeAction.capability}`, { error: String(err) });
+        throw err;
+      }
     }
   }
 

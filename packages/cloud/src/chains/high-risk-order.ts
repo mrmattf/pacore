@@ -1,4 +1,4 @@
-import type { UserSkillConfig, AdapterAction, Action, CompiledPolicy } from '@pacore/core';
+import type { UserSkillConfig, AdapterAction, Action, CompiledPolicy, ExecutionStep } from '@pacore/core';
 import type {
   HighRiskPolicyEvalContext,
   HighRiskCondition,
@@ -24,6 +24,7 @@ export interface HighRiskChainResult {
   riskScore: number;
   actions: string[];
   invokeResults: unknown[];
+  steps: ExecutionStep[];
   skipped?: boolean;
   skipReason?: string;
   dryRun?: {
@@ -67,6 +68,13 @@ function evaluateHighRiskPolicy(
     if (matches) return rule.actions as Action[];
   }
   return policy.defaultActions as Action[];
+}
+
+function stepTimer(steps: ExecutionStep[], name: string) {
+  const start = Date.now();
+  return (status: ExecutionStep['status'], summary: string, detail?: unknown) => {
+    steps.push({ name, status, summary, detail, duration_ms: Date.now() - start });
+  };
 }
 
 // ---- Webhook payload extraction ----
@@ -133,6 +141,7 @@ export async function runHighRiskOrderChain(
   options: { dryRun?: boolean } = {}
 ): Promise<HighRiskChainResult> {
   const { credentialManager, skillTemplateRegistry, adapterRegistry } = deps;
+  const steps: ExecutionStep[] = [];
 
   // ---- Resolve template ----
   const template = skillTemplateRegistry.getTemplate(userSkillConfig.templateId);
@@ -158,6 +167,7 @@ export async function runHighRiskOrderChain(
   const shopifyAdapter = new ShopifyOrderAdapter();
 
   // ---- Get order ----
+  const doneOrder = stepTimer(steps, 'Fetch Order + Risk');
   const order = await shopifyAdapter.getOrder(orderId, shopifyCredsMap) as {
     id: number; orderNumber: number; email: string;
     customer: { id: number; firstName: string | null; lastName: string | null } | null;
@@ -167,6 +177,7 @@ export async function runHighRiskOrderChain(
   // ---- Get order risks ----
   const risks = await shopifyAdapter.getOrderRisks(orderId, shopifyCredsMap);
   const { recommendation, score, messages } = resolveRiskRecommendation(risks);
+  doneOrder('ok', `Order #${order.orderNumber} — risk: ${recommendation} (score ${score.toFixed(2)})`, { orderId, recommendation, score, riskMessages: messages });
 
   const result: HighRiskChainResult = {
     orderId,
@@ -175,6 +186,7 @@ export async function runHighRiskOrderChain(
     riskScore: score,
     actions: [],
     invokeResults: [],
+    steps,
   };
 
   // ---- Get customer order count ----
@@ -207,9 +219,12 @@ export async function runHighRiskOrderChain(
     customerOrderCount,
   };
 
+  const donePolicy = stepTimer(steps, 'Evaluate Policy');
   const actions = evaluateHighRiskPolicy(template.compiledPolicy, ctx);
+  donePolicy('ok', `Policy evaluated: ${actions.length} action(s), recommendation=${recommendation}`, { recommendation, score, actionCount: actions.length });
 
   if (options.dryRun) {
+    const doneSend = stepTimer(steps, 'Send Notifications');
     const previews: HighRiskChainResult['dryRun'] = { wouldTakeAction: [] };
 
     for (const action of actions) {
@@ -237,6 +252,7 @@ export async function runHighRiskOrderChain(
       previews.wouldTakeAction.push(preview);
     }
 
+    doneSend('sandbox', `Dry run — would take ${previews.wouldTakeAction.length} action(s)`, { count: previews.wouldTakeAction.length });
     result.dryRun = previews;
     return result;
   }
@@ -295,15 +311,23 @@ export async function runHighRiskOrderChain(
         invokeParams = { ...invokeParams, subject, message };
       }
 
-      const invokeResult = await adapterRegistry.invokeCapability(
-        slot.integrationKey,
-        invokeAction.capability,
-        invokeParams,
-        slotCreds as unknown as Record<string, unknown>
-      );
+      
 
-      result.actions.push(`${slot.integrationKey}:${invokeAction.capability}`);
-      result.invokeResults.push(invokeResult);
+      const doneAction = stepTimer(steps, `Dispatch Action: ${invokeAction.capability}`);
+      try {
+        const invokeResult = await adapterRegistry.invokeCapability(
+          slot.integrationKey,
+          invokeAction.capability,
+          invokeParams,
+          slotCreds as unknown as Record<string, unknown>
+        );
+        doneAction('ok', `Dispatched ${slot.integrationKey}:${invokeAction.capability} for order #${order.orderNumber}`, { orderId });
+        result.actions.push(`${slot.integrationKey}:${invokeAction.capability}`);
+        result.invokeResults.push(invokeResult);
+      } catch (err) {
+        doneAction('error', `Failed to dispatch ${slot.integrationKey}:${invokeAction.capability}`, { error: String(err) });
+        throw err;
+      }
     }
   }
 

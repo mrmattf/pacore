@@ -1,4 +1,4 @@
-import type { UserSkillConfig, AdapterAction, Action, CompiledPolicy } from '@pacore/core';
+import type { UserSkillConfig, AdapterAction, Action, CompiledPolicy, ExecutionStep } from '@pacore/core';
 import type {
   LowStockPolicyEvalContext,
   AffectedItemContext,
@@ -31,6 +31,7 @@ export interface LowStockChainResult {
   affectedOrderCount: number;
   notifiedOrderCount: number;
   orderResults: LowStockOrderResult[];
+  steps: ExecutionStep[];
   skipped?: boolean;
   skipReason?: string;
   dryRun?: {
@@ -68,6 +69,13 @@ function evaluateLowStockPolicy(
     if (matches) return rule.actions as Action[];
   }
   return policy.defaultActions as Action[];
+}
+
+function stepTimer(steps: ExecutionStep[], name: string) {
+  const start = Date.now();
+  return (status: ExecutionStep['status'], summary: string, detail?: unknown) => {
+    steps.push({ name, status, summary, detail, duration_ms: Date.now() - start });
+  };
 }
 
 // ---- Webhook payload extraction ----
@@ -118,6 +126,7 @@ export async function runLowStockImpactChain(
   options: { dryRun?: boolean } = {}
 ): Promise<LowStockChainResult> {
   const { credentialManager, skillTemplateRegistry, adapterRegistry } = deps;
+  const steps: ExecutionStep[] = [];
   const { inventoryItemId, available } = inventoryPayload;
 
   // ---- Resolve template ----
@@ -153,13 +162,17 @@ export async function runLowStockImpactChain(
     affectedOrderCount: 0,
     notifiedOrderCount: 0,
     orderResults: [],
+    steps,
   };
 
+  const doneThreshold = stepTimer(steps, 'Check Threshold');
   if (available > threshold) {
+    doneThreshold('skipped', `Inventory (${available}) is above threshold (${threshold}) — no action needed`, { available, threshold });
     result.skipped = true;
     result.skipReason = `Inventory (${available}) is above threshold (${threshold}) — no action needed`;
     return result;
   }
+  doneThreshold('ok', `Inventory (${available}) is at or below threshold (${threshold}) — proceeding`, { available, threshold });
 
   // ---- Resolve variant from inventory item ----
   const variant = await shopifyAdapter.getVariantByInventoryItem(inventoryItemId, shopifyCredsMap);
@@ -183,18 +196,22 @@ export async function runLowStockImpactChain(
   result.productTitle = productTitle;
 
   // ---- Find affected open orders ----
+  const doneFindOrders = stepTimer(steps, 'Find Affected Orders');
   const affectedOrders = await shopifyAdapter.findOrdersByVariant(variantId, shopifyCredsMap);
 
   if (affectedOrders.length === 0) {
+    doneFindOrders('skipped', 'No open orders contain this variant — no customers to notify', { variantId });
     result.skipped = true;
     result.skipReason = 'No open orders contain this variant — no customers to notify';
     return result;
   }
+  doneFindOrders('ok', `Found ${affectedOrders.length} affected order(s)`, { variantId, count: affectedOrders.length });
 
   result.affectedOrderCount = affectedOrders.length;
 
   if (options.dryRun) {
     // Dry run: render previews without dispatching
+    const doneSend = stepTimer(steps, 'Send Notifications');
     const previews: LowStockChainResult['dryRun'] = { wouldNotify: [] };
 
     for (const order of affectedOrders) {
@@ -244,6 +261,7 @@ export async function runLowStockImpactChain(
       }
     }
 
+    doneSend('sandbox', `Dry run — would notify ${previews.wouldNotify.length} order(s)`, { count: previews.wouldNotify.length });
     result.dryRun = previews;
     return result;
   }
@@ -342,15 +360,21 @@ export async function runLowStockImpactChain(
           invokeParams = { ...invokeParams, subject, message };
         }
 
-        const invokeResult = await adapterRegistry.invokeCapability(
-          slot.integrationKey,
-          invokeAction.capability,
-          invokeParams,
-          slotCreds as unknown as Record<string, unknown>
-        );
-
-        orderResult.actions.push(`${slot.integrationKey}:${invokeAction.capability}`);
-        orderResult.invokeResults.push(invokeResult);
+        const doneAction = stepTimer(steps, `Notify Order #${order.order_number}`);
+        try {
+          const invokeResult = await adapterRegistry.invokeCapability(
+            slot.integrationKey,
+            invokeAction.capability,
+            invokeParams,
+            slotCreds as unknown as Record<string, unknown>
+          );
+          doneAction('ok', `Dispatched ${slot.integrationKey}:${invokeAction.capability} for order #${order.order_number}`, { orderId: order.id });
+          orderResult.actions.push(`${slot.integrationKey}:${invokeAction.capability}`);
+          orderResult.invokeResults.push(invokeResult);
+        } catch (err) {
+          doneAction('error', `Failed to dispatch ${slot.integrationKey}:${invokeAction.capability} for order #${order.order_number}`, { error: String(err) });
+          throw err;
+        }
       }
     }
 

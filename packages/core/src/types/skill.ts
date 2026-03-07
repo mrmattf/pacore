@@ -50,6 +50,16 @@ export interface SkillTrigger {
   createdAt: Date;
 }
 
+// ---- Execution step (stored inside result JSONB) ----
+
+export interface ExecutionStep {
+  name: string;
+  status: 'ok' | 'skipped' | 'sandbox' | 'error';
+  summary: string;
+  detail?: unknown;
+  duration_ms?: number;
+}
+
 // ---- Execution record ----
 
 export interface SkillExecution {
@@ -62,4 +72,5 @@ export interface SkillExecution {
   error: string | null;
   startedAt: Date;
   completedAt: Date | null;
+  sandbox: boolean;
 }

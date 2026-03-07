@@ -26,7 +26,7 @@ export class SkillDispatcher {
     executionId: string,
     userSkillId: string,
     payload: unknown,
-    options: { hmacHeader?: string; rawBody?: Buffer } = {}
+    options: { hmacHeader?: string; rawBody?: Buffer; dryRun?: boolean } = {}
   ): Promise<void> {
     const userSkill = await this.skillRegistry.getUserSkill(userSkillId);
     if (!userSkill) {
@@ -84,7 +84,7 @@ export class SkillDispatcher {
                 skillTemplateRegistry: this.skillTemplateRegistry!,
                 adapterRegistry: this.adapterRegistry,
               },
-              { dryRun: (options as Record<string, unknown>).dryRun as boolean | undefined }
+              { dryRun: options.dryRun }
             );
             break;
           }
@@ -101,7 +101,7 @@ export class SkillDispatcher {
                 skillTemplateRegistry: this.skillTemplateRegistry!,
                 adapterRegistry: this.adapterRegistry,
               },
-              { dryRun: (options as Record<string, unknown>).dryRun as boolean | undefined }
+              { dryRun: options.dryRun }
             );
             break;
           }
@@ -118,7 +118,7 @@ export class SkillDispatcher {
                 skillTemplateRegistry: this.skillTemplateRegistry!,
                 adapterRegistry: this.adapterRegistry,
               },
-              { dryRun: (options as Record<string, unknown>).dryRun as boolean | undefined }
+              { dryRun: options.dryRun }
             );
             break;
           }

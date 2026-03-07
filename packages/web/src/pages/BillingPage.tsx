@@ -1,5 +1,7 @@
-import { RefreshCw, Zap, Building2, Users, CreditCard } from 'lucide-react';
+import { useState } from 'react';
+import { RefreshCw, Zap, Building2, Users, CreditCard, CheckCircle, XCircle, Clock, ChevronDown, ChevronRight } from 'lucide-react';
 import { useBilling, PlanTier, LimitSummaryItem } from '../hooks/useBilling';
+import { useSkillExecutions, SkillExecution, ExecutionStep } from '../hooks/useSkillExecutions';
 
 // ─── Plan badge colours ──────────────────────────────────────────────────────
 const PLAN_COLORS: Record<PlanTier, string> = {
@@ -54,6 +56,135 @@ function fmtPrice(p: number | null) {
   if (p === null) return 'Custom';
   if (p === 0) return 'Free';
   return `$${p}/mo`;
+}
+
+// ─── Step timeline row ───────────────────────────────────────────────────────
+const STEP_ICONS: Record<ExecutionStep['status'], string> = {
+  ok:      '✓',
+  skipped: '—',
+  sandbox: '◎',
+  error:   '✕',
+};
+const STEP_COLORS: Record<ExecutionStep['status'], string> = {
+  ok:      'text-green-600',
+  skipped: 'text-gray-400',
+  sandbox: 'text-amber-500',
+  error:   'text-red-500',
+};
+
+function StepRow({ step }: { step: ExecutionStep }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="text-xs py-0.5">
+      <button
+        className="flex items-start gap-2 w-full text-left hover:bg-gray-50 rounded px-1"
+        onClick={() => step.detail != null && setOpen(!open)}
+      >
+        <span className={`font-mono font-bold w-3 shrink-0 mt-px ${STEP_COLORS[step.status]}`}>
+          {STEP_ICONS[step.status]}
+        </span>
+        <span className="text-gray-500 w-28 shrink-0">{step.name}</span>
+        <span className="text-gray-700 flex-1">{step.summary}</span>
+        {step.duration_ms != null && (
+          <span className="text-gray-300 tabular-nums shrink-0">{step.duration_ms}ms</span>
+        )}
+      </button>
+      {open && step.detail != null && (
+        <pre className="mt-1 ml-5 p-2 bg-white border rounded text-xs text-gray-600 whitespace-pre-wrap break-all max-h-40 overflow-auto">
+          {JSON.stringify(step.detail, null, 2)}
+        </pre>
+      )}
+    </div>
+  );
+}
+
+// ─── Activity feed ───────────────────────────────────────────────────────────
+function ActivityFeed() {
+  const { executions, loading, error, refresh } = useSkillExecutions(20);
+  const [expanded, setExpanded] = useState<string | null>(null);
+
+  function skillLabel(ex: SkillExecution) {
+    if (!ex.skillTypeId) return `Skill …${ex.userSkillId.slice(-8)}`;
+    return ex.skillTypeId.split('-').map((w: string) => w[0].toUpperCase() + w.slice(1)).join(' ');
+  }
+
+  function duration(ex: SkillExecution) {
+    if (!ex.completedAt) return null;
+    const ms = new Date(ex.completedAt).getTime() - new Date(ex.startedAt).getTime();
+    return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
+  }
+
+  function relativeTime(iso: string) {
+    const diff = Date.now() - new Date(iso).getTime();
+    if (diff < 60000) return 'just now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    return new Date(iso).toLocaleDateString();
+  }
+
+  return (
+    <div className="bg-white border rounded-lg p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Recent Activity</h2>
+        <button onClick={refresh} className="text-xs text-gray-400 hover:text-gray-600">Refresh</button>
+      </div>
+      {loading && <p className="text-sm text-gray-400">Loading...</p>}
+      {error && <p className="text-sm text-red-500">{error}</p>}
+      {!loading && executions.length === 0 && <p className="text-sm text-gray-400">No executions yet.</p>}
+      <div className="divide-y divide-gray-50">
+        {executions.map((ex) => (
+          <div key={ex.id}>
+            <button
+              className="w-full text-left py-2.5 flex items-center gap-3 hover:bg-gray-50 rounded px-1 -mx-1"
+              onClick={() => setExpanded(expanded === ex.id ? null : ex.id)}
+            >
+              {ex.status === 'completed' && <CheckCircle size={14} className="text-green-500 shrink-0" />}
+              {ex.status === 'failed'    && <XCircle    size={14} className="text-red-500 shrink-0" />}
+              {ex.status === 'running'   && <Clock      size={14} className="text-yellow-500 shrink-0 animate-pulse" />}
+              {ex.sandbox && (
+                <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium shrink-0">Sandbox</span>
+              )}
+              <span className="flex-1 text-sm text-gray-800 font-medium">{skillLabel(ex)}</span>
+              <span className="text-xs text-gray-400 tabular-nums">{duration(ex) ?? '—'}</span>
+              <span className="text-xs text-gray-400 w-20 text-right tabular-nums">{relativeTime(ex.startedAt)}</span>
+              {expanded === ex.id
+                ? <ChevronDown  size={12} className="text-gray-400 shrink-0" />
+                : <ChevronRight size={12} className="text-gray-400 shrink-0" />}
+            </button>
+            {expanded === ex.id && (() => {
+              const steps = (ex.result as Record<string, unknown> | null)?.steps as ExecutionStep[] | undefined;
+              return (
+                <div className="mx-1 mb-2 border-l-2 border-gray-100 ml-5 pl-3 py-1 space-y-0.5">
+                  {steps && steps.length > 0 ? (
+                    steps.map((step, i) => <StepRow key={i} step={step} />)
+                  ) : (
+                    <>
+                      {ex.error && (
+                        <div className="text-xs text-red-600 py-1">
+                          <span className="font-semibold">Error: </span>{ex.error}
+                        </div>
+                      )}
+                      {!ex.error && (
+                        <div className="text-xs text-gray-400 py-1">No step detail available</div>
+                      )}
+                    </>
+                  )}
+                  {ex.payload != null && (
+                    <details className="mt-1">
+                      <summary className="text-xs cursor-pointer text-gray-400 hover:text-gray-600 pl-5">Payload</summary>
+                      <pre className="mt-1 ml-5 p-2 bg-white border rounded text-xs text-gray-600 whitespace-pre-wrap break-all max-h-40 overflow-auto">
+                        {JSON.stringify(ex.payload, null, 2)}
+                      </pre>
+                    </details>
+                  )}
+                </div>
+              );
+            })()}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 // ─── Main page ───────────────────────────────────────────────────────────────
@@ -174,6 +305,9 @@ export function BillingPage({ orgId }: BillingPageProps) {
               </div>
             </div>
           )}
+
+          {/* ── Recent Activity ── */}
+          <ActivityFeed />
 
           {/* ── Plan Comparison Table ── */}
           {plans.length > 0 && (

@@ -204,10 +204,13 @@ export class SkillRegistry {
   async createExecution(
     userSkillId: string,
     triggerId: string | null,
-    payload: unknown
+    payload: unknown,
+    opts: { sandbox?: boolean } = {}
   ): Promise<SkillExecution> {
-    // Resolve billing scope from the user_skill row and increment usage counter
-    if (this.billingManager) {
+    const sandbox = opts.sandbox ?? false;
+
+    // Increment usage counter only for real (non-sandbox) executions
+    if (this.billingManager && !sandbox) {
       const scopeRow = await this.db.query<{ user_id: string | null; org_id: string | null }>(
         'SELECT user_id, org_id FROM user_skills WHERE id = $1',
         [userSkillId]
@@ -223,10 +226,10 @@ export class SkillRegistry {
 
     const id = nanoid();
     const result = await this.db.query(
-      `INSERT INTO skill_executions (id, user_skill_id, trigger_id, status, payload)
-       VALUES ($1, $2, $3, 'running', $4)
+      `INSERT INTO skill_executions (id, user_skill_id, trigger_id, status, payload, sandbox)
+       VALUES ($1, $2, $3, 'running', $4, $5)
        RETURNING *`,
-      [id, userSkillId, triggerId, JSON.stringify(payload)]
+      [id, userSkillId, triggerId, JSON.stringify(payload), sandbox]
     );
     return this.rowToExecution(result.rows[0]);
   }
@@ -255,6 +258,22 @@ export class SkillRegistry {
       [userSkillId, limit]
     );
     return result.rows.map(this.rowToExecution);
+  }
+
+  async listAllUserExecutions(userId: string, limit = 20): Promise<(SkillExecution & { skillTypeId: string | null })[]> {
+    const result = await this.db.query(
+      `SELECT se.*, us.configuration->>'skillTypeId' as skill_type_id
+       FROM skill_executions se
+       JOIN user_skills us ON se.user_skill_id = us.id
+       WHERE us.user_id = $1
+       ORDER BY se.started_at DESC
+       LIMIT $2`,
+      [userId, limit]
+    );
+    return result.rows.map(row => ({
+      ...this.rowToExecution(row),
+      skillTypeId: (row.skill_type_id as string | null) ?? null,
+    }));
   }
 
   // ---- Mappers ----
@@ -296,6 +315,7 @@ export class SkillRegistry {
       error: (row.error as string | null) ?? null,
       startedAt: new Date(row.started_at as string),
       completedAt: row.completed_at ? new Date(row.completed_at as string) : null,
+      sandbox: (row.sandbox as boolean) ?? false,
     };
   }
 }

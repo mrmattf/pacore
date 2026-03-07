@@ -1,5 +1,5 @@
 import crypto from 'crypto';
-import type { UserSkillConfig, AdapterAction } from '@pacore/core';
+import type { UserSkillConfig, AdapterAction, ExecutionStep } from '@pacore/core';
 import type {
   BackorderPolicyEvalContext,
   BackorderedItemContext,
@@ -24,9 +24,18 @@ export interface BackorderChainResult {
   backorderedCount: number;
   actions: string[];
   invokeResults: unknown[];
+  steps: ExecutionStep[];
   dryRun?: {
     wouldCreateTicket?: { subject: string; message: string; priority: string };
     wouldSkip?: boolean;
+  };
+}
+
+/** Helper: creates a step timer. Call the returned fn to push a completed step. */
+function stepTimer(steps: ExecutionStep[], name: string) {
+  const start = Date.now();
+  return (status: ExecutionStep['status'], summary: string, detail?: unknown) => {
+    steps.push({ name, status, summary, detail, duration_ms: Date.now() - start });
   };
 }
 
@@ -72,6 +81,7 @@ export async function runBackorderDetectionV2(
   options: { dryRun?: boolean; hmacHeader?: string; rawBody?: Buffer } = {}
 ): Promise<BackorderChainResult> {
   const { credentialManager, skillTemplateRegistry, adapterRegistry } = deps;
+  const steps: ExecutionStep[] = [];
 
   // ---- Resolve template ----
   const template = skillTemplateRegistry.getTemplate(userSkillConfig.templateId);
@@ -105,16 +115,24 @@ export async function runBackorderDetectionV2(
   const shopifyCredsMap = shopifyCreds as unknown as Record<string, unknown>;
 
   // ---- Fetch order + inventory ----
+  const doneOrder = stepTimer(steps, 'Fetch Order');
   const shopifyAdapter = new ShopifyOrderAdapter();
   const order = await shopifyAdapter.getOrder(orderId, shopifyCredsMap);
 
   const threshold = (userSkillConfig.fieldOverrides['threshold'] as number) ?? 0;
   const variantIds = order.lineItems.map(li => li.variantId).filter(Boolean);
   const inventoryResults = await shopifyAdapter.checkInventory(variantIds, shopifyCredsMap);
-
   const inventoryMap = new Map(inventoryResults.map(r => [r.variantId, r.available]));
 
+  doneOrder('ok', `Order #${order.orderNumber} — ${order.lineItems.length} item(s)`, {
+    orderId: order.id,
+    orderNumber: order.orderNumber,
+    totalPrice: order.totalPrice,
+    lineItemCount: order.lineItems.length,
+  });
+
   // ---- Build backordered items list ----
+  const doneInventory = stepTimer(steps, 'Check Inventory');
   const backorderedItems: BackorderedItemContext[] = order.lineItems
     .filter(li => {
       const available = inventoryMap.get(li.variantId) ?? 0;
@@ -139,12 +157,20 @@ export async function runBackorderDetectionV2(
     backorderedCount: backorderedItems.length,
     actions:          [],
     invokeResults:    [],
+    steps,
   };
 
   if (backorderedItems.length === 0) {
+    doneInventory('skipped', 'All items in stock — no action needed', {
+      itemCount: order.lineItems.length,
+    });
     result.actions.push('skip');
     return result;
   }
+
+  doneInventory('ok', `${backorderedItems.length} of ${order.lineItems.length} item(s) backordered`, {
+    backordered: backorderedItems.map(i => ({ title: i.title, sku: i.sku, backorderedQty: i.backorderedQty })),
+  });
 
   const customerName = order.customer
     ? [order.customer.firstName, order.customer.lastName].filter(Boolean).join(' ') || 'Valued Customer'
@@ -164,7 +190,6 @@ export async function runBackorderDetectionV2(
   };
 
   // ---- Run enrichment steps ----
-  // Enrichment tool calls route through AdapterRegistry for consistency.
   const mcpCaller: MCPToolCaller = {
     async callTool(tool, params) {
       if (tool.startsWith('shopify__')) {
@@ -182,10 +207,17 @@ export async function runBackorderDetectionV2(
   ) as BackorderPolicyEvalContext;
 
   // ---- Evaluate policy ----
+  const donePolicy = stepTimer(steps, 'Evaluate Policy');
   const actions = evaluatePolicy(template.compiledPolicy, ctx as any);
+  const hasInvoke = actions.some(a => a.type === 'invoke');
+  const hasSkip = actions.some(a => a.type === 'skip');
+  if (hasSkip || !hasInvoke) {
+    donePolicy('skipped', 'No matching policy rule — no action taken');
+  } else {
+    donePolicy('ok', `Policy matched — ${actions.filter(a => a.type === 'invoke').length} action(s) to dispatch`);
+  }
 
   // ---- Dispatch actions ----
-  // ALL invoke actions execute. Only 'skip' terminates the loop early.
   for (const action of actions) {
     if (action.type === 'skip') {
       result.actions.push('skip');
@@ -201,7 +233,6 @@ export async function runBackorderDetectionV2(
     if (action.type === 'invoke') {
       const invokeAction = action as AdapterAction;
 
-      // Resolve the slot → integrationKey from the template definition
       const slot = template.slots.find(s => s.key === invokeAction.targetSlot);
       if (!slot) {
         throw new Error(`No slot '${invokeAction.targetSlot}' defined in template '${template.id}'`);
@@ -220,7 +251,6 @@ export async function runBackorderDetectionV2(
         throw new Error(`No credentials for ${slot.integrationKey} connection: ${slotConnectionId}`);
       }
 
-      // Build params — start with action.params, add context fields
       let invokeParams: Record<string, unknown> = {
         orderId:       String(ctx.orderId),
         customerEmail: ctx.customerEmail,
@@ -229,7 +259,6 @@ export async function runBackorderDetectionV2(
         ...invokeAction.params,
       };
 
-      // If templateKey is set, render subject+message and merge into params
       if (invokeAction.templateKey) {
         const stored = userSkillConfig.namedTemplates;
         const namedTemplates = (stored && Object.keys(stored).length > 0) ? stored : template.defaultTemplates;
@@ -246,14 +275,25 @@ export async function runBackorderDetectionV2(
         const subject = renderSubject(msgTemplate.subject, ctx as any);
         const message = renderTemplate(msgTemplate, { ...ctx, ...branding } as any);
 
+        // ---- Render Template step ----
+        const doneRender = stepTimer(steps, 'Render Template');
+        doneRender('ok', `Subject: "${subject}" → ${ctx.customerEmail}`, {
+          subject,
+          recipient: ctx.customerEmail,
+          messagePreview: message.replace(/<[^>]+>/g, '').slice(0, 200),
+        });
+
         if (options.dryRun) {
+          const doneAction = stepTimer(steps, `Send via ${slot.integrationKey}`);
           result.dryRun = {
-            wouldCreateTicket: {
-              subject,
-              message,
-              priority: String(invokeAction.params.priority ?? 'normal'),
-            },
+            wouldCreateTicket: { subject, message, priority: String(invokeAction.params.priority ?? 'normal') },
           };
+          doneAction('sandbox', `Sandbox — would create ${slot.integrationKey} ticket`, {
+            subject,
+            message,
+            priority: String(invokeAction.params.priority ?? 'normal'),
+            recipient: ctx.customerEmail,
+          });
           result.actions.push('dry_run');
           break;
         }
@@ -261,15 +301,25 @@ export async function runBackorderDetectionV2(
         invokeParams = { ...invokeParams, subject, message };
       }
 
-      const invokeResult = await adapterRegistry.invokeCapability(
-        slot.integrationKey,
-        invokeAction.capability,
-        invokeParams,
-        slotCreds as unknown as Record<string, unknown>
-      );
-
-      result.actions.push(`${slot.integrationKey}:${invokeAction.capability}`);
-      result.invokeResults.push(invokeResult);
+      const doneAction = stepTimer(steps, `Send via ${slot.integrationKey}`);
+      try {
+        const invokeResult = await adapterRegistry.invokeCapability(
+          slot.integrationKey,
+          invokeAction.capability,
+          invokeParams,
+          slotCreds as unknown as Record<string, unknown>
+        );
+        result.actions.push(`${slot.integrationKey}:${invokeAction.capability}`);
+        result.invokeResults.push(invokeResult);
+        const r = invokeResult as Record<string, unknown>;
+        doneAction('ok',
+          r.ticketId ? `Ticket #${r.ticketId} created in ${slot.integrationKey}` : `Action completed in ${slot.integrationKey}`,
+          invokeResult
+        );
+      } catch (err) {
+        doneAction('error', `${slot.integrationKey} error: ${(err as Error).message}`);
+        throw err;
+      }
     }
   }
 
