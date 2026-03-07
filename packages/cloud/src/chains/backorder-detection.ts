@@ -10,6 +10,7 @@ import { AdapterRegistry } from '../integrations/adapter-registry';
 import { evaluatePolicy, runEnrichmentSteps, MCPToolCaller } from '../skills/logic-compiler';
 import { renderTemplate, renderSubject } from '../skills/backorder-templates';
 import { SkillTemplateRegistry } from '../skills/skill-template-registry';
+import { toPlainText } from './chain-utils';
 
 export interface BackorderChainDeps {
   credentialManager: CredentialManager;
@@ -280,7 +281,7 @@ export async function runBackorderDetectionV2(
         doneRender('ok', `Subject: "${subject}" → ${ctx.customerEmail}`, {
           subject,
           recipient: ctx.customerEmail,
-          messagePreview: message.replace(/<[^>]+>/g, '').slice(0, 200),
+          messagePreview: toPlainText(message),
         });
 
         if (options.dryRun) {
@@ -290,7 +291,7 @@ export async function runBackorderDetectionV2(
           };
           doneAction('sandbox', `Sandbox — would create ${slot.integrationKey} ticket`, {
             subject,
-            message,
+            messagePreview: toPlainText(message),
             priority: String(invokeAction.params.priority ?? 'normal'),
             recipient: ctx.customerEmail,
           });

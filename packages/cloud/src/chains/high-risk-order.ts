@@ -10,6 +10,7 @@ import type { ShopifyRisk } from '../integrations/shopify/shopify-api-client';
 import { AdapterRegistry } from '../integrations/adapter-registry';
 import { SkillTemplateRegistry } from '../skills/skill-template-registry';
 import { renderHighRiskTemplate, renderHighRiskSubject } from '../skills/high-risk-order-templates';
+import { toPlainText } from './chain-utils';
 
 export interface HighRiskChainDeps {
   credentialManager: CredentialManager;
@@ -252,7 +253,15 @@ export async function runHighRiskOrderChain(
       previews.wouldTakeAction.push(preview);
     }
 
-    doneSend('sandbox', `Dry run — would take ${previews.wouldTakeAction.length} action(s)`, { count: previews.wouldTakeAction.length });
+    doneSend('sandbox', `Dry run — would take ${previews.wouldTakeAction.length} action(s)`, {
+      count: previews.wouldTakeAction.length,
+      previews: previews.wouldTakeAction.map(p => ({
+        slot: p.slot,
+        capability: p.capability,
+        subject: p.subject,
+        messagePreview: p.message ? toPlainText(p.message) : undefined,
+      })),
+    });
     result.dryRun = previews;
     return result;
   }

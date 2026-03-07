@@ -8,6 +8,7 @@ import { ShopifyOrderAdapter } from '../integrations/shopify/shopify-order-adapt
 import { AdapterRegistry } from '../integrations/adapter-registry';
 import { SkillTemplateRegistry } from '../skills/skill-template-registry';
 import { renderLowStockTemplate, renderLowStockSubject } from '../skills/low-stock-templates';
+import { toPlainText } from './chain-utils';
 
 export interface LowStockChainDeps {
   credentialManager: CredentialManager;
@@ -261,7 +262,14 @@ export async function runLowStockImpactChain(
       }
     }
 
-    doneSend('sandbox', `Dry run — would notify ${previews.wouldNotify.length} order(s)`, { count: previews.wouldNotify.length });
+    doneSend('sandbox', `Dry run — would notify ${previews.wouldNotify.length} order(s)`, {
+      count: previews.wouldNotify.length,
+      previews: previews.wouldNotify.map(p => ({
+        orderNumber: p.orderNumber,
+        subject: p.subject,
+        messagePreview: toPlainText(p.message),
+      })),
+    });
     result.dryRun = previews;
     return result;
   }
