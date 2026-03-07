@@ -11,7 +11,6 @@ import {
   renderDeliveryExceptionTemplate,
   renderDeliveryExceptionSubject,
 } from '../skills/delivery-exception-templates';
-import { toPlainText } from './chain-utils';
 
 export interface DeliveryExceptionChainDeps {
   credentialManager: CredentialManager;
@@ -266,7 +265,7 @@ export async function runDeliveryExceptionChain(
       count: previews.wouldNotify.length,
       previews: previews.wouldNotify.map(p => ({
         subject: p.subject,
-        messagePreview: toPlainText(p.message),
+        messageHtml: p.message,
       })),
     });
     result.dryRun = previews;

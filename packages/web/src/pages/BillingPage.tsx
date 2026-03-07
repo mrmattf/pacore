@@ -72,6 +72,46 @@ const STEP_COLORS: Record<ExecutionStep['status'], string> = {
   error:   'text-red-500',
 };
 
+function HtmlPreview({ html }: { html: string }) {
+  return (
+    <div
+      className="p-3 bg-white border rounded text-xs overflow-auto max-h-64 prose prose-xs max-w-none"
+      dangerouslySetInnerHTML={{ __html: html }}
+    />
+  );
+}
+
+function StepDetail({ detail }: { detail: unknown }) {
+  const d = detail as Record<string, unknown>;
+  const topHtml = typeof d.messageHtml === 'string' ? d.messageHtml : null;
+  const previews = Array.isArray(d.previews) ? d.previews as Record<string, unknown>[] : null;
+  const rest = Object.fromEntries(
+    Object.entries(d).filter(([k]) => k !== 'messageHtml' && k !== 'previews')
+  );
+
+  return (
+    <div className="space-y-2">
+      {Object.keys(rest).length > 0 && (
+        <pre className="p-2 bg-white border rounded text-xs text-gray-600 whitespace-pre-wrap break-all">
+          {JSON.stringify(rest, null, 2)}
+        </pre>
+      )}
+      {topHtml && <HtmlPreview html={topHtml} />}
+      {previews && previews.map((p, i) => (
+        <div key={i} className="space-y-1">
+          {(p.subject || p.orderNumber) && (
+            <div className="text-xs text-gray-500 font-medium">
+              {p.orderNumber && <span>Order #{String(p.orderNumber)} — </span>}
+              {p.subject && <span>{String(p.subject)}</span>}
+            </div>
+          )}
+          {typeof p.messageHtml === 'string' && <HtmlPreview html={p.messageHtml} />}
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function StepRow({ step }: { step: ExecutionStep }) {
   const [open, setOpen] = useState(false);
   return (
@@ -90,9 +130,9 @@ function StepRow({ step }: { step: ExecutionStep }) {
         )}
       </button>
       {open && step.detail != null && (
-        <pre className="mt-1 ml-5 p-2 bg-white border rounded text-xs text-gray-600 whitespace-pre-wrap break-all max-h-40 overflow-auto">
-          {JSON.stringify(step.detail, null, 2)}
-        </pre>
+        <div className="mt-1 ml-5">
+          <StepDetail detail={step.detail} />
+        </div>
       )}
     </div>
   );

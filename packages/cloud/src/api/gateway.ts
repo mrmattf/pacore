@@ -6,7 +6,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import jwt from 'jsonwebtoken';
 import { Pool } from 'pg';
 import { Orchestrator } from '../orchestration';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { createAuthRoutes } from './auth-routes';
 import { createOAuthRoutes } from './oauth-routes';
 import { createMcpCredentialRoutes } from './mcp-credential-routes';
@@ -1534,6 +1534,17 @@ export class APIGateway {
       }
     });
 
+    // All skill executions for this user (activity feed)
+    this.app.get('/v1/me/skill-executions', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
+        const executions = await this.config.skillRegistry.listAllUserExecutions(req.user!.id, limit);
+        res.json(executions);
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
     // Execution history for a personal skill
     this.app.get('/v1/me/skills/:userSkillId/executions', async (req: AuthenticatedRequest, res: Response) => {
       try {
@@ -1690,7 +1701,7 @@ export class APIGateway {
         await testIntegrationCredentials(integrationKey, credentials, this.config.adapterRegistry);
 
         // Create connection record
-        const connectionId = crypto.randomUUID();
+        const connectionId = randomUUID();
 
         await this.config.db.query(
           `INSERT INTO integration_connections (id, user_id, integration_key, display_name, status, last_tested_at)
