@@ -44,9 +44,10 @@ export class GorgiasApiClient {
         {
           channel: 'email',
           via: 'api',
+          from_agent: true,
           source: {
             type: 'email',
-            from: { address: params.customerEmail, name: params.customerName },
+            to: [{ address: params.customerEmail, name: params.customerName }],
           },
           body_html: params.message,
           subject: params.subject,
