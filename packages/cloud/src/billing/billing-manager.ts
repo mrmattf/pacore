@@ -115,11 +115,8 @@ export class BillingManager {
         return this.countOrgs(scope);
       case 'orgMembers':
         return this.countOrgMembers(scope);
-      case 'skillExecutionsPerMonth': {
-        const now = new Date();
-        const usage = await this.getUsage(scope, now.getFullYear(), now.getMonth() + 1);
-        return usage.skillExecutions;
-      }
+      case 'skillExecutionsPerMonth':
+        return this.countNonSkippedExecutionsThisMonth(scope);
     }
   }
 
@@ -141,6 +138,22 @@ export class BillingManager {
       [scope.userId]
     );
     return rows[0].cnt;
+  }
+
+  private async countNonSkippedExecutionsThisMonth(scope: BillingScope): Promise<number> {
+    const col = scope.type === 'user' ? 'us.user_id' : 'us.org_id';
+    const id = scope.type === 'user' ? scope.userId : scope.orgId;
+    const { rows } = await this.db.query<{ cnt: number }>(
+      `SELECT COUNT(*)::int AS cnt
+       FROM skill_executions se
+       JOIN user_skills us ON se.user_skill_id = us.id
+       WHERE ${col} = $1
+         AND se.sandbox = false
+         AND se.skipped = false
+         AND se.started_at >= date_trunc('month', NOW())`,
+      [id]
+    );
+    return rows[0]?.cnt ?? 0;
   }
 
   private async countOrgMembers(scope: BillingScope): Promise<number> {
@@ -243,8 +256,8 @@ export class BillingManager {
     const limits = getPlanLimits(plan);
     const now = new Date();
 
-    const [execUsage, activeSkillsCount, orgsCount, orgMembersCount] = await Promise.all([
-      this.getUsage(scope, now.getFullYear(), now.getMonth() + 1),
+    const [execCount, activeSkillsCount, orgsCount, orgMembersCount] = await Promise.all([
+      this.countNonSkippedExecutionsThisMonth(scope),
       this.countActiveSkills(scope),
       this.countOrgs(scope),
       this.countOrgMembers(scope),
@@ -260,7 +273,7 @@ export class BillingManager {
     };
 
     return {
-      skillExecutionsPerMonth: mkItem(execUsage.skillExecutions, 'skillExecutionsPerMonth'),
+      skillExecutionsPerMonth: mkItem(execCount, 'skillExecutionsPerMonth'),
       activeSkills: mkItem(activeSkillsCount, 'activeSkills'),
       orgs: mkItem(orgsCount, 'orgs'),
       orgMembers: mkItem(orgMembersCount, 'orgMembers'),

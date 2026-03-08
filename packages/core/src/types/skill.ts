@@ -73,4 +73,6 @@ export interface SkillExecution {
   startedAt: Date;
   completedAt: Date | null;
   sandbox: boolean;
+  /** null while running; true = no action taken (free); false = action taken (billable) */
+  skipped: boolean | null;
 }

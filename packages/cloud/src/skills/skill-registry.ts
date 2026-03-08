@@ -8,6 +8,13 @@ export type SkillScope =
   | { type: 'user'; userId: string }
   | { type: 'org';  orgId: string };
 
+function isSkippedResult(result: unknown): boolean {
+  if (!result || typeof result !== 'object') return true;
+  const r = result as { actions?: unknown[] };
+  if (!Array.isArray(r.actions) || r.actions.length === 0) return true;
+  return r.actions.every(a => a === 'skip');
+}
+
 export class SkillRegistry {
   // In-memory catalog of platform-defined skills
   private catalog = new Map<string, SkillDefinition>();
@@ -208,22 +215,6 @@ export class SkillRegistry {
     opts: { sandbox?: boolean } = {}
   ): Promise<SkillExecution> {
     const sandbox = opts.sandbox ?? false;
-
-    // Increment usage counter only for real (non-sandbox) executions
-    if (this.billingManager && !sandbox) {
-      const scopeRow = await this.db.query<{ user_id: string | null; org_id: string | null }>(
-        'SELECT user_id, org_id FROM user_skills WHERE id = $1',
-        [userSkillId]
-      );
-      if (scopeRow.rows.length > 0) {
-        const { user_id, org_id } = scopeRow.rows[0];
-        const scope: BillingScope = org_id
-          ? { type: 'org', orgId: org_id }
-          : { type: 'user', userId: user_id! };
-        await this.billingManager.incrementExecution(scope);
-      }
-    }
-
     const id = nanoid();
     const result = await this.db.query(
       `INSERT INTO skill_executions (id, user_skill_id, trigger_id, status, payload, sandbox)
@@ -235,18 +226,38 @@ export class SkillRegistry {
   }
 
   async completeExecution(executionId: string, result: unknown): Promise<void> {
+    const skipped = isSkippedResult(result);
+
     await this.db.query(
       `UPDATE skill_executions
-       SET status = 'completed', result = $2, completed_at = NOW()
+       SET status = 'completed', result = $2, completed_at = NOW(), skipped = $3
        WHERE id = $1`,
-      [executionId, JSON.stringify(result)]
+      [executionId, JSON.stringify(result), skipped]
     );
+
+    // Increment billing only for real, non-skipped executions
+    if (this.billingManager && !skipped) {
+      const row = await this.db.query<{ user_id: string | null; org_id: string | null; sandbox: boolean }>(
+        `SELECT us.user_id, us.org_id, se.sandbox
+         FROM skill_executions se
+         JOIN user_skills us ON se.user_skill_id = us.id
+         WHERE se.id = $1`,
+        [executionId]
+      );
+      if (row.rows.length > 0 && !row.rows[0].sandbox) {
+        const { user_id, org_id } = row.rows[0];
+        const scope: BillingScope = org_id
+          ? { type: 'org', orgId: org_id }
+          : { type: 'user', userId: user_id! };
+        await this.billingManager.incrementExecution(scope);
+      }
+    }
   }
 
   async failExecution(executionId: string, error: string): Promise<void> {
     await this.db.query(
       `UPDATE skill_executions
-       SET status = 'failed', error = $2, completed_at = NOW()
+       SET status = 'failed', error = $2, completed_at = NOW(), skipped = true
        WHERE id = $1`,
       [executionId, error]
     );
@@ -316,6 +327,7 @@ export class SkillRegistry {
       startedAt: new Date(row.started_at as string),
       completedAt: row.completed_at ? new Date(row.completed_at as string) : null,
       sandbox: (row.sandbox as boolean) ?? false,
+      skipped: row.skipped !== null && row.skipped !== undefined ? Boolean(row.skipped) : null,
     };
   }
 }

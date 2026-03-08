@@ -21,6 +21,8 @@ export interface SkillExecution {
   completedAt: string | null;
   skillTypeId: string | null;
   sandbox: boolean;
+  /** null while running; true = no action taken (free); false = action taken (billable) */
+  skipped: boolean | null;
 }
 
 export function useSkillExecutions(limit = 20) {

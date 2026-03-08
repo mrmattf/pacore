@@ -184,6 +184,9 @@ function ActivityFeed() {
               {ex.sandbox && (
                 <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium shrink-0">Sandbox</span>
               )}
+              {!ex.sandbox && ex.skipped === true && (
+                <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium shrink-0">Skipped</span>
+              )}
               <span className="flex-1 text-sm text-gray-800 font-medium">{skillLabel(ex)}</span>
               <span className="text-xs text-gray-400 tabular-nums">{duration(ex) ?? '—'}</span>
               <span className="text-xs text-gray-400 w-20 text-right tabular-nums">{relativeTime(ex.startedAt)}</span>
