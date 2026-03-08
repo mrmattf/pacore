@@ -3,6 +3,7 @@ export interface ReamazeTicketParams {
   customerName: string;
   subject: string;
   message: string;       // HTML body — Re:amaze emails this to the customer from the conversation
+  category: string;      // Re:amaze channel slug (Settings → Channels)
   tags?: string[];
 }
 
@@ -32,7 +33,8 @@ export class ReamazeApiClient {
   async createTicket(params: ReamazeTicketParams): Promise<ReamazeTicketResult> {
     const body = {
       conversation: {
-        subject: params.subject,
+        subject:  params.subject,
+        category: params.category,
         message: {
           body: params.message,
         },

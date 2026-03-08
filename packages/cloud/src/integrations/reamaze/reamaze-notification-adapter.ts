@@ -14,6 +14,7 @@ export class ReamazeNotificationAdapter implements NotificationToolAdapter, Slot
     { key: 'brand',    label: 'Brand Subdomain', type: 'text',     placeholder: 'mystore (from mystore.reamaze.com)' },
     { key: 'email',    label: 'Email',            type: 'text',     hint: 'Your Re:amaze login email' },
     { key: 'apiToken', label: 'API Token',        type: 'password', hint: 'Re:amaze Settings → API Access Token' },
+    { key: 'channel',  label: 'Channel Slug',     type: 'text',     hint: 'Re:amaze Settings → Channels → slug (e.g. "support")' },
   ];
 
   readonly setupGuide = 'Re:amaze Settings → API Access → copy your API Token';
@@ -45,6 +46,7 @@ export class ReamazeNotificationAdapter implements NotificationToolAdapter, Slot
       customerName:  params.customerName,
       subject:       params.subject,
       message:       params.message,
+      category:      creds.channel as string,
       tags:          params.tags ?? ['backorder', 'automated'],
     });
     return { ticketId: result.ticketId };
