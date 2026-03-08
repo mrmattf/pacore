@@ -63,14 +63,14 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
     name: 'Starter',
     priceMonthly: 79,
     sandboxMode: false,
-    features: ['50 skill actions/mo', '3 active skills', 'Personal workspace only'],
+    features: ['50 skill executions/mo', '3 active skills', 'Personal workspace only'],
   },
   {
     tier: 'growth',
     name: 'Growth',
     priceMonthly: 199,
     sandboxMode: false,
-    features: ['250 skill actions/mo', '10 active skills', '1 organization', 'Up to 10 org members'],
+    features: ['250 skill executions/mo', '10 active skills', '1 organization', 'Up to 10 org members'],
   },
   {
     tier: 'business',
@@ -78,7 +78,7 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
     priceMonthly: 499,
     sandboxMode: false,
     features: [
-      '1,000 skill actions/mo',
+      '1,000 skill executions/mo',
       'Unlimited active skills',
       '3 organizations',
       'Unlimited org members',

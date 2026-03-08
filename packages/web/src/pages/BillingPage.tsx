@@ -1,7 +1,9 @@
-import { useState } from 'react';
-import { RefreshCw, Zap, Building2, Users, CreditCard, CheckCircle, XCircle, Clock, ChevronDown, ChevronRight } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { RefreshCw, Zap, Building2, Users, CreditCard, CheckCircle, XCircle, Clock, ChevronDown, ChevronRight, Minus } from 'lucide-react';
 import { useBilling, PlanTier, LimitSummaryItem } from '../hooks/useBilling';
-import { useSkillExecutions, SkillExecution, ExecutionStep } from '../hooks/useSkillExecutions';
+import { SkillExecution, ExecutionStep } from '../hooks/useSkillExecutions';
+import { apiFetch } from '../services/auth';
+import { useUserSkills, UserSkill } from '../hooks/useUserSkills';
 
 // ─── Plan badge colours ──────────────────────────────────────────────────────
 const PLAN_COLORS: Record<PlanTier, string> = {
@@ -51,14 +53,7 @@ function UsageBar({
   );
 }
 
-// ─── Plan comparison table ───────────────────────────────────────────────────
-function fmtPrice(p: number | null) {
-  if (p === null) return 'Custom';
-  if (p === 0) return 'Free';
-  return `$${p}/mo`;
-}
-
-// ─── Step timeline row ───────────────────────────────────────────────────────
+// ─── Step timeline ───────────────────────────────────────────────────────────
 const STEP_ICONS: Record<ExecutionStep['status'], string> = {
   ok:      '✓',
   skipped: '—',
@@ -138,88 +133,185 @@ function StepRow({ step }: { step: ExecutionStep }) {
   );
 }
 
-// ─── Activity feed ───────────────────────────────────────────────────────────
-function ActivityFeed() {
-  const { executions, loading, error, refresh } = useSkillExecutions(20);
+// ─── Helpers ─────────────────────────────────────────────────────────────────
+function relativeTime(iso: string) {
+  const diff = Date.now() - new Date(iso).getTime();
+  if (diff < 60000) return 'just now';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+  return new Date(iso).toLocaleDateString();
+}
+
+/** Maps the platform plan tier to a skill-level tier key. */
+function activeTierKey(plan: PlanTier): string | null {
+  if (plan === 'free') return null;
+  if (plan === 'enterprise') return 'business';
+  return plan; // 'starter' | 'growth' | 'business'
+}
+
+// ─── Skill metadata + pricing ────────────────────────────────────────────────
+const SKILL_META: Record<string, {
+  name: string;
+  description: string;
+  tiers: Array<{ key: string; label: string; price: number; runs: number }>;
+}> = {
+  'backorder-notification': {
+    name: 'Backorder Notification',
+    description: 'Notifies customers when their ordered items are backordered.',
+    tiers: [
+      { key: 'starter',  label: 'Starter',  price: 49,  runs: 50    },
+      { key: 'growth',   label: 'Growth',   price: 99,  runs: 250   },
+      { key: 'business', label: 'Business', price: 199, runs: 1_000 },
+    ],
+  },
+  'delivery-exception-alert': {
+    name: 'Delivery Exception Alert',
+    description: 'Alerts customers when their shipment encounters a delivery exception.',
+    tiers: [
+      { key: 'starter',  label: 'Starter',  price: 39,  runs: 50    },
+      { key: 'growth',   label: 'Growth',   price: 79,  runs: 250   },
+      { key: 'business', label: 'Business', price: 159, runs: 1_000 },
+    ],
+  },
+  'low-stock-impact': {
+    name: 'Low Stock Customer Impact',
+    description: 'Proactively notifies customers when their ordered item runs low.',
+    tiers: [
+      { key: 'starter',  label: 'Starter',  price: 39,  runs: 50    },
+      { key: 'growth',   label: 'Growth',   price: 79,  runs: 250   },
+      { key: 'business', label: 'Business', price: 159, runs: 1_000 },
+    ],
+  },
+  'high-risk-order-response': {
+    name: 'High Risk Order Response',
+    description: 'Automatically flags and responds to potentially fraudulent orders.',
+    tiers: [
+      { key: 'starter',  label: 'Starter',  price: 99,  runs: 50    },
+      { key: 'growth',   label: 'Growth',   price: 349, runs: 250   },
+      { key: 'business', label: 'Business', price: 999, runs: 1_000 },
+    ],
+  },
+};
+
+// ─── SkillCard ───────────────────────────────────────────────────────────────
+function SkillCard({ userSkill, currentPlan }: { userSkill: UserSkill; currentPlan: PlanTier }) {
+  const meta = SKILL_META[userSkill.skillId];
+  const [executions, setExecutions] = useState<SkillExecution[]>([]);
+  const [execLoading, setExecLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
 
-  function skillLabel(ex: SkillExecution) {
-    if (!ex.skillTypeId) return `Skill …${ex.userSkillId.slice(-8)}`;
-    return ex.skillTypeId.split('-').map((w: string) => w[0].toUpperCase() + w.slice(1)).join(' ');
-  }
+  const tierKey = activeTierKey(currentPlan);
+  const activeTier = meta?.tiers.find(t => t.key === tierKey);
 
-  function duration(ex: SkillExecution) {
-    if (!ex.completedAt) return null;
-    const ms = new Date(ex.completedAt).getTime() - new Date(ex.startedAt).getTime();
-    return ms < 1000 ? `${ms}ms` : `${(ms / 1000).toFixed(1)}s`;
-  }
+  useEffect(() => {
+    apiFetch(`/v1/me/skills/${userSkill.id}/executions?limit=5`)
+      .then(r => r.json())
+      .then(setExecutions)
+      .catch(() => {})
+      .finally(() => setExecLoading(false));
+  }, [userSkill.id]);
 
-  function relativeTime(iso: string) {
-    const diff = Date.now() - new Date(iso).getTime();
-    if (diff < 60000) return 'just now';
-    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
-    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
-    return new Date(iso).toLocaleDateString();
-  }
+  if (!meta) return null;
 
   return (
-    <div className="bg-white border rounded-lg p-6">
-      <div className="flex items-center justify-between mb-4">
-        <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">Recent Activity</h2>
-        <button onClick={refresh} className="text-xs text-gray-400 hover:text-gray-600">Refresh</button>
+    <div className="bg-white border rounded-lg overflow-hidden">
+      {/* ── Header ── */}
+      <div className="p-5">
+        <div className="flex items-start justify-between mb-4">
+          <div>
+            <div className="flex items-center gap-2">
+              <h3 className="text-sm font-semibold text-gray-900">{meta.name}</h3>
+              <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
+                userSkill.status === 'active'
+                  ? 'bg-green-100 text-green-700'
+                  : 'bg-gray-100 text-gray-500'
+              }`}>
+                {userSkill.status}
+              </span>
+            </div>
+            <p className="text-xs text-gray-500 mt-0.5">{meta.description}</p>
+          </div>
+          <div className="text-right shrink-0 ml-4">
+            {currentPlan === 'free'
+              ? <span className="text-sm font-semibold text-amber-600">Sandbox</span>
+              : activeTier
+                ? <span className="text-sm font-semibold text-gray-900">${activeTier.price}/mo</span>
+                : null}
+          </div>
+        </div>
+
+        {/* Tier selector */}
+        <div className="grid grid-cols-3 gap-2">
+          {meta.tiers.map(tier => (
+            <div
+              key={tier.key}
+              className={`p-2.5 rounded-lg border text-xs ${
+                tier.key === tierKey
+                  ? 'border-blue-500 bg-blue-50'
+                  : 'border-gray-200 bg-gray-50 opacity-50'
+              }`}
+            >
+              <div className="font-semibold text-gray-800">{tier.label}</div>
+              <div className="text-gray-500">${tier.price}/mo</div>
+              <div className="text-gray-400">{tier.runs.toLocaleString()} executions/mo</div>
+            </div>
+          ))}
+        </div>
       </div>
-      {loading && <p className="text-sm text-gray-400">Loading...</p>}
-      {error && <p className="text-sm text-red-500">{error}</p>}
-      {!loading && executions.length === 0 && <p className="text-sm text-gray-400">No executions yet.</p>}
-      <div className="divide-y divide-gray-50">
-        {executions.map((ex) => (
-          <div key={ex.id}>
+
+      {/* ── Recent Executions ── */}
+      <div className="border-t bg-gray-50 px-5 py-3">
+        <h4 className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-2">
+          Recent Executions
+        </h4>
+        {execLoading && <div className="text-xs text-gray-400 py-2">Loading…</div>}
+        {!execLoading && executions.length === 0 && (
+          <div className="text-xs text-gray-400 py-2">No executions yet</div>
+        )}
+        {executions.map(ex => (
+          <div key={ex.id} className="border-b border-gray-100 last:border-0">
             <button
-              className="w-full text-left py-2.5 flex items-center gap-3 hover:bg-gray-50 rounded px-1 -mx-1"
+              className="w-full text-left py-2 flex items-center gap-2 hover:bg-gray-100 rounded px-1 -mx-1"
               onClick={() => setExpanded(expanded === ex.id ? null : ex.id)}
             >
-              {ex.status === 'completed' && <CheckCircle size={14} className="text-green-500 shrink-0" />}
-              {ex.status === 'failed'    && <XCircle    size={14} className="text-red-500 shrink-0" />}
-              {ex.status === 'running'   && <Clock      size={14} className="text-yellow-500 shrink-0 animate-pulse" />}
+              {ex.status === 'completed' && !ex.skipped && (
+                <CheckCircle size={12} className="text-green-500 shrink-0" />
+              )}
+              {ex.status === 'completed' && ex.skipped && (
+                <Minus size={12} className="text-gray-400 shrink-0" />
+              )}
+              {ex.status === 'failed' && (
+                <XCircle size={12} className="text-red-500 shrink-0" />
+              )}
+              {ex.status === 'running' && (
+                <Clock size={12} className="text-yellow-500 shrink-0 animate-pulse" />
+              )}
               {ex.sandbox && (
-                <span className="text-xs bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded font-medium shrink-0">Sandbox</span>
+                <span className="text-xs bg-amber-100 text-amber-700 px-1 py-0.5 rounded font-medium">
+                  Sandbox
+                </span>
               )}
-              {!ex.sandbox && ex.skipped === true && (
-                <span className="text-xs bg-gray-100 text-gray-500 px-1.5 py-0.5 rounded font-medium shrink-0">Skipped</span>
+              {!ex.sandbox && ex.skipped && (
+                <span className="text-xs bg-gray-100 text-gray-500 px-1 py-0.5 rounded font-medium">
+                  Skipped
+                </span>
               )}
-              <span className="flex-1 text-sm text-gray-800 font-medium">{skillLabel(ex)}</span>
-              <span className="text-xs text-gray-400 tabular-nums">{duration(ex) ?? '—'}</span>
-              <span className="text-xs text-gray-400 w-20 text-right tabular-nums">{relativeTime(ex.startedAt)}</span>
+              <span className="flex-1 text-xs text-gray-600">{relativeTime(ex.startedAt)}</span>
               {expanded === ex.id
-                ? <ChevronDown  size={12} className="text-gray-400 shrink-0" />
-                : <ChevronRight size={12} className="text-gray-400 shrink-0" />}
+                ? <ChevronDown  size={10} className="text-gray-400" />
+                : <ChevronRight size={10} className="text-gray-400" />}
             </button>
+
             {expanded === ex.id && (() => {
               const steps = (ex.result as Record<string, unknown> | null)?.steps as ExecutionStep[] | undefined;
               return (
-                <div className="mx-1 mb-2 border-l-2 border-gray-100 ml-5 pl-3 py-1 space-y-0.5">
-                  {steps && steps.length > 0 ? (
-                    steps.map((step, i) => <StepRow key={i} step={step} />)
-                  ) : (
-                    <>
-                      {ex.error && (
-                        <div className="text-xs text-red-600 py-1">
-                          <span className="font-semibold">Error: </span>{ex.error}
-                        </div>
-                      )}
-                      {!ex.error && (
-                        <div className="text-xs text-gray-400 py-1">No step detail available</div>
-                      )}
-                    </>
-                  )}
-                  {ex.payload != null && (
-                    <details className="mt-1">
-                      <summary className="text-xs cursor-pointer text-gray-400 hover:text-gray-600 pl-5">Payload</summary>
-                      <pre className="mt-1 ml-5 p-2 bg-white border rounded text-xs text-gray-600 whitespace-pre-wrap break-all max-h-40 overflow-auto">
-                        {JSON.stringify(ex.payload, null, 2)}
-                      </pre>
-                    </details>
-                  )}
+                <div className="ml-4 mb-2 border-l-2 border-gray-200 pl-3 space-y-0.5">
+                  {steps && steps.length > 0
+                    ? steps.map((step, i) => <StepRow key={i} step={step} />)
+                    : ex.error
+                      ? <div className="text-xs text-red-600 py-1">{ex.error}</div>
+                      : <div className="text-xs text-gray-400 py-1">No step detail</div>
+                  }
                 </div>
               );
             })()}
@@ -236,11 +328,19 @@ interface BillingPageProps {
 }
 
 export function BillingPage({ orgId }: BillingPageProps) {
-  const { billing, plans, loading, error, refresh } = useBilling(orgId);
+  const { billing, loading, error, refresh } = useBilling(orgId);
+  const { userSkills } = useUserSkills();
 
   const currentPlan: PlanTier = billing?.plan ?? 'free';
   const sub = billing?.subscription;
   const summary = billing?.summary;
+
+  // Total estimated monthly cost for all active skills at current tier
+  const tierKey = activeTierKey(currentPlan);
+  const totalMonthly = userSkills.reduce((sum, s) => {
+    const tier = SKILL_META[s.skillId]?.tiers.find(t => t.key === tierKey);
+    return sum + (tier?.price ?? 0);
+  }, 0);
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
@@ -349,93 +449,23 @@ export function BillingPage({ orgId }: BillingPageProps) {
             </div>
           )}
 
-          {/* ── Recent Activity ── */}
-          <ActivityFeed />
-
-          {/* ── Plan Comparison Table ── */}
-          {plans.length > 0 && (
-            <div className="bg-white border rounded-lg p-6 overflow-x-auto">
-              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide mb-4">
-                Plan comparison
+          {/* ── Your Skills ── */}
+          {userSkills.length > 0 && (
+            <div className="space-y-4">
+              <h2 className="text-sm font-semibold text-gray-700 uppercase tracking-wide">
+                Your Skills
               </h2>
-              <table className="w-full text-sm">
-                <thead>
-                  <tr>
-                    <th className="text-left py-2 pr-4 text-gray-500 font-medium w-40"></th>
-                    {plans.map((p) => (
-                      <th key={p.tier} className="text-center py-2 px-3 font-semibold">
-                        <span
-                          className={`inline-block px-2 py-0.5 rounded-full text-xs capitalize ${PLAN_COLORS[p.tier]}`}
-                        >
-                          {p.name}
-                        </span>
-                      </th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100">
-                  <tr>
-                    <td className="py-2.5 pr-4 text-gray-600">Price</td>
-                    {plans.map((p) => (
-                      <td key={p.tier} className="text-center py-2.5 px-3 text-gray-900 font-medium">
-                        {fmtPrice(p.priceMonthly)}
-                      </td>
-                    ))}
-                  </tr>
-                  <tr>
-                    <td className="py-2.5 pr-4 text-gray-600">Executions/mo</td>
-                    {plans.map((p) => {
-                      // These come from plan definitions on the server; we can infer from features
-                      const feat = p.features.find((f) => f.includes('execution'));
-                      return (
-                        <td key={p.tier} className="text-center py-2.5 px-3 text-gray-700">
-                          {feat?.split(' ')[0] ?? '—'}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                  <tr>
-                    <td className="py-2.5 pr-4 text-gray-600">Active Skills</td>
-                    {plans.map((p) => {
-                      const feat = p.features.find((f) => f.includes('skill'));
-                      return (
-                        <td key={p.tier} className="text-center py-2.5 px-3 text-gray-700">
-                          {feat?.split(' ')[0] ?? '—'}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                  <tr>
-                    <td className="py-2.5 pr-4 text-gray-600">Organizations</td>
-                    {plans.map((p) => {
-                      const feat = p.features.find((f) => f.includes('organization') || f.includes('personal only'));
-                      return (
-                        <td key={p.tier} className="text-center py-2.5 px-3 text-gray-700">
-                          {feat?.includes('personal') ? '—' : feat?.split(' ')[0] ?? '—'}
-                        </td>
-                      );
-                    })}
-                  </tr>
-                  <tr>
-                    <td className="py-2.5 pr-4 text-gray-600"></td>
-                    {plans.map((p) => (
-                      <td key={p.tier} className="text-center py-2.5 px-3">
-                        <button
-                          disabled
-                          title="Payments coming soon"
-                          className={`px-3 py-1 rounded text-xs font-medium cursor-not-allowed ${
-                            p.tier === currentPlan
-                              ? 'bg-blue-600 text-white opacity-80'
-                              : 'bg-gray-100 text-gray-500 opacity-60'
-                          }`}
-                        >
-                          {p.tier === currentPlan ? 'Current' : 'Select'}
-                        </button>
-                      </td>
-                    ))}
-                  </tr>
-                </tbody>
-              </table>
+              {userSkills.map(us => (
+                <SkillCard key={us.id} userSkill={us} currentPlan={currentPlan} />
+              ))}
+            </div>
+          )}
+
+          {/* ── Total this month ── */}
+          {currentPlan !== 'free' && totalMonthly > 0 && (
+            <div className="bg-white border rounded-lg px-5 py-3 flex justify-between items-center">
+              <span className="text-sm text-gray-600">Estimated monthly total</span>
+              <span className="text-sm font-semibold text-gray-900">${totalMonthly}/mo</span>
             </div>
           )}
         </div>
