@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { RefreshCw, Zap, Building2, Users, CheckCircle, XCircle, Clock, ChevronDown, ChevronRight, Minus } from 'lucide-react';
+import { RefreshCw, Zap, Building2, Users, CheckCircle, XCircle, Clock, ChevronDown, ChevronRight, Minus, Pause, Play } from 'lucide-react';
 import { useBilling, PlanTier, LimitSummaryItem } from '../hooks/useBilling';
 import { SkillExecution, ExecutionStep } from '../hooks/useSkillExecutions';
 import { apiFetch } from '../services/auth';
@@ -190,9 +190,24 @@ function SkillCard({ userSkill, currentPlan }: { userSkill: UserSkill; currentPl
   const [executions, setExecutions] = useState<SkillExecution[]>([]);
   const [execLoading, setExecLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
+  const [status, setStatus] = useState(userSkill.status);
+  const [toggling, setToggling] = useState(false);
 
   const tierKey = activeTierKey(currentPlan);
   const activeTier = meta?.tiers.find(t => t.key === tierKey);
+
+  async function togglePause() {
+    setToggling(true);
+    try {
+      const action = status === 'active' ? 'pause' : 'resume';
+      await apiFetch(`/v1/me/skills/${userSkill.id}/${action}`, { method: 'PUT' });
+      setStatus(status === 'active' ? 'paused' : 'active');
+    } catch {
+      // ignore — button reverts to previous state
+    } finally {
+      setToggling(false);
+    }
+  }
 
   useEffect(() => {
     apiFetch(`/v1/me/skills/${userSkill.id}/executions?limit=5`)
@@ -209,25 +224,39 @@ function SkillCard({ userSkill, currentPlan }: { userSkill: UserSkill; currentPl
       {/* ── Header ── */}
       <div className="p-5">
         <div className="flex items-start justify-between mb-4">
-          <div>
+          <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2">
               <h3 className="text-sm font-semibold text-gray-900">{meta.name}</h3>
               <span className={`text-xs px-1.5 py-0.5 rounded-full font-medium ${
-                userSkill.status === 'active'
+                status === 'active'
                   ? 'bg-green-100 text-green-700'
-                  : 'bg-gray-100 text-gray-500'
+                  : status === 'paused'
+                    ? 'bg-amber-100 text-amber-700'
+                    : 'bg-gray-100 text-gray-500'
               }`}>
-                {userSkill.status}
+                {status}
               </span>
             </div>
             <p className="text-xs text-gray-500 mt-0.5">{meta.description}</p>
           </div>
-          <div className="text-right shrink-0 ml-4">
-            {currentPlan === 'free'
-              ? <span className="text-sm font-semibold text-amber-600">Sandbox</span>
-              : activeTier
-                ? <span className="text-sm font-semibold text-gray-900">${activeTier.price}/mo</span>
-                : null}
+          <div className="flex items-center gap-3 shrink-0 ml-4">
+            <button
+              onClick={togglePause}
+              disabled={toggling || status === 'pending'}
+              title={status === 'active' ? 'Pause skill' : 'Resume skill'}
+              className="p-1.5 rounded text-gray-400 hover:text-gray-700 hover:bg-gray-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+            >
+              {status === 'active'
+                ? <Pause size={14} />
+                : <Play size={14} />}
+            </button>
+            <div className="text-right">
+              {currentPlan === 'free'
+                ? <span className="text-sm font-semibold text-amber-600">Sandbox</span>
+                : activeTier
+                  ? <span className={`text-sm font-semibold ${status === 'paused' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>${activeTier.price}/mo</span>
+                  : null}
+            </div>
           </div>
         </div>
 
@@ -347,9 +376,10 @@ export function BillingPage({ orgId }: BillingPageProps) {
   const currentPlan: PlanTier = billing?.plan ?? 'free';
   const summary = billing?.summary;
 
-  // Total estimated monthly cost for all active skills at current tier
+  // Total estimated monthly cost for active (non-paused) skills at current tier
   const tierKey = activeTierKey(currentPlan);
   const totalMonthly = userSkills.reduce((sum, s) => {
+    if (s.status !== 'active') return sum;
     const tier = SKILL_META[s.skillId]?.tiers.find(t => t.key === tierKey);
     return sum + (tier?.price ?? 0);
   }, 0);

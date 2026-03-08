@@ -30,6 +30,14 @@ export class WebhookTriggerHandler {
       return { status: 404, body: 'Trigger not found' };
     }
 
+    // Check if the parent skill is paused — return 200 so the source platform
+    // doesn't retry or unregister the webhook, but don't create an execution.
+    const userSkill = await this.skillRegistry.getUserSkill(trigger.userSkillId);
+    if (userSkill?.status === 'paused') {
+      console.log(`[WebhookTrigger] Skill ${trigger.userSkillId} is paused — dropping webhook`);
+      return { status: 200, body: 'Paused' };
+    }
+
     const rawBody = req.body as Buffer;
     const payload = rawBody instanceof Buffer ? rawBody : Buffer.from(JSON.stringify(rawBody));
 
