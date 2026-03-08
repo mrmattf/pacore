@@ -1,18 +1,9 @@
 import { useState, useEffect } from 'react';
-import { RefreshCw, Zap, Building2, Users, CreditCard, CheckCircle, XCircle, Clock, ChevronDown, ChevronRight, Minus } from 'lucide-react';
+import { RefreshCw, Zap, Building2, Users, CheckCircle, XCircle, Clock, ChevronDown, ChevronRight, Minus } from 'lucide-react';
 import { useBilling, PlanTier, LimitSummaryItem } from '../hooks/useBilling';
 import { SkillExecution, ExecutionStep } from '../hooks/useSkillExecutions';
 import { apiFetch } from '../services/auth';
 import { useUserSkills, UserSkill } from '../hooks/useUserSkills';
-
-// ─── Plan badge colours ──────────────────────────────────────────────────────
-const PLAN_COLORS: Record<PlanTier, string> = {
-  free:       'bg-gray-100 text-gray-700',
-  starter:    'bg-blue-100 text-blue-700',
-  growth:     'bg-purple-100 text-purple-700',
-  business:   'bg-indigo-100 text-indigo-700',
-  enterprise: 'bg-amber-100 text-amber-700',
-};
 
 // ─── Usage bar ───────────────────────────────────────────────────────────────
 function UsageBar({
@@ -241,22 +232,44 @@ function SkillCard({ userSkill, currentPlan }: { userSkill: UserSkill; currentPl
         </div>
 
         {/* Tier selector */}
-        <div className="grid grid-cols-3 gap-2">
-          {meta.tiers.map(tier => (
-            <div
-              key={tier.key}
-              className={`p-2.5 rounded-lg border text-xs ${
-                tier.key === tierKey
-                  ? 'border-blue-500 bg-blue-50'
-                  : 'border-gray-200 bg-gray-50 opacity-50'
-              }`}
-            >
-              <div className="font-semibold text-gray-800">{tier.label}</div>
-              <div className="text-gray-500">${tier.price}/mo</div>
-              <div className="text-gray-400">{tier.runs.toLocaleString()} executions/mo</div>
-            </div>
-          ))}
+        <div className="grid grid-cols-3 gap-2 mt-3">
+          {meta.tiers.map(tier => {
+            const isCurrent = tier.key === tierKey;
+            const tierIdx = meta.tiers.findIndex(t => t.key === tier.key);
+            const currentIdx = tierKey ? meta.tiers.findIndex(t => t.key === tierKey) : -1;
+            const isUpgrade = tierIdx > currentIdx;
+            return (
+              <div
+                key={tier.key}
+                className={`p-2.5 rounded-lg border text-xs flex flex-col gap-1 ${
+                  isCurrent
+                    ? 'border-blue-500 bg-blue-50'
+                    : 'border-gray-200 bg-gray-50'
+                }`}
+              >
+                <div className="font-semibold text-gray-800">{tier.label}</div>
+                <div className="text-gray-500">${tier.price}/mo</div>
+                <div className="text-gray-400">{tier.runs.toLocaleString()} executions/mo</div>
+                <div className="mt-1">
+                  {isCurrent ? (
+                    <span className="text-xs font-medium text-blue-600">Current</span>
+                  ) : (
+                    <button
+                      disabled
+                      title="Payments coming soon"
+                      className={`text-xs font-medium cursor-not-allowed ${
+                        isUpgrade ? 'text-blue-400' : 'text-gray-400'
+                      }`}
+                    >
+                      {currentPlan === 'free' ? 'Subscribe' : isUpgrade ? 'Upgrade ↑' : 'Downgrade'}
+                    </button>
+                  )}
+                </div>
+              </div>
+            );
+          })}
         </div>
+        <p className="text-xs text-gray-400 mt-2">Payments coming soon</p>
       </div>
 
       {/* ── Recent Executions ── */}
@@ -332,7 +345,6 @@ export function BillingPage({ orgId }: BillingPageProps) {
   const { userSkills } = useUserSkills();
 
   const currentPlan: PlanTier = billing?.plan ?? 'free';
-  const sub = billing?.subscription;
   const summary = billing?.summary;
 
   // Total estimated monthly cost for all active skills at current tier
@@ -372,48 +384,6 @@ export function BillingPage({ orgId }: BillingPageProps) {
         )}
 
         <div className="max-w-3xl mx-auto space-y-6">
-          {/* ── Current Plan Card ── */}
-          <div className="bg-white border rounded-lg p-6">
-            <div className="flex items-start justify-between">
-              <div>
-                <div className="flex items-center gap-2">
-                  <CreditCard size={18} className="text-gray-500" />
-                  <span className="text-sm text-gray-500 font-medium uppercase tracking-wide">
-                    Current plan
-                  </span>
-                </div>
-                <div className="mt-2 flex items-center gap-3">
-                  <span
-                    className={`px-3 py-1 rounded-full text-sm font-semibold capitalize ${PLAN_COLORS[currentPlan]}`}
-                  >
-                    {currentPlan}
-                  </span>
-                  {sub && (
-                    <span className="text-sm text-gray-500">
-                      Status: {sub.status}
-                    </span>
-                  )}
-                  {sub?.currentPeriodEnd && (
-                    <span className="text-sm text-gray-500">
-                      Renews {new Date(sub.currentPeriodEnd).toLocaleDateString()}
-                    </span>
-                  )}
-                </div>
-              </div>
-
-              <button
-                disabled
-                title="Payments coming soon"
-                className="px-4 py-2 text-sm bg-blue-600 text-white rounded opacity-50 cursor-not-allowed"
-              >
-                Upgrade
-              </button>
-            </div>
-            <p className="mt-3 text-xs text-gray-400">
-              Payments coming soon — plan changes are available via the admin API in the meantime.
-            </p>
-          </div>
-
           {/* ── Usage This Month ── */}
           {summary && (
             <div className="bg-white border rounded-lg p-6">
