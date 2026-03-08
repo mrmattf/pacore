@@ -11,9 +11,10 @@ export class GorgiasNotificationAdapter implements NotificationToolAdapter, Slot
   readonly capabilities = ['create_ticket', 'add_message'] as const;
 
   readonly credentialFields: CredentialField[] = [
-    { key: 'subdomain', label: 'Subdomain',  type: 'text',     placeholder: 'mystore (from mystore.gorgias.com)' },
-    { key: 'email',     label: 'Email',      type: 'text',     hint: 'The email you use to log in to Gorgias' },
-    { key: 'apiKey',    label: 'API Key',    type: 'password', hint: 'Gorgias Settings → REST API → Create API Key' },
+    { key: 'subdomain',    label: 'Subdomain',       type: 'text',     placeholder: 'mystore (from mystore.gorgias.com)' },
+    { key: 'email',        label: 'Login Email',      type: 'text',     hint: 'The email you use to log in to Gorgias' },
+    { key: 'apiKey',       label: 'API Key',          type: 'password', hint: 'Gorgias Settings → REST API → Create API Key' },
+    { key: 'supportEmail', label: 'Support Email',    type: 'text',     hint: 'Optional. The outbound email address of your Gorgias email integration (e.g. support@yourstore.com). Leave blank if it matches your login email.' },
   ];
 
   readonly setupGuide = 'Gorgias Settings → REST API → Generate API Key';
@@ -43,7 +44,7 @@ export class GorgiasNotificationAdapter implements NotificationToolAdapter, Slot
     const result = await client.createTicket({
       customerEmail: params.customerEmail,
       customerName:  params.customerName,
-      agentEmail:    creds.email as string,
+      agentEmail:    (creds.supportEmail || creds.email) as string,
       subject:       params.subject,
       message:       params.message,
       tags:          params.tags ?? ['backorder', 'automated'],

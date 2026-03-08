@@ -1,7 +1,7 @@
 export interface GorgiasTicketParams {
   customerEmail: string;
   customerName: string;
-  agentEmail: string;    // sender — the Gorgias login email used as the from address
+  agentEmail: string;    // sender — must match a Gorgias email integration address
   subject: string;
   message: string;       // HTML body — Gorgias emails this to the customer from the ticket
   tags?: string[];
@@ -48,12 +48,13 @@ export class GorgiasApiClient {
           channel: 'email',
           via: 'api',
           from_agent: true,
+          sender: { email: params.agentEmail },
           source: {
-            type: 'email',
             from: { address: params.agentEmail },
             to: [{ address: params.customerEmail, name: params.customerName }],
           },
           body_html: params.message,
+          body_text: params.message.replace(/<[^>]*>/g, ''),
           subject: params.subject,
         },
       ],
