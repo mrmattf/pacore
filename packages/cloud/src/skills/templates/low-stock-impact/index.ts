@@ -134,8 +134,13 @@ const functionalFields: EditableField[] = [
   { key: 'templates.high_value_stockout.closing', label: 'Priority Order — Closing', type: 'textarea', rows: 3, defaultValue: sharedDefaultTemplates.high_value_stockout.closing },
 ];
 
-// Gorgias, Re:amaze: branding + functional — send body_html as-is
+// Gorgias: full branding (logo, company name, signature) + functional
 const gorgiasEditableFields  = [...brandingFields, ...functionalFields];
+// Re:amaze: signature only — Re:amaze handles logo/branding at account level
+const reamazeEditableFields: EditableField[] = [
+  { key: 'signature', label: 'Message Signature', type: 'textarea', defaultValue: '', hint: 'Shown at the end of every message (e.g. "The Acme Support Team")' },
+  ...functionalFields,
+];
 // Zendesk: functional only — wraps email in its own branded template
 const standardEditableFields = functionalFields;
 
@@ -191,7 +196,7 @@ export const LowStockShopifyReamazeTemplate: SkillTemplate = {
     { key: 'shopify',      label: 'Your Shopify Store',    integrationKey: 'shopify',  required: true },
     { key: 'notification', label: 'Your Re:amaze Account', integrationKey: 'reamaze',  required: true },
   ],
-  editableFields: gorgiasEditableFields,
+  editableFields: reamazeEditableFields,
   templateVariables: sharedTemplateVariables,
 };
 
