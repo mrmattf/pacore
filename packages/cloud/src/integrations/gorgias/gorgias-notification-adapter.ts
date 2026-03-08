@@ -43,6 +43,7 @@ export class GorgiasNotificationAdapter implements NotificationToolAdapter, Slot
     const result = await client.createTicket({
       customerEmail: params.customerEmail,
       customerName:  params.customerName,
+      agentEmail:    creds.email as string,
       subject:       params.subject,
       message:       params.message,
       tags:          params.tags ?? ['backorder', 'automated'],

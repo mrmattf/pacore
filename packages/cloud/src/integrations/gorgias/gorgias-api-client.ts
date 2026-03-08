@@ -1,6 +1,7 @@
 export interface GorgiasTicketParams {
   customerEmail: string;
   customerName: string;
+  agentEmail: string;    // sender — the Gorgias login email used as the from address
   subject: string;
   message: string;       // HTML body — Gorgias emails this to the customer from the ticket
   tags?: string[];
@@ -20,12 +21,14 @@ export interface GorgiasTicketResult {
 export class GorgiasApiClient {
   private baseUrl: string;
   private authHeader: string;
+  private subdomain: string;
 
   constructor(
     subdomain: string,
-    private email: string,
-    private apiKey: string
+    email: string,
+    apiKey: string
   ) {
+    this.subdomain = subdomain;
     this.baseUrl = `https://${subdomain}.gorgias.com/api`;
     this.authHeader = `Basic ${Buffer.from(`${email}:${apiKey}`).toString('base64')}`;
   }
@@ -47,6 +50,7 @@ export class GorgiasApiClient {
           from_agent: true,
           source: {
             type: 'email',
+            from: { address: params.agentEmail },
             to: [{ address: params.customerEmail, name: params.customerName }],
           },
           body_html: params.message,
@@ -72,7 +76,7 @@ export class GorgiasApiClient {
     const data = await response.json() as { id: number };
     return {
       ticketId: String(data.id),
-      ticketUrl: `https://${this.authHeader.split('@')[0]}.gorgias.com/app/ticket/${data.id}`,
+      ticketUrl: `https://${this.subdomain}.gorgias.com/app/ticket/${data.id}`,
     };
   }
 
