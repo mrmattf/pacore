@@ -1615,6 +1615,7 @@ export class APIGateway {
           price: t.price,
           slots: t.slots,
           editableFields: t.editableFields,
+          templateVariables: t.templateVariables,
           // compiledPolicy and enrichmentSpec are not exposed to end users
         }));
         res.json(templates);
