@@ -8,7 +8,8 @@ import { CredentialManager } from '../mcp/credential-manager';
 import { ShopifyOrderAdapter } from '../integrations/shopify/shopify-order-adapter';
 import { AdapterRegistry } from '../integrations/adapter-registry';
 import { evaluatePolicy, runEnrichmentSteps, MCPToolCaller } from '../skills/logic-compiler';
-import { renderTemplate, renderSubject } from '../skills/backorder-templates';
+import { renderTemplate, renderTemplatePlainText, renderSubject } from '../skills/backorder-templates';
+import { applyTemplateFieldOverrides } from '../skills/template-utils';
 import { SkillTemplateRegistry } from '../skills/skill-template-registry';
 
 export interface BackorderChainDeps {
@@ -262,18 +263,21 @@ export async function runBackorderDetectionV2(
       if (invokeAction.templateKey) {
         const stored = userSkillConfig.namedTemplates;
         const namedTemplates = (stored && Object.keys(stored).length > 0) ? stored : template.defaultTemplates;
-        const msgTemplate = namedTemplates[invokeAction.templateKey];
-        if (!msgTemplate) {
+        const raw = namedTemplates[invokeAction.templateKey];
+        if (!raw) {
           throw new Error(`Message template not found: ${invokeAction.templateKey}`);
         }
+
+        const msgTemplate = applyTemplateFieldOverrides(raw, invokeAction.templateKey, userSkillConfig.fieldOverrides ?? {});
 
         const branding = {
           companyName: (userSkillConfig.fieldOverrides['companyName'] as string) || '',
           logoUrl:     (userSkillConfig.fieldOverrides['logoUrl']     as string) || '',
           signature:   (userSkillConfig.fieldOverrides['signature']   as string) || '',
         };
-        const subject = renderSubject(msgTemplate.subject, ctx as any);
-        const message = renderTemplate(msgTemplate, { ...ctx, ...branding } as any);
+        const subject          = renderSubject(msgTemplate.subject, ctx as any);
+        const message          = renderTemplate(msgTemplate, { ...ctx, ...branding } as any);
+        const messagePlainText = renderTemplatePlainText(msgTemplate, { ...ctx, signature: branding.signature });
 
         // ---- Render Template step ----
         const doneRender = stepTimer(steps, 'Render Template');
@@ -298,7 +302,7 @@ export async function runBackorderDetectionV2(
           break;
         }
 
-        invokeParams = { ...invokeParams, subject, message };
+        invokeParams = { ...invokeParams, subject, message, messagePlainText };
       }
 
       const doneAction = stepTimer(steps, `Send via ${slot.integrationKey}`);

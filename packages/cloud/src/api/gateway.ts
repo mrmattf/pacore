@@ -1816,8 +1816,11 @@ export class APIGateway {
           ];
           const invokeAction = allActions.find((a: any) => a.type === 'invoke' && a.templateKey);
           const templateKey = invokeAction?.templateKey ?? Object.keys(namedTemplates)[0];
-          const msgTemplate = namedTemplates[templateKey];
-          if (!msgTemplate) return res.status(400).json({ error: 'No message template found in skill configuration' });
+          const rawTemplate = namedTemplates[templateKey];
+          if (!rawTemplate) return res.status(400).json({ error: 'No message template found in skill configuration' });
+
+          const { applyTemplateFieldOverrides } = await import('../skills/template-utils');
+          const msgTemplate = applyTemplateFieldOverrides(rawTemplate, templateKey, config.fieldOverrides ?? {});
 
           const syntheticCtx = {
             orderId: 99999,

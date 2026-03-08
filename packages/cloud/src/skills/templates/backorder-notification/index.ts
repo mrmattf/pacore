@@ -1,6 +1,7 @@
 import type {
   SkillType,
   SkillTemplate,
+  TemplateVariable,
   EditableField,
   CompiledPolicy,
   DataEnrichmentSpec,
@@ -63,24 +64,36 @@ const sharedEnrichmentSpec: DataEnrichmentSpec = {
   ],
 };
 
-// ---- Shared default message templates ----
+// ---- Shared default message templates (plain text — renderers add HTML/formatting) ----
 
 const sharedDefaultTemplates: NamedTemplates = {
   full_backorder: {
     label: 'Full Backorder Apology',
     subject: 'Important update on your order #{{orderNumber}}',
-    intro: 'Hi {{customerName}},<br><br>Thank you for your order #{{orderNumber}}. We\'re sorry to let you know that all items are temporarily out of stock.',
-    body: '{{backorderedItemsTable}}<br><p>Please reply with your preference:<br><strong>A</strong> — Hold my order until everything is available<br><strong>B</strong> — Cancel my order</p>',
+    intro: 'Hi {{customerName}},\n\nThank you for your order #{{orderNumber}}. We\'re sorry to let you know that all items are temporarily out of stock.',
+    body: '{{backorderedItemsTable}}\n\nPlease reply with your preference:\nA — Hold my order until everything is available\nB — Cancel my order',
     closing: 'We apologize for the inconvenience and will do our best to get your order to you as soon as possible. Thank you for your patience.',
   },
   partial_backorder: {
     label: 'Partial Backorder Shipping Update',
     subject: 'Shipping update for your order #{{orderNumber}}',
-    intro: 'Hi {{customerName}},<br><br>Thank you for your order #{{orderNumber}}. Some items are temporarily out of stock and will ship separately.',
-    body: '{{backorderedItemsTable}}<br><p>Please reply with your preference:<br><strong>A</strong> — Ship available items now; send backordered items when ready<br><strong>B</strong> — Wait until everything is in stock and ship together</p>',
+    intro: 'Hi {{customerName}},\n\nThank you for your order #{{orderNumber}}. Some items are temporarily out of stock and will ship separately.',
+    body: '{{backorderedItemsTable}}\n\nPlease reply with your preference:\nA — Ship available items now; send backordered items when ready\nB — Wait until everything is in stock and ship together',
     closing: 'We apologize for the delay and appreciate your understanding.',
   },
 };
+
+// ---- Template variables ----
+
+const sharedTemplateVariables: TemplateVariable[] = [
+  { key: 'customerName',          label: 'Customer Name',                  example: 'Jane Smith' },
+  { key: 'orderNumber',           label: 'Order Number',                   example: '1234' },
+  { key: 'orderId',               label: 'Order ID',                       example: '5678901' },
+  { key: 'customerEmail',         label: 'Customer Email',                 example: 'jane@example.com' },
+  { key: 'orderTotal',            label: 'Order Total',                    example: '149.99' },
+  { key: 'backorderedCount',      label: 'Number of Backordered Items',    example: '2' },
+  { key: 'backorderedItemsTable', label: 'Backordered Items Table',        example: '(formatted item list)' },
+];
 
 // ---- Editable fields ----
 
@@ -119,25 +132,21 @@ const functionalFields: EditableField[] = [
     defaultValue: 0,
     hint: 'Items at or below this quantity are considered backordered',
   },
-  {
-    key: 'templates.full_backorder.subject',
-    label: 'Full Backorder Ticket Subject',
-    type: 'text',
-    defaultValue: 'Important update on your order #{{orderNumber}}',
-    hint: 'Your customer sees this as the email subject from your support tool',
-  },
-  {
-    key: 'templates.partial_backorder.subject',
-    label: 'Partial Backorder Ticket Subject',
-    type: 'text',
-    defaultValue: 'Shipping update for your order #{{orderNumber}}',
-    hint: 'Your customer sees this as the email subject from your support tool',
-  },
+  // Full Backorder template fields
+  { key: 'templates.full_backorder.subject', label: 'Full Backorder — Subject', type: 'text',     rows: 1, defaultValue: sharedDefaultTemplates.full_backorder.subject, hint: 'Email subject your customer sees' },
+  { key: 'templates.full_backorder.intro',   label: 'Full Backorder — Opening', type: 'textarea', rows: 4, defaultValue: sharedDefaultTemplates.full_backorder.intro },
+  { key: 'templates.full_backorder.body',    label: 'Full Backorder — Body',    type: 'textarea', rows: 6, defaultValue: sharedDefaultTemplates.full_backorder.body,    hint: '{{backorderedItemsTable}} inserts the item list' },
+  { key: 'templates.full_backorder.closing', label: 'Full Backorder — Closing', type: 'textarea', rows: 3, defaultValue: sharedDefaultTemplates.full_backorder.closing },
+  // Partial Backorder template fields
+  { key: 'templates.partial_backorder.subject', label: 'Partial Backorder — Subject', type: 'text',     rows: 1, defaultValue: sharedDefaultTemplates.partial_backorder.subject, hint: 'Email subject your customer sees' },
+  { key: 'templates.partial_backorder.intro',   label: 'Partial Backorder — Opening', type: 'textarea', rows: 4, defaultValue: sharedDefaultTemplates.partial_backorder.intro },
+  { key: 'templates.partial_backorder.body',    label: 'Partial Backorder — Body',    type: 'textarea', rows: 6, defaultValue: sharedDefaultTemplates.partial_backorder.body,    hint: '{{backorderedItemsTable}} inserts the item list' },
+  { key: 'templates.partial_backorder.closing', label: 'Partial Backorder — Closing', type: 'textarea', rows: 3, defaultValue: sharedDefaultTemplates.partial_backorder.closing },
 ];
 
-// Gorgias, Re:amaze: branding + functional (6 fields) — send body_html as-is
+// Gorgias, Re:amaze: branding + functional — send body_html as-is
 const gorgiasEditableFields = [...brandingFields, ...functionalFields];
-// Zendesk: functional only (3 fields) — wraps email in its own branded template
+// Zendesk: functional only — wraps email in its own branded template
 const standardEditableFields = functionalFields;
 
 // ---- Three SkillTemplate variants ----
@@ -157,6 +166,7 @@ export const BackorderShopifyGorgiasTemplate: SkillTemplate = {
     { key: 'notification',  label: 'Your Gorgias Account', integrationKey: 'gorgias',  required: true },
   ],
   editableFields: gorgiasEditableFields,
+  templateVariables: sharedTemplateVariables,
 };
 
 export const BackorderShopifyZendeskTemplate: SkillTemplate = {
@@ -174,6 +184,7 @@ export const BackorderShopifyZendeskTemplate: SkillTemplate = {
     { key: 'notification',  label: 'Your Zendesk Account', integrationKey: 'zendesk',  required: true },
   ],
   editableFields: standardEditableFields,
+  templateVariables: sharedTemplateVariables,
 };
 
 export const BackorderShopifyReamazeTemplate: SkillTemplate = {
@@ -191,6 +202,7 @@ export const BackorderShopifyReamazeTemplate: SkillTemplate = {
     { key: 'notification', label: 'Your Re:amaze Account', integrationKey: 'reamaze',   required: true },
   ],
   editableFields: gorgiasEditableFields,
+  templateVariables: sharedTemplateVariables,
 };
 
 export const BackorderNotificationTemplates: SkillTemplate[] = [

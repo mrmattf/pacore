@@ -7,7 +7,8 @@ import { CredentialManager } from '../mcp/credential-manager';
 import { ShopifyOrderAdapter } from '../integrations/shopify/shopify-order-adapter';
 import { AdapterRegistry } from '../integrations/adapter-registry';
 import { SkillTemplateRegistry } from '../skills/skill-template-registry';
-import { renderLowStockTemplate, renderLowStockSubject } from '../skills/low-stock-templates';
+import { renderLowStockTemplate, renderLowStockTemplatePlainText, renderLowStockSubject } from '../skills/low-stock-templates';
+import { applyTemplateFieldOverrides } from '../skills/template-utils';
 
 export interface LowStockChainDeps {
   credentialManager: CredentialManager;
@@ -243,8 +244,9 @@ export async function runLowStockImpactChain(
       const invokeAction = actions.find(a => a.type === 'invoke') as AdapterAction | undefined;
       if (invokeAction?.templateKey) {
         const namedTemplates = userSkillConfig.namedTemplates ?? template.defaultTemplates;
-        const msgTemplate = namedTemplates[invokeAction.templateKey];
-        if (msgTemplate) {
+        const raw = namedTemplates[invokeAction.templateKey];
+        if (raw) {
+          const msgTemplate = applyTemplateFieldOverrides(raw, invokeAction.templateKey, userSkillConfig.fieldOverrides ?? {});
           const branding = {
             companyName: (userSkillConfig.fieldOverrides['companyName'] as string) || '',
             logoUrl:     (userSkillConfig.fieldOverrides['logoUrl']     as string) || '',
@@ -352,19 +354,21 @@ export async function runLowStockImpactChain(
 
         if (invokeAction.templateKey) {
           const namedTemplates = userSkillConfig.namedTemplates ?? template.defaultTemplates;
-          const msgTemplate = namedTemplates[invokeAction.templateKey];
-          if (!msgTemplate) {
+          const raw = namedTemplates[invokeAction.templateKey];
+          if (!raw) {
             throw new Error(`Message template not found: ${invokeAction.templateKey}`);
           }
 
+          const msgTemplate = applyTemplateFieldOverrides(raw, invokeAction.templateKey, userSkillConfig.fieldOverrides ?? {});
           const branding = {
             companyName: (userSkillConfig.fieldOverrides['companyName'] as string) || '',
             logoUrl:     (userSkillConfig.fieldOverrides['logoUrl']     as string) || '',
             signature:   (userSkillConfig.fieldOverrides['signature']   as string) || '',
           };
-          const subject = renderLowStockSubject(msgTemplate.subject, ctx);
-          const message = renderLowStockTemplate(msgTemplate, { ...ctx, ...branding });
-          invokeParams = { ...invokeParams, subject, message };
+          const subject          = renderLowStockSubject(msgTemplate.subject, ctx);
+          const message          = renderLowStockTemplate(msgTemplate, { ...ctx, ...branding });
+          const messagePlainText = renderLowStockTemplatePlainText(msgTemplate, { ...ctx, signature: branding.signature });
+          invokeParams = { ...invokeParams, subject, message, messagePlainText };
         }
 
         const doneAction = stepTimer(steps, `Notify Order #${order.order_number}`);

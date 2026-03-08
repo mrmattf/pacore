@@ -2,8 +2,14 @@ import type { TemplateContent } from '@pacore/core';
 import type { LowStockPolicyEvalContext } from '../chains/low-stock-types';
 import { escapeHtml, substituteVars } from './backorder-templates';
 
+/** Converts \n line breaks to <br> tags for HTML rendering. */
+function nl2br(s: string): string {
+  return s.replace(/\n/g, '<br>');
+}
+
 /**
  * Renders a full HTML email body for a Low Stock Customer Impact notification.
+ * Template fields use plain text with \n line breaks; nl2br converts them before substitution.
  */
 export function renderLowStockTemplate(
   template: TemplateContent,
@@ -11,9 +17,9 @@ export function renderLowStockTemplate(
 ): string {
   const vars = buildVarMap(context);
 
-  const intro   = substituteVars(template.intro,   vars);
-  const body    = substituteVars(template.body,    vars);
-  const closing = substituteVars(template.closing, vars);
+  const intro   = substituteVars(nl2br(template.intro),   vars);
+  const body    = substituteVars(nl2br(template.body),    vars);
+  const closing = substituteVars(nl2br(template.closing), vars);
 
   const logoHtml = context.logoUrl
     ? `<div style="margin-bottom: 16px;"><img src="${escapeHtml(context.logoUrl)}" alt="${escapeHtml(context.companyName || '')}" style="max-height: 48px; max-width: 200px;" /></div>`
@@ -32,6 +38,23 @@ export function renderLowStockTemplate(
   ${signatureHtml}
 </div>
 `.trim();
+}
+
+/**
+ * Renders a plain-text email body for adapters that don't support HTML (e.g. Re:amaze).
+ */
+export function renderLowStockTemplatePlainText(
+  template: TemplateContent,
+  context: LowStockPolicyEvalContext & { signature?: string }
+): string {
+  const vars = buildVarMapText(context);
+  const parts = [
+    substituteVarsPlain(template.intro,   vars),
+    substituteVarsPlain(template.body,    vars),
+    substituteVarsPlain(template.closing, vars),
+  ].filter(Boolean);
+  if (context.signature) parts.push(`— ${context.signature}`);
+  return parts.join('\n\n');
 }
 
 /**
@@ -66,6 +89,26 @@ function buildVarMap(ctx: LowStockPolicyEvalContext): Record<string, unknown> {
   };
 }
 
+function buildVarMapText(ctx: LowStockPolicyEvalContext): Record<string, string> {
+  return {
+    affectedItemsTable: buildAffectedItemsText(ctx),
+    customerName:       ctx.customerName || 'Valued Customer',
+    orderNumber:        String(ctx.orderNumber),
+    orderId:            String(ctx.orderId),
+    customerEmail:      ctx.customerEmail,
+    orderTotal:         String(ctx.orderTotal),
+    productTitle:       ctx.productTitle || '',
+    sku:                ctx.sku || '',
+    availableQty:       String(ctx.availableQty),
+    affectedOrderCount: String(ctx.affectedOrderCount),
+  };
+}
+
+/** Plain-text variable substitution — no HTML escaping. */
+function substituteVarsPlain(text: string, vars: Record<string, string>): string {
+  return text.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? '');
+}
+
 function buildAffectedItemsHtml(ctx: LowStockPolicyEvalContext): string {
   if (!ctx.affectedItems || ctx.affectedItems.length === 0) return '';
 
@@ -87,4 +130,13 @@ function buildAffectedItemsHtml(ctx: LowStockPolicyEvalContext): string {
   </thead>
   <tbody>${rows}</tbody>
 </table>`.trim();
+}
+
+function buildAffectedItemsText(ctx: LowStockPolicyEvalContext): string {
+  if (!ctx.affectedItems || ctx.affectedItems.length === 0) return '';
+  const separator = '-'.repeat(50);
+  const rows = ctx.affectedItems.map(item =>
+    `${item.title}  |  ${item.sku || '—'}  |  Qty: ${item.quantity}`
+  );
+  return ['Item  |  SKU  |  Qty Ordered', separator, ...rows].join('\n');
 }

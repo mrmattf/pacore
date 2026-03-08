@@ -47,8 +47,9 @@ export interface CreateTicketParams {
   customerEmail: string;
   customerName: string;
   priority: 'low' | 'normal' | 'high';
-  subject: string;     // rendered from template — becomes email subject customer sees
-  message: string;     // rendered HTML — support tool emails this as ticket body
+  subject: string;            // rendered from template — becomes email subject customer sees
+  message: string;            // rendered HTML — Gorgias / Zendesk ticket body
+  messagePlainText?: string;  // plain text — Re:amaze and other plain-text adapters
   tags?: string[];
 }
 

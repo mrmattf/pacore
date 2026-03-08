@@ -1,6 +1,7 @@
 import type {
   SkillType,
   SkillTemplate,
+  TemplateVariable,
   EditableField,
   CompiledPolicy,
   DataEnrichmentSpec,
@@ -51,24 +52,39 @@ const sharedEnrichmentSpec: DataEnrichmentSpec = {
   steps: [],
 };
 
-// ---- Shared default message templates ----
+// ---- Shared default message templates (plain text — renderers add HTML/formatting) ----
 
 const sharedDefaultTemplates: NamedTemplates = {
   stockout_notification: {
     label: 'Out of Stock Customer Notification',
     subject: 'Important update on your order #{{orderNumber}}',
-    intro: 'Hi {{customerName}},<br><br>We\'re sorry to let you know that an item in your order #{{orderNumber}} is temporarily out of stock.',
-    body: '{{affectedItemsTable}}<br><p>Please reply with your preference:<br><strong>A</strong> — Hold my order until the item is back in stock<br><strong>B</strong> — Suggest a comparable substitute item<br><strong>C</strong> — Cancel the affected item for a full refund</p>',
+    intro: 'Hi {{customerName}},\n\nWe\'re sorry to let you know that an item in your order #{{orderNumber}} is temporarily out of stock.',
+    body: '{{affectedItemsTable}}\n\nPlease reply with your preference:\nA — Hold my order until the item is back in stock\nB — Suggest a comparable substitute item\nC — Cancel the affected item for a full refund',
     closing: 'We apologize for the inconvenience and will process your choice as quickly as possible. Thank you for your patience.',
   },
   high_value_stockout: {
     label: 'High-Value Order Stockout — Priority Response',
     subject: 'Priority update on your order #{{orderNumber}}',
-    intro: 'Hi {{customerName}},<br><br>I\'m personally reaching out about your order #{{orderNumber}}. An item you\'ve ordered is temporarily out of stock and I want to make this right.',
-    body: '{{affectedItemsTable}}<br><p>Please reply and we\'ll take care of you right away:<br><strong>A</strong> — Hold my order until everything is back in stock<br><strong>B</strong> — Suggest a comparable substitute item<br><strong>C</strong> — Cancel the affected item for an immediate full refund</p>',
+    intro: 'Hi {{customerName}},\n\nI\'m personally reaching out about your order #{{orderNumber}}. An item you\'ve ordered is temporarily out of stock and I want to make this right.',
+    body: '{{affectedItemsTable}}\n\nPlease reply and we\'ll take care of you right away:\nA — Hold my order until everything is back in stock\nB — Suggest a comparable substitute item\nC — Cancel the affected item for an immediate full refund',
     closing: 'I\'m sorry for this inconvenience. Your satisfaction is our priority and we\'ll respond to your reply within 2 hours.',
   },
 };
+
+// ---- Template variables ----
+
+const sharedTemplateVariables: TemplateVariable[] = [
+  { key: 'customerName',      label: 'Customer Name',              example: 'Jane Smith' },
+  { key: 'orderNumber',       label: 'Order Number',               example: '1234' },
+  { key: 'orderId',           label: 'Order ID',                   example: '5678901' },
+  { key: 'customerEmail',     label: 'Customer Email',             example: 'jane@example.com' },
+  { key: 'orderTotal',        label: 'Order Total',                example: '149.99' },
+  { key: 'productTitle',      label: 'Product Title',              example: 'Blue Widget (L)' },
+  { key: 'sku',               label: 'SKU',                        example: 'WIDGET-BLU-L' },
+  { key: 'availableQty',      label: 'Available Quantity',         example: '0' },
+  { key: 'affectedOrderCount', label: 'Number of Affected Orders', example: '3' },
+  { key: 'affectedItemsTable', label: 'Affected Items Table',      example: '(formatted item list)' },
+];
 
 // ---- Editable fields ----
 
@@ -106,20 +122,16 @@ const functionalFields: EditableField[] = [
     defaultValue: 0,
     hint: 'Trigger customer notifications when inventory falls at or below this quantity',
   },
-  {
-    key: 'templates.stockout_notification.subject',
-    label: 'Standard Notification Subject',
-    type: 'text',
-    defaultValue: 'Important update on your order #{{orderNumber}}',
-    hint: 'Your customer sees this as the email subject from your support tool',
-  },
-  {
-    key: 'templates.high_value_stockout.subject',
-    label: 'Priority Order Subject',
-    type: 'text',
-    defaultValue: 'Priority update on your order #{{orderNumber}}',
-    hint: 'Used for orders over $200 — your customer sees this as the email subject',
-  },
+  // Stockout notification template fields
+  { key: 'templates.stockout_notification.subject', label: 'Standard Notification — Subject', type: 'text',     rows: 1, defaultValue: sharedDefaultTemplates.stockout_notification.subject, hint: 'Your customer sees this as the email subject' },
+  { key: 'templates.stockout_notification.intro',   label: 'Standard Notification — Opening', type: 'textarea', rows: 4, defaultValue: sharedDefaultTemplates.stockout_notification.intro },
+  { key: 'templates.stockout_notification.body',    label: 'Standard Notification — Body',    type: 'textarea', rows: 6, defaultValue: sharedDefaultTemplates.stockout_notification.body,    hint: '{{affectedItemsTable}} inserts the item list' },
+  { key: 'templates.stockout_notification.closing', label: 'Standard Notification — Closing', type: 'textarea', rows: 3, defaultValue: sharedDefaultTemplates.stockout_notification.closing },
+  // High-value stockout template fields
+  { key: 'templates.high_value_stockout.subject', label: 'Priority Order — Subject', type: 'text',     rows: 1, defaultValue: sharedDefaultTemplates.high_value_stockout.subject, hint: 'Used for orders over $200' },
+  { key: 'templates.high_value_stockout.intro',   label: 'Priority Order — Opening', type: 'textarea', rows: 4, defaultValue: sharedDefaultTemplates.high_value_stockout.intro },
+  { key: 'templates.high_value_stockout.body',    label: 'Priority Order — Body',    type: 'textarea', rows: 6, defaultValue: sharedDefaultTemplates.high_value_stockout.body,    hint: '{{affectedItemsTable}} inserts the item list' },
+  { key: 'templates.high_value_stockout.closing', label: 'Priority Order — Closing', type: 'textarea', rows: 3, defaultValue: sharedDefaultTemplates.high_value_stockout.closing },
 ];
 
 // Gorgias, Re:amaze: branding + functional — send body_html as-is
@@ -144,6 +156,7 @@ export const LowStockShopifyGorgiasTemplate: SkillTemplate = {
     { key: 'notification', label: 'Your Gorgias Account', integrationKey: 'gorgias',  required: true },
   ],
   editableFields: gorgiasEditableFields,
+  templateVariables: sharedTemplateVariables,
 };
 
 export const LowStockShopifyZendeskTemplate: SkillTemplate = {
@@ -161,6 +174,7 @@ export const LowStockShopifyZendeskTemplate: SkillTemplate = {
     { key: 'notification', label: 'Your Zendesk Account',  integrationKey: 'zendesk',  required: true },
   ],
   editableFields: standardEditableFields,
+  templateVariables: sharedTemplateVariables,
 };
 
 export const LowStockShopifyReamazeTemplate: SkillTemplate = {
@@ -178,6 +192,7 @@ export const LowStockShopifyReamazeTemplate: SkillTemplate = {
     { key: 'notification', label: 'Your Re:amaze Account', integrationKey: 'reamaze',  required: true },
   ],
   editableFields: gorgiasEditableFields,
+  templateVariables: sharedTemplateVariables,
 };
 
 export const LowStockImpactTemplates: SkillTemplate[] = [

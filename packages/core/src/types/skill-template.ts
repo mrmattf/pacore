@@ -9,6 +9,14 @@ export interface SkillType {
   category: string;    // "E-commerce" | "Legal" | "Finance"
 }
 
+// ---- TemplateVariable — an available {{variable}} placeholder exposed to UI and API ----
+
+export interface TemplateVariable {
+  key: string;       // used in {{key}}
+  label: string;     // human-readable description
+  example?: string;  // example value shown in UI
+}
+
 // ---- SkillTemplate — one concrete implementation (e.g. "Shopify → Zendesk") ----
 
 export interface SkillTemplate {
@@ -27,6 +35,7 @@ export interface SkillTemplate {
   // What end users configure
   slots: SkillSlot[];
   editableFields: EditableField[];
+  templateVariables?: TemplateVariable[];  // available {{variable}} placeholders
 }
 
 // ---- SkillSlot — an integration connection the user must provide ----
@@ -46,6 +55,7 @@ export interface EditableField {
   type: 'text' | 'textarea' | 'number';
   defaultValue: unknown;
   hint?: string;
+  rows?: number;           // textarea row height hint for UI
 }
 
 // ---- UserSkillConfig — stored in user_skills.configuration JSONB ----

@@ -45,7 +45,7 @@ export class ReamazeNotificationAdapter implements NotificationToolAdapter, Slot
       customerEmail: params.customerEmail,
       customerName:  params.customerName,
       subject:       params.subject,
-      message:       params.message,
+      message:       params.messagePlainText ?? params.message,
       category:      creds.channel as string,
       tags:          params.tags ?? ['backorder', 'automated'],
     });

@@ -9,8 +9,10 @@ import { AdapterRegistry } from '../integrations/adapter-registry';
 import { SkillTemplateRegistry } from '../skills/skill-template-registry';
 import {
   renderDeliveryExceptionTemplate,
+  renderDeliveryExceptionTemplatePlainText,
   renderDeliveryExceptionSubject,
 } from '../skills/delivery-exception-templates';
+import { applyTemplateFieldOverrides } from '../skills/template-utils';
 
 export interface DeliveryExceptionChainDeps {
   credentialManager: CredentialManager;
@@ -250,8 +252,9 @@ export async function runDeliveryExceptionChain(
       if (!slot) continue;
 
       const namedTemplates = userSkillConfig.namedTemplates ?? template.defaultTemplates;
-      const msgTemplate = namedTemplates[invokeAction.templateKey];
-      if (msgTemplate) {
+      const raw = namedTemplates[invokeAction.templateKey];
+      if (raw) {
+        const msgTemplate = applyTemplateFieldOverrides(raw, invokeAction.templateKey, userSkillConfig.fieldOverrides ?? {});
         previews.wouldNotify.push({
           slot:       invokeAction.targetSlot,
           capability: invokeAction.capability,
@@ -316,14 +319,16 @@ export async function runDeliveryExceptionChain(
 
       if (invokeAction.templateKey) {
         const namedTemplates = userSkillConfig.namedTemplates ?? template.defaultTemplates;
-        const msgTemplate = namedTemplates[invokeAction.templateKey];
-        if (!msgTemplate) {
+        const raw = namedTemplates[invokeAction.templateKey];
+        if (!raw) {
           throw new Error(`Message template not found: ${invokeAction.templateKey}`);
         }
 
-        const subject = renderDeliveryExceptionSubject(msgTemplate.subject, ctx);
-        const message = renderDeliveryExceptionTemplate(msgTemplate, ctx);
-        invokeParams = { ...invokeParams, subject, message };
+        const msgTemplate      = applyTemplateFieldOverrides(raw, invokeAction.templateKey, userSkillConfig.fieldOverrides ?? {});
+        const subject          = renderDeliveryExceptionSubject(msgTemplate.subject, ctx);
+        const message          = renderDeliveryExceptionTemplate(msgTemplate, ctx);
+        const messagePlainText = renderDeliveryExceptionTemplatePlainText(msgTemplate, ctx);
+        invokeParams = { ...invokeParams, subject, message, messagePlainText };
       }
 
       const doneAction = stepTimer(steps, `Dispatch Action: ${invokeAction.capability}`);

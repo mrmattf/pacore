@@ -1,6 +1,7 @@
 import type {
   SkillType,
   SkillTemplate,
+  TemplateVariable,
   EditableField,
   CompiledPolicy,
   DataEnrichmentSpec,
@@ -69,42 +70,52 @@ const sharedEnrichmentSpec: DataEnrichmentSpec = {
   steps: [],
 };
 
-// ---- Shared default message templates ----
+// ---- Shared default message templates (plain text for customer-facing; team alerts already plain text) ----
 
 const sharedDefaultTemplates: NamedTemplates = {
   cancel_customer_notice: {
     label: 'Fraud Review — Customer Notice',
     subject: 'Action required on your order #{{orderNumber}}',
-    intro: 'Hi {{customerName}},<br><br>We\'re reviewing your recent order #{{orderNumber}} and need to verify a few details before we can proceed.',
-    body: '<p>This is a routine security check we perform on some orders. Please reply to this message so we can confirm your order and get it on its way to you.</p><p>If you did not place this order, please let us know immediately.</p>',
+    intro: 'Hi {{customerName}},\n\nWe\'re reviewing your recent order #{{orderNumber}} and need to verify a few details before we can proceed.',
+    body: 'This is a routine security check we perform on some orders. Please reply to this message so we can confirm your order and get it on its way to you.\n\nIf you did not place this order, please let us know immediately.',
     closing: 'Thank you for your understanding. We\'ll get back to you within a few hours.',
   },
   cancel_team_alert: {
     label: 'Fraud Cancel — Internal Team Alert',
     subject: '🚨 High-risk order flagged for cancellation — #{{orderNumber}}',
     intro: '',
-    body: 'Order *#{{orderNumber}}* has been flagged by Shopify with a <strong>CANCEL</strong> recommendation.\n\nCustomer: {{customerName}} ({{customerEmail}})\nOrder total: ${{orderTotal}}\nRisk score: {{riskScore}}\nRisk details: {{riskMessages}}\n\nA ticket has been created to notify the customer. Please review and cancel if confirmed fraudulent.',
+    body: 'Order *#{{orderNumber}}* has been flagged by Shopify with a CANCEL recommendation.\n\nCustomer: {{customerName}} ({{customerEmail}})\nOrder total: ${{orderTotal}}\nRisk score: {{riskScore}}\nRisk details: {{riskMessages}}\n\nA ticket has been created to notify the customer. Please review and cancel if confirmed fraudulent.',
     closing: '',
   },
   investigate_team_alert: {
     label: 'Fraud Investigate — Internal Team Alert',
     subject: '⚠️ Order flagged for review — #{{orderNumber}}',
     intro: '',
-    body: 'Order *#{{orderNumber}}* has been flagged by Shopify for *investigation*.\n\nCustomer: {{customerName}} ({{customerEmail}})\nOrder total: ${{orderTotal}}\nRisk score: {{riskScore}}\nRisk details: {{riskMessages}}\n\nPlease review this order before fulfilling.',
+    body: 'Order *#{{orderNumber}}* has been flagged by Shopify for investigation.\n\nCustomer: {{customerName}} ({{customerEmail}})\nOrder total: ${{orderTotal}}\nRisk score: {{riskScore}}\nRisk details: {{riskMessages}}\n\nPlease review this order before fulfilling.',
     closing: '',
   },
 };
 
+// ---- Template variables ----
+
+const sharedTemplateVariables: TemplateVariable[] = [
+  { key: 'customerName',       label: 'Customer Name',         example: 'Jane Smith' },
+  { key: 'orderNumber',        label: 'Order Number',          example: '1234' },
+  { key: 'orderId',            label: 'Order ID',              example: '5678901' },
+  { key: 'customerEmail',      label: 'Customer Email',        example: 'jane@example.com' },
+  { key: 'orderTotal',         label: 'Order Total',           example: '149.99' },
+  { key: 'riskScore',          label: 'Risk Score',            example: '0.85' },
+  { key: 'riskMessages',       label: 'Risk Details',          example: 'Multiple failed payment attempts' },
+  { key: 'customerOrderCount', label: 'Customer Order Count',  example: '1' },
+];
+
 // ---- Shared editable fields ----
 
 const sharedEditableFields: EditableField[] = [
-  {
-    key: 'templates.cancel_customer_notice.subject',
-    label: 'Customer Verification Request Subject',
-    type: 'text',
-    defaultValue: 'Action required on your order #{{orderNumber}}',
-    hint: 'Your customer sees this as the email subject from your support tool',
-  },
+  { key: 'templates.cancel_customer_notice.subject', label: 'Customer Notice — Subject', type: 'text',     rows: 1, defaultValue: sharedDefaultTemplates.cancel_customer_notice.subject, hint: 'Your customer sees this as the email subject' },
+  { key: 'templates.cancel_customer_notice.intro',   label: 'Customer Notice — Opening', type: 'textarea', rows: 4, defaultValue: sharedDefaultTemplates.cancel_customer_notice.intro },
+  { key: 'templates.cancel_customer_notice.body',    label: 'Customer Notice — Body',    type: 'textarea', rows: 6, defaultValue: sharedDefaultTemplates.cancel_customer_notice.body },
+  { key: 'templates.cancel_customer_notice.closing', label: 'Customer Notice — Closing', type: 'textarea', rows: 3, defaultValue: sharedDefaultTemplates.cancel_customer_notice.closing },
 ];
 
 // ---- Two SkillTemplate variants ----
@@ -126,6 +137,7 @@ export const HighRiskShopifyGorgiasSlackTemplate: SkillTemplate = {
     { key: 'alert',        label: 'Your Slack Channel',   integrationKey: 'slack',   required: true },
   ],
   editableFields: sharedEditableFields,
+  templateVariables: sharedTemplateVariables,
 };
 
 export const HighRiskShopifyZendeskSlackTemplate: SkillTemplate = {
@@ -144,6 +156,7 @@ export const HighRiskShopifyZendeskSlackTemplate: SkillTemplate = {
     { key: 'alert',        label: 'Your Slack Channel',    integrationKey: 'slack',    required: true },
   ],
   editableFields: sharedEditableFields,
+  templateVariables: sharedTemplateVariables,
 };
 
 export const HighRiskOrderTemplates: SkillTemplate[] = [

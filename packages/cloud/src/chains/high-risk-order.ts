@@ -9,7 +9,8 @@ import { ShopifyOrderAdapter } from '../integrations/shopify/shopify-order-adapt
 import type { ShopifyRisk } from '../integrations/shopify/shopify-api-client';
 import { AdapterRegistry } from '../integrations/adapter-registry';
 import { SkillTemplateRegistry } from '../skills/skill-template-registry';
-import { renderHighRiskTemplate, renderHighRiskSubject } from '../skills/high-risk-order-templates';
+import { renderHighRiskTemplate, renderHighRiskTemplatePlainText, renderHighRiskSubject } from '../skills/high-risk-order-templates';
+import { applyTemplateFieldOverrides } from '../skills/template-utils';
 
 export interface HighRiskChainDeps {
   credentialManager: CredentialManager;
@@ -242,8 +243,9 @@ export async function runHighRiskOrderChain(
 
       if (invokeAction.templateKey) {
         const namedTemplates = userSkillConfig.namedTemplates ?? template.defaultTemplates;
-        const msgTemplate = namedTemplates[invokeAction.templateKey];
-        if (msgTemplate) {
+        const raw = namedTemplates[invokeAction.templateKey];
+        if (raw) {
+          const msgTemplate = applyTemplateFieldOverrides(raw, invokeAction.templateKey, userSkillConfig.fieldOverrides ?? {});
           preview.subject = renderHighRiskSubject(msgTemplate.subject, ctx);
           preview.message = renderHighRiskTemplate(msgTemplate, ctx);
         }
@@ -309,14 +311,16 @@ export async function runHighRiskOrderChain(
 
       if (invokeAction.templateKey) {
         const namedTemplates = userSkillConfig.namedTemplates ?? template.defaultTemplates;
-        const msgTemplate = namedTemplates[invokeAction.templateKey];
-        if (!msgTemplate) {
+        const raw = namedTemplates[invokeAction.templateKey];
+        if (!raw) {
           throw new Error(`Message template not found: ${invokeAction.templateKey}`);
         }
 
-        const subject = renderHighRiskSubject(msgTemplate.subject, ctx);
-        const message = renderHighRiskTemplate(msgTemplate, ctx);
-        invokeParams = { ...invokeParams, subject, message };
+        const msgTemplate      = applyTemplateFieldOverrides(raw, invokeAction.templateKey, userSkillConfig.fieldOverrides ?? {});
+        const subject          = renderHighRiskSubject(msgTemplate.subject, ctx);
+        const message          = renderHighRiskTemplate(msgTemplate, ctx);
+        const messagePlainText = renderHighRiskTemplatePlainText(msgTemplate, ctx);
+        invokeParams = { ...invokeParams, subject, message, messagePlainText };
       }
 
       

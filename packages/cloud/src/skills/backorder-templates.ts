@@ -14,6 +14,11 @@ export function escapeHtml(str: string): string {
     .replace(/'/g, '&#39;');
 }
 
+/** Converts \n line breaks to <br> tags for HTML rendering. */
+function nl2br(s: string): string {
+  return s.replace(/\n/g, '<br>');
+}
+
 /**
  * Marks a string as pre-sanitized HTML so substituteVars skips escaping it.
  * Only use this for HTML built entirely from already-escaped values (e.g. buildBackorderedItemsHtml).
@@ -38,13 +43,14 @@ export function substituteVars(text: string, context: Record<string, unknown>): 
 /**
  * Renders a full HTML email body from a NamedTemplate and execution context.
  * Returns a self-contained HTML string suitable for Gorgias/Zendesk ticket bodies.
+ * Template fields use plain text with \n line breaks; nl2br converts them before substitution.
  */
 export function renderTemplate(template: TemplateContent, context: PolicyEvalContext & { companyName?: string; logoUrl?: string; signature?: string }): string {
   const vars = buildVarMap(context);
 
-  const intro   = substituteVars(template.intro,   vars);
-  const body    = substituteVars(template.body,    vars);
-  const closing = substituteVars(template.closing, vars);
+  const intro   = substituteVars(nl2br(template.intro),   vars);
+  const body    = substituteVars(nl2br(template.body),    vars);
+  const closing = substituteVars(nl2br(template.closing), vars);
 
   const logoHtml = context.logoUrl
     ? `<div style="margin-bottom: 16px;"><img src="${escapeHtml(context.logoUrl)}" alt="${escapeHtml(context.companyName || '')}" style="max-height: 48px; max-width: 200px;" /></div>`
@@ -63,6 +69,23 @@ export function renderTemplate(template: TemplateContent, context: PolicyEvalCon
   ${signatureHtml}
 </div>
 `.trim();
+}
+
+/**
+ * Renders a plain-text email body for adapters that don't support HTML (e.g. Re:amaze).
+ */
+export function renderTemplatePlainText(
+  template: TemplateContent,
+  context: PolicyEvalContext & { signature?: string }
+): string {
+  const vars = buildVarMapText(context);
+  const parts = [
+    substituteVarsPlain(template.intro,   vars),
+    substituteVarsPlain(template.body,    vars),
+    substituteVarsPlain(template.closing, vars),
+  ].filter(Boolean);
+  if (context.signature) parts.push(`— ${context.signature}`);
+  return parts.join('\n\n');
 }
 
 /**
@@ -89,6 +112,23 @@ function buildVarMap(ctx: PolicyEvalContext): Record<string, unknown> {
     customerEmail:     ctx.customerEmail,
     orderTotal:        String(ctx.orderTotal),
   };
+}
+
+function buildVarMapText(ctx: PolicyEvalContext): Record<string, string> {
+  return {
+    backorderedItemsTable: buildBackorderedItemsText(ctx),
+    backorderedCount:  String(ctx.backorderedItems.length),
+    orderNumber:       String(ctx.orderNumber),
+    orderId:           String(ctx.orderId),
+    customerName:      ctx.customerName || 'Valued Customer',
+    customerEmail:     ctx.customerEmail,
+    orderTotal:        String(ctx.orderTotal),
+  };
+}
+
+/** Plain-text variable substitution — no HTML escaping. */
+function substituteVarsPlain(text: string, vars: Record<string, string>): string {
+  return text.replace(/\{\{(\w+)\}\}/g, (_, key) => vars[key] ?? '');
 }
 
 /** Coerces an eta value (string or API response object) to a display string. */
@@ -143,4 +183,15 @@ function buildBackorderedItemsHtml(ctx: PolicyEvalContext): string {
   </thead>
   <tbody>${rows}</tbody>
 </table>`.trim();
+}
+
+function buildBackorderedItemsText(ctx: PolicyEvalContext): string {
+  if (ctx.backorderedItems.length === 0) return '';
+  const separator = '-'.repeat(60);
+  const rows = ctx.backorderedItems.map(item => {
+    const eta = etaToString(item.eta);
+    const etaPart = eta ? `  |  Est. ${eta}` : '';
+    return `${item.title}  |  ${item.sku || '—'}  |  Ordered: ${item.orderedQty}, Available: ${item.availableQty}, Backordered: ${item.backorderedQty}${etaPart}`;
+  });
+  return ['Item  |  SKU  |  Qty', separator, ...rows].join('\n');
 }

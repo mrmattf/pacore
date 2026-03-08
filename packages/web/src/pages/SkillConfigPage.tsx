@@ -17,6 +17,13 @@ interface EditableField {
   type: 'text' | 'textarea' | 'number';
   defaultValue: unknown;
   hint?: string;
+  rows?: number;
+}
+
+interface TemplateVariable {
+  key: string;
+  label: string;
+  example?: string;
 }
 
 interface SkillTemplate {
@@ -25,6 +32,7 @@ interface SkillTemplate {
   name: string;
   slots: SkillSlot[];
   editableFields: EditableField[];
+  templateVariables?: TemplateVariable[];
 }
 
 type Panel = 'connections' | 'customize' | 'activate';
@@ -273,6 +281,23 @@ export function SkillConfigPage() {
           {/* Panel 2: Customize */}
           {activePanel === 'customize' && template && (
             <div className="space-y-4">
+              {template.templateVariables && template.templateVariables.length > 0 && (
+                <div className="p-3 bg-blue-50 border border-blue-100 rounded-lg">
+                  <p className="text-xs font-medium text-blue-700 mb-2">Available variables — click to copy</p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {template.templateVariables.map(v => (
+                      <button
+                        key={v.key}
+                        onClick={() => navigator.clipboard.writeText(`{{${v.key}}}`)}
+                        title={v.example ? `Example: ${v.example}` : v.label}
+                        className="text-xs font-mono bg-white border border-blue-200 text-blue-700 px-2 py-0.5 rounded hover:bg-blue-100"
+                      >
+                        {`{{${v.key}}}`}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="bg-white border rounded-lg p-5 space-y-4">
                 {template.editableFields.map(field => (
                   <div key={field.key}>
@@ -283,7 +308,7 @@ export function SkillConfigPage() {
                       <textarea
                         value={getFieldValue(field)}
                         onChange={e => setFieldValue(field.key, e.target.value)}
-                        rows={3}
+                        rows={field.rows ?? 3}
                         className="w-full border rounded px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                       />
                     ) : field.type === 'number' ? (
