@@ -25,7 +25,7 @@ export class ReamazeApiClient {
     email: string,
     apiToken: string
   ) {
-    this.baseUrl = `https://${brand}.reamaze.io/api/v1`;
+    this.baseUrl = `https://${brand}.reamaze.com/api/v1`;
     this.authHeader = `Basic ${Buffer.from(`${email}:${apiToken}`).toString('base64')}`;
   }
 
@@ -60,7 +60,7 @@ export class ReamazeApiClient {
     }
 
     const data = await response.json() as { slug: string };
-    const brand = this.baseUrl.match(/https:\/\/(.+)\.reamaze\.io/)?.[1] ?? '';
+    const brand = this.baseUrl.match(/https:\/\/(.+)\.reamaze\.com/)?.[1] ?? '';
     return {
       ticketId: data.slug,
       ticketUrl: `https://${brand}.reamaze.io/conversations/${data.slug}`,
@@ -69,7 +69,7 @@ export class ReamazeApiClient {
 
   /** Test credentials by fetching account info. Throws if auth fails. */
   async testConnection(): Promise<{ accountName: string }> {
-    const response = await fetch(`${this.baseUrl}/account`, {
+    const response = await fetch(`${this.baseUrl}/me`, {
       headers: {
         'Authorization': this.authHeader,
         'Accept': 'application/json',
@@ -80,7 +80,7 @@ export class ReamazeApiClient {
       throw new Error(`Re:amaze auth failed (${response.status}): check brand subdomain, email, and API token`);
     }
 
-    const data = await response.json() as { name: string };
-    return { accountName: data.name };
+    const data = await response.json() as { login?: string; name?: string };
+    return { accountName: data.name ?? data.login ?? 'Re:amaze' };
   }
 }

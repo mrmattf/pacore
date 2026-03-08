@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Zap, ChevronRight, RefreshCw, Settings, CheckCircle, Clock, Trash2 } from 'lucide-react';
+import { Zap, ChevronRight, RefreshCw, Settings, CheckCircle, Clock, Trash2, Pause, Play } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { UserSkill } from '../hooks/useSkills';
 
@@ -71,7 +71,7 @@ export function SkillsPage() {
     return acc;
   }, {});
 
-  const activeSkills = mySkills.filter(s => s.status === 'active' || s.status === 'pending');
+  const myConfiguredSkills = mySkills.filter(s => s.status === 'active' || s.status === 'paused' || s.status === 'pending');
 
   async function handleRemoveSkill(skillId: string) {
     try {
@@ -82,6 +82,20 @@ export function SkillsPage() {
       await load();
     } catch (e) {
       console.error('Failed to remove skill', e);
+    }
+  }
+
+  async function handleTogglePause(skill: UserSkill) {
+    const action = skill.status === 'active' ? 'pause' : 'resume';
+    try {
+      await fetch(`/v1/me/skills/${skill.id}/${action}`, {
+        method: 'PUT',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const newStatus = action === 'pause' ? 'paused' : 'active';
+      setMySkills(prev => prev.map(s => s.id === skill.id ? { ...s, status: newStatus as UserSkill['status'] } : s));
+    } catch (e) {
+      console.error('Failed to toggle skill pause', e);
     }
   }
 
@@ -131,36 +145,43 @@ export function SkillsPage() {
         <div className="max-w-3xl mx-auto space-y-8">
 
           {/* My skills (active + pending/incomplete) */}
-          {activeSkills.length > 0 && (
+          {myConfiguredSkills.length > 0 && (
             <section>
               <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
                 My Skills
               </h2>
               <div className="space-y-2">
-                {activeSkills.map(skill => {
+                {myConfiguredSkills.map(skill => {
                   const cfg = skill.configuration as any;
                   const templateName = resolveTemplateName(skill);
                   const templateId = cfg?.templateId ?? '';
                   const typeId = cfg?.skillTypeId ?? templateMap[templateId]?.skillTypeId ?? '';
                   const canConfigure = Boolean(typeId && templateId);
-                  const isActive = skill.status === 'active';
+                  const isPaused = skill.status === 'paused';
+                  const isPending = skill.status === 'pending';
                   return (
                     <div
                       key={skill.id}
                       className="bg-white border rounded-lg px-5 py-3 flex items-center justify-between"
                     >
                       <div className="flex items-center gap-2 min-w-0">
-                        {isActive
+                        {skill.status === 'active'
                           ? <CheckCircle size={15} className="text-green-500 flex-shrink-0" />
-                          : <Clock size={15} className="text-amber-400 flex-shrink-0" />
+                          : isPaused
+                            ? <Pause size={15} className="text-amber-500 flex-shrink-0" />
+                            : <Clock size={15} className="text-amber-400 flex-shrink-0" />
                         }
-                        <span className="text-sm font-medium text-gray-900 truncate">{templateName}</span>
+                        <span className={`text-sm font-medium truncate ${isPaused ? 'text-gray-400' : 'text-gray-900'}`}>
+                          {templateName}
+                        </span>
                         <span className={`text-xs px-1.5 py-0.5 rounded-full flex-shrink-0 ${
-                          isActive
+                          skill.status === 'active'
                             ? 'bg-green-50 text-green-700'
-                            : 'bg-amber-50 text-amber-700'
+                            : isPaused
+                              ? 'bg-amber-50 text-amber-700'
+                              : 'bg-gray-100 text-gray-500'
                         }`}>
-                          {isActive ? 'active' : 'incomplete'}
+                          {skill.status === 'active' ? 'active' : isPaused ? 'paused' : 'incomplete'}
                         </span>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
@@ -171,6 +192,15 @@ export function SkillsPage() {
                         >
                           <Settings size={12} /> Configure
                         </button>
+                        {!isPending && (
+                          <button
+                            onClick={() => handleTogglePause(skill)}
+                            title={isPaused ? 'Resume skill' : 'Pause skill'}
+                            className="p-1.5 text-gray-400 hover:text-gray-700 rounded hover:bg-gray-100 transition-colors"
+                          >
+                            {isPaused ? <Play size={14} /> : <Pause size={14} />}
+                          </button>
+                        )}
                         <button
                           onClick={() => handleRemoveSkill(skill.id)}
                           className="p-1.5 text-gray-400 hover:text-red-500 rounded hover:bg-red-50 transition-colors"

@@ -11,7 +11,7 @@ export class ReamazeNotificationAdapter implements NotificationToolAdapter, Slot
   readonly capabilities = ['create_ticket'] as const;
 
   readonly credentialFields: CredentialField[] = [
-    { key: 'brand',    label: 'Brand Subdomain', type: 'text',     placeholder: 'mystore (from mystore.reamaze.io)' },
+    { key: 'brand',    label: 'Brand Subdomain', type: 'text',     placeholder: 'mystore (from mystore.reamaze.com)' },
     { key: 'email',    label: 'Email',            type: 'text',     hint: 'Your Re:amaze login email' },
     { key: 'apiToken', label: 'API Token',        type: 'password', hint: 'Re:amaze Settings → API Access Token' },
   ];
