@@ -36,7 +36,7 @@ export class ReamazeApiClient {
         message: {
           body: params.message,
         },
-        customer: {
+        user: {
           email: params.customerEmail,
           name:  params.customerName,
         },
@@ -63,7 +63,7 @@ export class ReamazeApiClient {
     const brand = this.baseUrl.match(/https:\/\/(.+)\.reamaze\.com/)?.[1] ?? '';
     return {
       ticketId: data.slug,
-      ticketUrl: `https://${brand}.reamaze.io/conversations/${data.slug}`,
+      ticketUrl: `https://${brand}.reamaze.com/conversations/${data.slug}`,
     };
   }
 
