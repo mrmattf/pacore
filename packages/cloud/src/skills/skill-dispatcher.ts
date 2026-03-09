@@ -90,8 +90,10 @@ export class SkillDispatcher {
             if (!this.adapterRegistry) {
               throw new Error('AdapterRegistry is required for low-stock-impact skills');
             }
+            const inventoryPayload = extractInventoryUpdatePayload(payload);
+            console.log(`[SkillDispatcher] low-stock-impact extracted payload:`, JSON.stringify(inventoryPayload));
             result = await runLowStockImpactChain(
-              extractInventoryUpdatePayload(payload),
+              inventoryPayload,
               userSkillConfig,
               userId,
               {

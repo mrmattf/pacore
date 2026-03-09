@@ -186,6 +186,7 @@ export async function runLowStockImpactChain(
 
   const variantId = variant.id;
   result.variantId = variantId;
+  console.log(`[LowStockChain] inventoryItemId=${inventoryItemId} → variantId=${variantId} sku=${variant.sku || '(none)'} productId=${variant.product_id}`);
 
   // ---- Get product title ----
   let productTitle = variant.title || 'Unknown Product';
