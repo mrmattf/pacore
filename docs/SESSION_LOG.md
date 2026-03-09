@@ -1,8 +1,16 @@
 # Development Session Log
 
-Brief tracking of significant changes. Keep entries to 1-2 sentences. Delete entries older than 5 sessions.
+Brief tracking of significant changes. Keep entries to 1-2 sentences each. Delete entries older than 5 sessions.
 
 ---
+
+## 2026-03 (recent sessions)
+- Auth bug: SkillsPage and TemplatePickerPage were using raw `fetch()` with token captured at render time; replaced all calls with `apiFetch()` so JWT expiry is handled transparently via refresh.
+- Platform reliability: added exponential-backoff retry in `AdapterRegistry.invokeCapability()`, SHA-256 idempotency-key deduplication in `SkillDispatcher` (`skill_executions.idempotency_key`), and `executeEscalation()` shared utility routing `escalate` policy actions to a configurable support slot.
+- Gorgias adapter fixed: added `sender`, `from_agent: true`, `source.from` fields; corrected `ticketUrl` construction using stored subdomain.
+- Re:amaze adapter fixed: `conversation[user]` field (not `customer`), base URL changed to `.reamaze.com`.
+- Template engine overhauled: plain-text base templates with per-adapter renderers (nl2br for Gorgias/Zendesk, plain text for Re:amaze); intro/body/closing/subject are all editable per skill config; `templateVariables` shown as clickable chips in the Customize tab; fixed subject override bug (`applyTemplateFieldOverrides`).
+- Added three new skill types: `low-stock-impact`, `high-risk-order-response`, `delivery-exception-alert` — each with Gorgias, Zendesk, and Re:amaze template variants plus optional escalation slot on all templates.
 
 ## 2026-02-28
 - Built multi-tenant PA Core MCP Gateway (`/v1/mcp`): aggregates tools from user's active-skill servers, namespaces as `{server}__{tool}`, injects per-tenant credentials, exposes `list_skills`/`activate_skill`/`deactivate_skill` meta-tools.
@@ -15,19 +23,10 @@ Brief tracking of significant changes. Keep entries to 1-2 sentences. Delete ent
 - Created WorkflowsPage for viewing/editing saved workflows. Fixed API array response handling.
 - Added 2-minute timeout and status message for workflow build endpoint.
 - Created documentation system: CLAUDE.md, .cursorrules, ADRs for AI continuity.
-- Customer research: Yota Xpedition (Toyota aftermarket, uses Fulfil.io ERP).
-
-## 2025-01-27
-- Implemented schema-aware input mapping: SchemaFormBuilder, SchemaField, NodeOutputMapper components.
-- Extended workflow-executor parameter resolution to support property paths (`$input[0].user.email`).
-
-## 2025-01-26
-- Visual workflow builder with React Flow and NodeConfigPanel.
-- Workflow execution engine with DAG traversal.
 
 ---
 
 ## Next Priorities
-1. Test schema-aware input mapping with real MCP tools
-2. Edge Agent MVP (start with Telegram)
-3. Customer demo for Yota Xpedition
+1. Test all 4 skill types end-to-end with live Shopify webhooks
+2. Add Re:amaze variants for low-stock, high-risk, delivery-exception templates
+3. Edge Agent MVP

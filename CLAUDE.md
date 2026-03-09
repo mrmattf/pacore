@@ -9,10 +9,18 @@
 4. Create ADRs only for decisions affecting multiple systems
 5. Skip: minor fixes, debugging steps, research that led nowhere
 
+**When to write an ADR (proactively, during implementation):**
+- New pattern that applies across multiple systems (e.g., retry strategy, rendering strategy)
+- Decision that future contributors would otherwise re-debate (e.g., why plain-text not HTML)
+- Trade-off with a clear rejected alternative worth preserving
+- Checklist: does this touch ≥2 packages AND encode a non-obvious design choice? → write ADR
+- ADRs live in `docs/decisions/`, numbered sequentially; update the index in `docs/decisions/README.md`
+
 **Prompts the user can say:**
 - "Update session log" → Add current work to SESSION_LOG.md
 - "Clean up docs" → Remove stale entries, consolidate
 - "Skip docs" → Don't update any documentation this session
+- "Write ADR" → Create a new ADR for the current architectural decision
 
 ## Project Overview
 
@@ -91,19 +99,17 @@ See detailed documentation:
 ### Data Flow
 
 ```
-User Message → API Gateway → Orchestrator → LLM Provider
-                                ↓
-                         Workflow Detection
-                                ↓
-                    MCP Tool Execution (if needed)
-                                ↓
-                         Response to User
+Skills (primary):
+Webhook → API Gateway → SkillDispatcher → Tool Chain → AdapterRegistry → SlotAdapter
+
+Chat (secondary):
+User Message → API Gateway → Orchestrator → LLM Provider → Response
 ```
 
 ## Tech Stack
 
-- **Frontend:** React 18, TypeScript, Vite, TailwindCSS, React Flow (workflow visualization)
-- **Backend:** Node.js, Express, WebSocket (ws), PostgreSQL, Redis
+- **Frontend:** React 18, TypeScript, Vite, TailwindCSS
+- **Backend:** Node.js, Express, WebSocket (ws), PostgreSQL
 - **AI:** Anthropic Claude, OpenAI GPT, Ollama (local models)
 - **Protocol:** MCP (Model Context Protocol) for tool integration
 
@@ -112,20 +118,18 @@ User Message → API Gateway → Orchestrator → LLM Provider
 ### Completed
 - [x] Multi-provider LLM orchestration (Anthropic, OpenAI, Ollama)
 - [x] MCP server registration and tool execution
-- [x] Visual workflow builder with React Flow
-- [x] Schema-aware input mapping for MCP tools
-- [x] Parameter resolution with property path syntax (`$input[0].user.email`)
-- [x] Workflow list page with edit/run/delete
-- [x] Node connection via drag-and-drop and checkboxes
 - [x] Credential management with encryption
+- [x] Skills platform: 4 skill types (backorder-notification, low-stock-impact, high-risk-order-response, delivery-exception-alert)
+- [x] Integration adapters: Shopify, Gorgias, Zendesk, Re:amaze, Slack, AfterShip
+- [x] Platform reliability: retry (AdapterRegistry), deduplication (idempotency key), escalation routing
+- [x] Skill template customization: editable intro/body/closing/subject, templateVariables chips
+- [x] Execution history: API endpoints + per-skill view in BillingPage
 
 ### In Progress
-- [ ] Scheduled/cron workflow triggers
-- [ ] Webhook triggers for workflows
-- [ ] Execution history dashboard
 - [ ] Edge agent for local desktop integration
 
 ### Planned
+- [ ] Agent layer for Tier 2 skills (LLM-driven decision-making on top of tool chains)
 - [ ] Chat channel integrations (WhatsApp, Telegram, Slack)
 - [ ] Voice interface
 - [ ] Multi-tenant enterprise features
@@ -133,24 +137,27 @@ User Message → API Gateway → Orchestrator → LLM Provider
 ## Key Files
 
 ### Backend (packages/cloud)
-- `src/api/gateway.ts` - All REST and WebSocket endpoints
-- `src/orchestration/index.ts` - Main orchestration logic
-- `src/workflow/workflow-executor.ts` - Executes workflow DAGs
-- `src/workflow/workflow-builder.ts` - AI-driven workflow generation
-- `src/workflow/workflow-manager.ts` - CRUD operations + validation
+- `src/api/gateway.ts` - All REST endpoints and webhook entry points
+- `src/skills/skill-dispatcher.ts` - Routes webhook events to skill tool chains
+- `src/skills/skill-template-registry.ts` - Skill catalog and template registry
+- `src/integrations/adapter-registry.ts` - Central dispatch for all integration adapters (with retry)
+- `src/skills/execute-escalation.ts` - Shared escalation action handler
+- `src/utils/retry.ts` - Exponential backoff retry utility
+- `src/mcp/credential-manager.ts` - Encrypted credential storage
 - `src/mcp/mcp-registry.ts` - MCP server management
-- `src/mcp/mcp-client.ts` - MCP protocol client
+- `src/orchestration/index.ts` - LLM orchestration (chat/agent mode)
 
 ### Frontend (packages/web)
 - `src/pages/ChatPage.tsx` - Main chat interface
-- `src/pages/WorkflowBuilderPage.tsx` - Visual workflow editor
-- `src/pages/WorkflowsPage.tsx` - Workflow list/management
-- `src/components/WorkflowGraph.tsx` - React Flow wrapper
-- `src/components/NodeConfigPanel.tsx` - Node configuration with schema forms
-- `src/components/SchemaFormBuilder.tsx` - Auto-generated forms from JSON Schema
+- `src/pages/SkillsPage.tsx` - Browse and activate skills
+- `src/pages/SkillConfigPage.tsx` - Configure slot connections + field overrides
+- `src/pages/TemplatePickerPage.tsx` - Template picker for a skill type
+- `src/pages/BillingPage.tsx` - Usage and execution history
 
 ### Shared (packages/core)
-- `src/types/` - TypeScript interfaces (WorkflowDAG, WorkflowNode, etc.)
+- `src/types/policy.ts` - ECA action types (invoke, skip, escalate + targetSlot)
+- `src/types/skill-template.ts` - SkillTemplate, SkillSlot, EditableField interfaces
+- `src/types/skill.ts` - UserSkill, SkillDefinition
 - `src/llm/` - LLM provider interfaces and registry
 
 ### Standalone Services
@@ -164,12 +171,29 @@ User Message → API Gateway → Orchestrator → LLM Provider
 ## Database Schema
 
 ```sql
--- Main tables
+-- Identity
+users (id, email, password_hash)
+organizations (id, name)
+org_members (org_id, user_id, role)
+
+-- MCP
+mcp_servers (id, user_id, name, server_type, url, capabilities JSONB)
+mcp_credentials (user_id, server_id, encrypted_value, iv, auth_tag)
+
+-- Integrations
+integration_connections (id, org_id, integration_key, name, encrypted_creds, iv, auth_tag)
+
+-- Skills
+user_skills (id, user_id, template_id, status, configuration JSONB)
+skill_triggers (id, user_skill_id, type, webhook_token)
+skill_executions (id, user_skill_id, status, result JSONB, idempotency_key TEXT)
+
+-- Auth
+refresh_tokens (token_hash, user_id, expires_at, idle_expires_at)
+
+-- Legacy
 workflows (id, user_id, name, description, category, nodes JSONB)
 workflow_executions (id, workflow_id, user_id, status, execution_log JSONB)
-mcp_servers (id, user_id, name, server_type, url, capabilities JSONB)
-credentials (user_id, type, encrypted_value, iv, auth_tag)
-users (id, email, password_hash)
 ```
 
 ## API Endpoints
@@ -178,20 +202,27 @@ users (id, email, password_hash)
 - `POST /v1/chat` - Send message, get AI response
 - `WS /ws` - Real-time chat via WebSocket
 
-### Workflows
-- `GET /v1/workflows` - List user's workflows
-- `POST /v1/workflows` - Create workflow
-- `GET /v1/workflows/:id` - Get workflow
-- `PUT /v1/workflows/:id` - Update workflow
-- `DELETE /v1/workflows/:id` - Delete workflow
-- `POST /v1/workflows/:id/execute` - Execute workflow
-- `POST /v1/workflows/build` - AI-generate workflow from description
-
 ### MCP Servers
 - `GET /v1/mcp/servers` - List MCP servers
 - `POST /v1/mcp/servers` - Register MCP server
 - `GET /v1/mcp/servers/:id/tools` - Get server's tools
 - `POST /v1/mcp/servers/:id/execute` - Execute tool
+
+### Skills
+- `GET /v1/skill-types` - List available skill types with template counts
+- `GET /v1/skill-types/:typeId/templates` - Templates for a skill type
+- `GET /v1/me/skills` - User's activated skills
+- `POST /v1/me/skills/:typeId/activate` - Activate a skill (creates user_skill record)
+- `PUT /v1/me/skills/:id/configure` - Save slot connections + field overrides
+- `PUT /v1/me/skills/:id/pause` / `resume` - Pause / resume a skill
+- `DELETE /v1/me/skills/:id` - Remove skill
+- `GET /v1/me/skills/:id/executions` - Recent execution history
+
+### Integrations & Webhooks
+- `GET /v1/integrations/:key/fields` - Credential fields for an integration
+- `GET /v1/integrations/:key/connections` - List saved connections
+- `POST /v1/integrations/:key/connections` - Save a new connection
+- `POST /v1/triggers/webhook/:token` - Inbound webhook entry point (async, returns 200 immediately)
 
 ## Development Commands
 
@@ -217,7 +248,6 @@ npm run typecheck
 ```env
 # Required
 DATABASE_URL=postgresql://user:pass@localhost:5432/pacore
-REDIS_URL=redis://localhost:6379
 JWT_SECRET=your-secret-key
 
 # LLM Providers (at least one)
@@ -237,12 +267,6 @@ MCP is an emerging standard for AI-tool communication. Using MCP means:
 - Standard protocol for tool schemas
 - Community ecosystem of tools
 
-### Why DAG-based workflows?
-Directed Acyclic Graphs allow:
-- Parallel execution of independent nodes
-- Clear data flow visualization
-- Validation of dependencies before execution
-
 ### Why multi-provider LLM support?
 - Cost optimization (use cheaper models for simple tasks)
 - Redundancy (fallback if one provider is down)
@@ -250,15 +274,22 @@ Directed Acyclic Graphs allow:
 
 ## Common Patterns
 
-### Adding a new workflow node type
-1. Add type to `packages/core/src/types/workflow.ts`
-2. Add execution logic in `packages/cloud/src/workflow/workflow-executor.ts`
-3. Add UI config in `packages/web/src/components/NodeConfigPanel.tsx`
+### Adding a new skill type
+1. Add `SkillTemplate` variants in `packages/cloud/src/skills/templates/<skill-type>/index.ts`
+2. Create tool chain in `packages/cloud/src/chains/<skill-type>.ts`
+3. Register templates in `skill-template-registry.ts`
+4. Add dispatch case in `skill-dispatcher.ts`
+5. Add `SlotAdapter`(s) in `packages/cloud/src/integrations/<integration>/`
+
+### Adding a new integration adapter
+1. Implement `SlotAdapter` interface in `packages/cloud/src/integrations/<key>/`
+2. Register in the `AdapterRegistry` setup in `gateway.ts`
+3. Add credential fields (`credentialFields`, `setupGuide`) for the Connect UI
 
 ### Adding a new MCP server integration
 1. Register via API or UI at `/mcp`
 2. Server's tools auto-discovered via MCP protocol
-3. Tools available in workflows as `mcp_fetch` nodes
+3. Tools available to the AI orchestrator for chat/agent interactions
 
 ### Adding a new LLM provider
 1. Implement `LLMProvider` interface in `packages/core/src/llm/`
@@ -277,19 +308,10 @@ cd packages/cloud && npm test
 
 ## Troubleshooting
 
-### Workflow build timeout
-- Check LLM provider response time (Ollama can be slow)
-- Reduce tool catalog size if many MCP servers registered
-- Check `[WorkflowBuilder]` logs for timing breakdown
-
 ### MCP tool execution fails
 - Verify server is running and accessible
 - Check credentials are configured
 - Look at `[MCPClient]` logs for protocol errors
-
-### Node connections not working
-- Ensure `fetchServerTools` not in useEffect dependencies (causes infinite loop)
-- Check that node IDs match between inputs array and existing nodes
 
 ## Contact
 

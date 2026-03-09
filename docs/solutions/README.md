@@ -13,19 +13,33 @@ Solutions are customer-facing products powered by pacore workflows and AI agents
 
 See [Product Strategy](../product-strategy.md) for full details.
 
-## Active Solutions
+## Platform Skills (PA Core native)
 
-| Solution | Package | Phase | Agent | Workflows | Edge | Customization |
-|----------|---------|-------|-------|-----------|------|---------------|
-| Backorder Detection | [shopify-backorder](../../packages/shopify-backorder/) | 1 - MVP | Planned | Planned | Optional | Order source, notification system |
+These skill types ship as part of the PA Core platform. Users activate them via the Skills UI — no deployment required.
 
-## Planned Solutions
+| Skill Type | Description | Integrations | Status |
+|------------|-------------|--------------|--------|
+| `backorder-notification` | Notify customers when ordered items are out of stock | Shopify → Gorgias / Zendesk / Re:amaze | Active |
+| `low-stock-impact` | When inventory drops to zero, notify affected open-order customers | Shopify → Gorgias / Zendesk / Re:amaze | Active |
+| `high-risk-order-response` | Alert team and optionally notify customer on fraud-flagged orders | Shopify → Gorgias + Slack / Zendesk + Slack | Active |
+| `delivery-exception-alert` | Notify customer when a shipment hits a delivery exception | AfterShip + Shopify → Gorgias / Zendesk | Active |
 
-| Solution | Description | Order Source | Action System | Priority |
-|----------|-------------|--------------|---------------|----------|
-| Order Routing | Route orders to fulfillment centers | Shopify, WooCommerce | Shipping APIs | Medium |
-| Support Triage | Classify and route support tickets | Gorgias, Zendesk | Ticket systems | Medium |
-| Inventory Alerts | Proactive low-stock notifications | Shopify, ERP | Slack, Email | Low |
+All skill types support an optional `escalation` slot for routing high-priority internal alerts to a separate support channel.
+
+## Customer Deliverables
+
+These are standalone packages built for specific customers. They are **not** PA Core platform features (see ADR-006).
+
+| Solution | Package | Status |
+|----------|---------|--------|
+| Backorder Detection (Yota) | [shopify-backorder](../../packages/shopify-backorder/) | Delivered — customer-owned |
+
+## Planned Skill Types
+
+| Skill Type | Description | Priority |
+|------------|-------------|----------|
+| Order Routing | Route orders to fulfillment centers based on inventory/location | Medium |
+| Support Triage | Classify and route inbound tickets | Medium |
 
 ## Solution Architecture
 

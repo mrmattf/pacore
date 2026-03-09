@@ -1,37 +1,50 @@
 # AI Agents
 
+> **Current state (Tier 1):** Skill execution today is fully deterministic — no LLM involved. Webhooks flow through `SkillDispatcher` → tool chains → `AdapterRegistry`. The agent layer described in this document is the **planned Tier 2+** architecture where an LLM adds reasoning on top of the deterministic chains.
+
 ## Overview
 
-AI agents in pacore provide intelligent decision-making capabilities on top of MCP tools and workflows. Agents can reason about situations, call tools, and handle edge cases that deterministic workflows cannot.
+AI agents in pacore provide intelligent decision-making capabilities on top of MCP tools and tool chains. Agents can reason about situations, call tools, and handle edge cases that deterministic execution cannot.
 
-## Agent Architecture
+## Current Execution Path (Tier 1 — no agent)
+
+```
+Webhook → SkillDispatcher → Tool Chain (backorder, low-stock, ...)
+                                   ↓
+                          AdapterRegistry.invokeCapability()
+                          (retry + escalation built-in)
+                                   ↓
+                          SlotAdapter (Gorgias, Zendesk, ...)
+```
+
+## Planned Agent Architecture (Tier 2+)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │                        AI AGENT                              │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │  System Prompt (solution-specific instructions)     │    │
+│  │  System Prompt (skill-specific instructions)        │    │
 │  └─────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────┐    │
 │  │  LLM Provider (Claude, GPT, Ollama)                 │    │
 │  └─────────────────────────────────────────────────────┘    │
 │  ┌─────────────────────────────────────────────────────┐    │
-│  │  Tool Calling (MCP tools + Workflow MCP)            │    │
+│  │  Tool Calling (MCP tools + Skill chains)            │    │
 │  └─────────────────────────────────────────────────────┘    │
 └──────────────────────────┬──────────────────────────────────┘
                            │
                            ▼
               ┌────────────────────────┐
               │      MCP TOOLS         │
-              │  - workflow.execute    │
               │  - shopify.get_order   │
               │  - gorgias.create      │
+              │  - skill.execute       │
               └────────────────────────┘
 ```
 
-## Agent + MCP Pattern
+## Agent + Skill Chain Pattern (Tier 2+)
 
-Agents interact with external systems and workflows through MCP tools:
+Agents interact with external systems and skill chains through MCP tools:
 
 ```typescript
 // Agent receives event
@@ -43,43 +56,24 @@ const inventory = await callTool('shopify.check_inventory', { variant_ids: [...]
 
 // Agent decides based on context
 if (hasBackorders(inventory) && isVIPCustomer(order)) {
-  // High priority - agent handles directly
+  // High priority - agent handles directly with personalized message
   await callTool('gorgias.create_ticket', {
     priority: 'high',
     message: personalizedMessage(order)
   });
 } else if (hasBackorders(inventory)) {
-  // Standard path - delegate to workflow
-  await callTool('workflow.execute', {
-    id: 'backorder-notification',
+  // Standard path - delegate to deterministic skill chain
+  await callTool('skill.execute', {
+    skillType: 'backorder-notification',
     inputs: { orderId: 123 }
   });
 }
 ```
 
-## Agent Calling Workflow MCP
-
-The key pattern: agents can orchestrate workflows via the Workflow MCP server:
-
-```
-Agent: "I need to run the standard backorder check"
-       ↓
-Agent calls: workflow.execute({ id: "backorder-detection", inputs: { orderId: 123 } })
-       ↓
-Workflow MCP: Finds and executes the workflow
-       ↓
-Workflow: Runs deterministic DAG (get order → check inventory → create ticket)
-       ↓
-Result: Returns to agent
-       ↓
-Agent: Reasons about result, handles exceptions
-```
-
-**Benefits**:
-- Workflows handle the predictable 90%
-- Agent handles the complex 10%
-- Workflows remain auditable and testable
-- Agent adds intelligence on top
+**Benefits** (Tier 2):
+- Skill chains handle the predictable 90% (deterministic, auditable)
+- Agent handles the complex 10% (reasoning, personalization)
+- Agent adds intelligence on top without replacing the reliable foundation
 
 ## When to Use Agent vs Workflow
 
@@ -174,19 +168,19 @@ interface AgentConfig {
 
 Each solution defines how agents are used:
 
-**Backorder Detection Solution**:
+**Backorder Detection Solution** (Tier 2 planned):
 ```yaml
 agent:
   trigger: order_created webhook
   tools:
     - shopify-mcp (get_order, check_inventory)
     - gorgias-mcp (create_ticket)
-    - workflow-mcp (execute backorder-workflow)
+    - skill-mcp (execute backorder-notification chain)
   behavior:
     - Assess order for backorder risk
-    - For VIP customers: personalized handling
-    - For standard: delegate to workflow
-    - For edge cases: escalate to human
+    - For VIP customers: personalized handling via direct tool calls
+    - For standard: delegate to backorder-notification skill chain
+    - For edge cases: escalate to human via escalation slot
 ```
 
 ## Implementation Checklist
