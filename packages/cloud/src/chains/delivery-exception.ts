@@ -13,6 +13,7 @@ import {
   renderDeliveryExceptionSubject,
 } from '../skills/delivery-exception-templates';
 import { applyTemplateFieldOverrides } from '../skills/template-utils';
+import { executeEscalation } from '../skills/execute-escalation';
 
 export interface DeliveryExceptionChainDeps {
   credentialManager: CredentialManager;
@@ -283,7 +284,7 @@ export async function runDeliveryExceptionChain(
     }
 
     if (action.type === 'escalate') {
-      console.warn(`[DeliveryExceptionChain] escalate for order ${order.orderNumber}: ${action.message ?? '(no message)'}`);
+      await executeEscalation(action, ctx, userSkillConfig, template, userId, { credentialManager, adapterRegistry });
       result.actions.push('escalate');
       continue;
     }

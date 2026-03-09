@@ -9,6 +9,7 @@ import { AdapterRegistry } from '../integrations/adapter-registry';
 import { SkillTemplateRegistry } from '../skills/skill-template-registry';
 import { renderLowStockTemplate, renderLowStockTemplatePlainText, renderLowStockSubject } from '../skills/low-stock-templates';
 import { applyTemplateFieldOverrides } from '../skills/template-utils';
+import { executeEscalation } from '../skills/execute-escalation';
 
 export interface LowStockChainDeps {
   credentialManager: CredentialManager;
@@ -318,7 +319,7 @@ export async function runLowStockImpactChain(
       }
 
       if (action.type === 'escalate') {
-        console.warn(`[LowStockChain] escalate for order ${order.order_number}: ${action.message ?? '(no message)'}`);
+        await executeEscalation(action, ctx, userSkillConfig, template, userId, { credentialManager, adapterRegistry });
         orderResult.actions.push('escalate');
         continue;
       }

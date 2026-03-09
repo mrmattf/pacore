@@ -6,7 +6,7 @@
 
 export type PrimitiveAction =
   | { type: 'skip' }
-  | { type: 'escalate'; message?: string };
+  | { type: 'escalate'; message?: string; targetSlot?: string };
 
 export interface AdapterAction {
   type: 'invoke';

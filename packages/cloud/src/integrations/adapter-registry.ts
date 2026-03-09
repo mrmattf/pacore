@@ -1,4 +1,5 @@
 import type { SlotAdapter, CredentialField } from './slot-adapter';
+import { withRetry, isTransientError } from '../utils/retry';
 
 /**
  * AdapterRegistry — central dispatch hub for all integration adapters.
@@ -75,6 +76,9 @@ export class AdapterRegistry {
         `Available: ${adapter.capabilities.join(', ')}`
       );
     }
-    return adapter.invoke(capability, params, creds);
+    return withRetry(
+      () => adapter.invoke(capability, params, creds),
+      { maxAttempts: 3, initialDelayMs: 1000, multiplier: 2, shouldRetry: isTransientError }
+    );
   }
 }

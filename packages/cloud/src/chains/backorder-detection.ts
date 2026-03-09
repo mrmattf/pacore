@@ -11,6 +11,7 @@ import { evaluatePolicy, runEnrichmentSteps, MCPToolCaller } from '../skills/log
 import { renderTemplate, renderTemplatePlainText, renderSubject } from '../skills/backorder-templates';
 import { applyTemplateFieldOverrides } from '../skills/template-utils';
 import { SkillTemplateRegistry } from '../skills/skill-template-registry';
+import { executeEscalation } from '../skills/execute-escalation';
 
 export interface BackorderChainDeps {
   credentialManager: CredentialManager;
@@ -244,7 +245,7 @@ export async function runBackorderDetectionV2(
     }
 
     if (action.type === 'escalate') {
-      console.warn(`[BackorderChain] escalate: ${action.message ?? '(no message)'}`);
+      await executeEscalation(action, ctx, userSkillConfig, template, userId, { credentialManager, adapterRegistry });
       result.actions.push('escalate');
       continue;
     }

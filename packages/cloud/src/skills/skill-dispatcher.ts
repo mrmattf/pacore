@@ -8,6 +8,7 @@ import { runLowStockImpactChain, extractInventoryUpdatePayload } from '../chains
 import { runHighRiskOrderChain } from '../chains/high-risk-order';
 import { runDeliveryExceptionChain } from '../chains/delivery-exception';
 import type { UserSkillConfig } from '@pacore/core';
+import { createHash } from 'crypto';
 
 /**
  * Routes a trigger event to the correct tool chain based on the activated skill's templateId.
@@ -41,6 +42,20 @@ export class SkillDispatcher {
     }
 
     const config = userSkill.configuration as Record<string, unknown>;
+
+    // ---- Deduplication ----
+    // Skip executions we've already completed for this exact payload.
+    // Failed executions are intentionally allowed through so Shopify retries can recover them.
+    if (!options.dryRun) {
+      const idempotencyKey = createHash('sha256').update(JSON.stringify(payload)).digest('hex');
+      const existing = await this.skillRegistry.findExecutionByIdempotencyKey(userSkillId, idempotencyKey);
+      if (existing?.status === 'completed' || existing?.status === 'running') {
+        console.log(`[SkillDispatcher] dedup: skipping ${existing.status} execution for user_skill=${userSkillId} key=${idempotencyKey.slice(0, 12)}...`);
+        await this.skillRegistry.completeExecution(executionId, { actions: ['skip'], deduplicatedFrom: existing.id });
+        return;
+      }
+      await this.skillRegistry.setIdempotencyKey(executionId, idempotencyKey);
+    }
 
     try {
       let result: unknown;

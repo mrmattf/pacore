@@ -11,6 +11,7 @@ import { AdapterRegistry } from '../integrations/adapter-registry';
 import { SkillTemplateRegistry } from '../skills/skill-template-registry';
 import { renderHighRiskTemplate, renderHighRiskTemplatePlainText, renderHighRiskSubject } from '../skills/high-risk-order-templates';
 import { applyTemplateFieldOverrides } from '../skills/template-utils';
+import { executeEscalation } from '../skills/execute-escalation';
 
 export interface HighRiskChainDeps {
   credentialManager: CredentialManager;
@@ -275,7 +276,7 @@ export async function runHighRiskOrderChain(
     }
 
     if (action.type === 'escalate') {
-      console.warn(`[HighRiskOrderChain] escalate for order ${order.orderNumber}: ${action.message ?? '(no message)'}`);
+      await executeEscalation(action, ctx, userSkillConfig, template, userId, { credentialManager, adapterRegistry });
       result.actions.push('escalate');
       continue;
     }

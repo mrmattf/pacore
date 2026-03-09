@@ -263,6 +263,29 @@ export class SkillRegistry {
     );
   }
 
+  /** Returns an existing execution for the given (userSkillId, idempotencyKey) pair, or null if none exists. */
+  async findExecutionByIdempotencyKey(
+    userSkillId: string,
+    idempotencyKey: string
+  ): Promise<Pick<SkillExecution, 'id' | 'status'> | null> {
+    const result = await this.db.query<{ id: string; status: string }>(
+      `SELECT id, status FROM skill_executions
+       WHERE user_skill_id = $1 AND idempotency_key = $2
+       ORDER BY started_at DESC LIMIT 1`,
+      [userSkillId, idempotencyKey]
+    );
+    if (!result.rows[0]) return null;
+    return { id: result.rows[0].id, status: result.rows[0].status as SkillExecution['status'] };
+  }
+
+  /** Sets the idempotency key on an execution record after the chain starts. */
+  async setIdempotencyKey(executionId: string, idempotencyKey: string): Promise<void> {
+    await this.db.query(
+      'UPDATE skill_executions SET idempotency_key = $2 WHERE id = $1',
+      [executionId, idempotencyKey]
+    );
+  }
+
   async listExecutions(userSkillId: string, limit = 50): Promise<SkillExecution[]> {
     const result = await this.db.query(
       'SELECT * FROM skill_executions WHERE user_skill_id = $1 ORDER BY started_at DESC LIMIT $2',
