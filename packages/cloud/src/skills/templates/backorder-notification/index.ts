@@ -70,16 +70,16 @@ const sharedDefaultTemplates: NamedTemplates = {
   full_backorder: {
     label: 'Full Backorder Apology',
     subject: 'Important update on your order #{{orderNumber}}',
-    intro: 'Hi {{customerName}},\n\nThank you for your order #{{orderNumber}}. We\'re sorry to let you know that all items are temporarily out of stock.',
-    body: '{{backorderedItemsTable}}\n\nPlease reply with your preference:\nA — Hold my order until everything is available\nB — Cancel my order',
-    closing: 'We apologize for the inconvenience and will do our best to get your order to you as soon as possible. Thank you for your patience.',
+    intro: 'Thank you for your order! Unfortunately, all items are temporarily out of stock — we wanted to let you know and give you options on how to proceed.',
+    body: '{{backorderedItemsTable}}\n\nPlease reply with your preference:\nOption A — Hold my order until everything is available\nOption B — Cancel my order for a full refund',
+    closing: 'We apologize for the inconvenience and appreciate your patience!',
   },
   partial_backorder: {
     label: 'Partial Backorder Shipping Update',
     subject: 'Shipping update for your order #{{orderNumber}}',
-    intro: 'Hi {{customerName}},\n\nThank you for your order #{{orderNumber}}. Some items are temporarily out of stock and will ship separately.',
-    body: '{{backorderedItemsTable}}\n\nPlease reply with your preference:\nA — Ship available items now; send backordered items when ready\nB — Wait until everything is in stock and ship together',
-    closing: 'We apologize for the delay and appreciate your understanding.',
+    intro: 'Thank you for your order! Some items are temporarily out of stock — we wanted to let you know and give you a choice on how to proceed.',
+    body: '{{backorderedItemsTable}}\n\nHow would you like us to proceed?\nOption A — Split shipment: Reply "A" to this email and we\'ll ship your available items right away. The backordered items will follow in a separate shipment once they\'re back in stock.\n\nOption B — Wait & ship together: No reply needed. If we don\'t hear from you, we\'ll hold the order and ship everything together once all items are available.',
+    closing: 'We apologize for the inconvenience and appreciate your patience!',
   },
 };
 

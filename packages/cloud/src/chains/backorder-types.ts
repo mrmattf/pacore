@@ -26,6 +26,7 @@ export interface BackorderPolicyEvalContext {
   customerName: string;
   orderTotal: number;
   backorderedItems: BackorderedItemContext[];
+  availableItems: BackorderedItemContext[];
   allItemsBackordered: boolean;
   someItemsBackordered: boolean;
   threshold: number;

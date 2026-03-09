@@ -150,39 +150,51 @@ function etaToString(eta: unknown): string {
   return '';
 }
 
-function buildBackorderedItemsHtml(ctx: PolicyEvalContext): string {
-  if (ctx.backorderedItems.length === 0) return '';
-
-  const rows = ctx.backorderedItems.map(item => {
-    const etaStr = etaToString(item.eta);
-    const etaCell = etaStr
-      ? `<td style="padding: 4px 8px;">Est. ${escapeHtml(etaStr)}</td>`
-      : '';
-    return `
-    <tr>
-      <td style="padding: 4px 8px;">${escapeHtml(item.title)}</td>
-      <td style="padding: 4px 8px;">${escapeHtml(item.sku || '—')}</td>
-      <td style="padding: 4px 8px;">Ordered: ${item.orderedQty}, Available: ${item.availableQty}, Backordered: ${item.backorderedQty}</td>
-      ${etaCell}
-    </tr>`;
-  }).join('');
-
-  const etaHeader = ctx.backorderedItems.some(i => etaToString(i.eta))
-    ? '<th style="padding: 4px 8px; text-align: left;">Est. Availability</th>'
-    : '';
-
+function itemTable(heading: string, rows: string): string {
   return `
+<p style="margin: 16px 0 4px; font-weight: bold;">${heading}</p>
 <table style="border-collapse: collapse; width: 100%; font-size: 13px;">
   <thead>
     <tr style="background: #f5f5f5;">
       <th style="padding: 4px 8px; text-align: left;">Item</th>
-      <th style="padding: 4px 8px; text-align: left;">SKU</th>
       <th style="padding: 4px 8px; text-align: left;">Qty</th>
-      ${etaHeader}
+      <th style="padding: 4px 8px; text-align: left;">Status</th>
     </tr>
   </thead>
   <tbody>${rows}</tbody>
 </table>`.trim();
+}
+
+function buildBackorderedItemsHtml(ctx: PolicyEvalContext): string {
+  if (ctx.backorderedItems.length === 0) return '';
+
+  const backorderedRows = ctx.backorderedItems.map(item => {
+    const etaStr = etaToString(item.eta);
+    const status = etaStr
+      ? `${item.backorderedQty} backordered — Est. ${escapeHtml(etaStr)}`
+      : `${item.backorderedQty} backordered`;
+    return `
+    <tr>
+      <td style="padding: 4px 8px;">${escapeHtml(item.title)}</td>
+      <td style="padding: 4px 8px;">${item.orderedQty}</td>
+      <td style="padding: 4px 8px;">${status}</td>
+    </tr>`;
+  }).join('');
+
+  const parts = [itemTable('Backordered Items', backorderedRows)];
+
+  const availableItems = (ctx.availableItems ?? []) as typeof ctx.backorderedItems;
+  if (availableItems.length > 0) {
+    const availableRows = availableItems.map(item => `
+    <tr>
+      <td style="padding: 4px 8px;">${escapeHtml(item.title)}</td>
+      <td style="padding: 4px 8px;">${item.orderedQty}</td>
+      <td style="padding: 4px 8px;">Ready to ship</td>
+    </tr>`).join('');
+    parts.push(itemTable('Items Ready to Ship', availableRows));
+  }
+
+  return parts.join('\n');
 }
 
 function buildBackorderedItemsText(ctx: PolicyEvalContext): string {

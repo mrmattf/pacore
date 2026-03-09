@@ -132,7 +132,7 @@ export async function runBackorderDetectionV2(
     lineItemCount: order.lineItems.length,
   });
 
-  // ---- Build backordered items list ----
+  // ---- Build backordered and available items lists ----
   const doneInventory = stepTimer(steps, 'Check Inventory');
   const backorderedItems: BackorderedItemContext[] = order.lineItems
     .filter(li => {
@@ -147,6 +147,23 @@ export async function runBackorderDetectionV2(
         orderedQty:     li.quantity,
         availableQty:   available,
         backorderedQty: Math.max(0, li.quantity - available),
+        variantId:      li.variantId,
+      };
+    });
+
+  const availableItems: BackorderedItemContext[] = order.lineItems
+    .filter(li => {
+      const available = inventoryMap.get(li.variantId) ?? 0;
+      return available > threshold;
+    })
+    .map(li => {
+      const available = inventoryMap.get(li.variantId) ?? 0;
+      return {
+        title:          li.title,
+        sku:            li.sku,
+        orderedQty:     li.quantity,
+        availableQty:   available,
+        backorderedQty: 0,
         variantId:      li.variantId,
       };
     });
@@ -185,6 +202,7 @@ export async function runBackorderDetectionV2(
     customerName,
     orderTotal:           parseFloat(order.totalPrice) || 0,
     backorderedItems,
+    availableItems,
     allItemsBackordered:  backorderedItems.length === order.lineItems.length,
     someItemsBackordered: backorderedItems.length > 0,
     threshold,
