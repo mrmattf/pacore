@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Zap, ChevronRight, RefreshCw, Settings, CheckCircle, Clock, Trash2, Pause, Play } from 'lucide-react';
-import { useAuthStore } from '../store/authStore';
+import { apiFetch } from '../services/auth';
 import { UserSkill } from '../hooks/useSkills';
 
 interface SkillTypeCard {
@@ -17,7 +17,6 @@ interface TemplateMeta { name: string; skillTypeId: string; }
 
 export function SkillsPage() {
   const navigate = useNavigate();
-  const token = useAuthStore(s => s.token)!;
 
   const [skillTypes, setSkillTypes] = useState<SkillTypeCard[]>([]);
   const [mySkills, setMySkills] = useState<UserSkill[]>([]);
@@ -31,8 +30,8 @@ export function SkillsPage() {
     setLoading(true);
     try {
       const [typesRes, myRes] = await Promise.all([
-        fetch('/v1/skill-types', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch('/v1/me/skills',   { headers: { Authorization: `Bearer ${token}` } }),
+        apiFetch('/v1/skill-types'),
+        apiFetch('/v1/me/skills'),
       ]);
       const types: SkillTypeCard[] = typesRes.ok ? await typesRes.json() : [];
       if (typesRes.ok) setSkillTypes(types);
@@ -43,9 +42,7 @@ export function SkillsPage() {
       const map: Record<string, TemplateMeta> = {};
       await Promise.all(types.map(async (type) => {
         try {
-          const res = await fetch(`/v1/skill-types/${type.id}/templates`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
+          const res = await apiFetch(`/v1/skill-types/${type.id}/templates`);
           if (res.ok) {
             const templates: Array<{ id: string; name: string; skillTypeId: string }> = await res.json();
             for (const t of templates) map[t.id] = { name: t.name, skillTypeId: t.skillTypeId };
@@ -58,7 +55,7 @@ export function SkillsPage() {
     }
   }
 
-  useEffect(() => { load(); }, [token]);
+  useEffect(() => { load(); }, []);
 
   const categories = ['All', ...Array.from(new Set(skillTypes.map(t => t.category)))];
 
@@ -75,10 +72,7 @@ export function SkillsPage() {
 
   async function handleRemoveSkill(skillId: string) {
     try {
-      await fetch(`/v1/me/skills/${skillId}`, {
-        method: 'DELETE',
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await apiFetch(`/v1/me/skills/${skillId}`, { method: 'DELETE' });
       await load();
     } catch (e) {
       console.error('Failed to remove skill', e);
@@ -88,10 +82,7 @@ export function SkillsPage() {
   async function handleTogglePause(skill: UserSkill) {
     const action = skill.status === 'active' ? 'pause' : 'resume';
     try {
-      await fetch(`/v1/me/skills/${skill.id}/${action}`, {
-        method: 'PUT',
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      await apiFetch(`/v1/me/skills/${skill.id}/${action}`, { method: 'PUT' });
       const newStatus = action === 'pause' ? 'paused' : 'active';
       setMySkills(prev => prev.map(s => s.id === skill.id ? { ...s, status: newStatus as UserSkill['status'] } : s));
     } catch (e) {

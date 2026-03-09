@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Zap, ChevronRight, ThumbsUp } from 'lucide-react';
-import { useAuthStore } from '../store/authStore';
+import { apiFetch } from '../services/auth';
 
 interface SkillTemplate {
   id: string;
@@ -21,7 +21,6 @@ interface TemplateRequest {
 export function TemplatePickerPage() {
   const { typeId } = useParams<{ typeId: string }>();
   const navigate = useNavigate();
-  const token = useAuthStore(s => s.token);
 
   const [templates, setTemplates] = useState<SkillTemplate[]>([]);
   const [requests, setRequests] = useState<TemplateRequest[]>([]);
@@ -33,16 +32,16 @@ export function TemplatePickerPage() {
   const [showRequestForm, setShowRequestForm] = useState(false);
 
   useEffect(() => {
-    if (!typeId || !token) return;
+    if (!typeId) return;
     loadData();
-  }, [typeId, token]);
+  }, [typeId]);
 
   async function loadData() {
     setLoading(true);
     try {
       const [typesRes, templatesRes] = await Promise.all([
-        fetch('/v1/skill-types', { headers: { Authorization: `Bearer ${token}` } }),
-        fetch(`/v1/skill-types/${typeId}/templates`, { headers: { Authorization: `Bearer ${token}` } }),
+        apiFetch('/v1/skill-types'),
+        apiFetch(`/v1/skill-types/${typeId}/templates`),
       ]);
 
       if (typesRes.ok) {
@@ -56,9 +55,7 @@ export function TemplatePickerPage() {
       }
 
       // Load template requests from DB (if endpoint exists)
-      const reqRes = await fetch(`/v1/skill-types/${typeId}/template-requests`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
+      const reqRes = await apiFetch(`/v1/skill-types/${typeId}/template-requests`);
       if (reqRes.ok) setRequests(await reqRes.json());
     } finally {
       setLoading(false);
@@ -69,9 +66,9 @@ export function TemplatePickerPage() {
     setActivating(template.id);
     try {
       // Create a user_skill record with pending status
-      const res = await fetch(`/v1/me/skills/${template.skillTypeId}/activate`, {
+      const res = await apiFetch(`/v1/me/skills/${template.skillTypeId}/activate`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ templateId: template.id }),
       });
 
@@ -83,9 +80,9 @@ export function TemplatePickerPage() {
 
       const userSkill = await res.json();
       // Pre-configure with template metadata so SkillsPage can display and navigate correctly
-      await fetch(`/v1/me/skills/${userSkill.id}/configure`, {
+      await apiFetch(`/v1/me/skills/${userSkill.id}/configure`, {
         method: 'PUT',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           templateId: template.id,
           skillTypeId: template.skillTypeId,
@@ -105,9 +102,9 @@ export function TemplatePickerPage() {
   async function handleVote(request: TemplateRequest) {
     setVoting(request.id);
     try {
-      await fetch(`/v1/skill-types/${typeId}/template-requests`, {
+      await apiFetch(`/v1/skill-types/${typeId}/template-requests`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ integrationCombo: request.integrationCombo }),
       });
       await loadData();
@@ -118,9 +115,9 @@ export function TemplatePickerPage() {
 
   async function handleSubmitRequest() {
     if (!requestCombo.trim()) return;
-    await fetch(`/v1/skill-types/${typeId}/template-requests`, {
+    await apiFetch(`/v1/skill-types/${typeId}/template-requests`, {
       method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ integrationCombo: requestCombo.trim(), description: '' }),
     });
     setRequestCombo('');
