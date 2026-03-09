@@ -200,10 +200,27 @@ function buildBackorderedItemsHtml(ctx: PolicyEvalContext): string {
 function buildBackorderedItemsText(ctx: PolicyEvalContext): string {
   if (ctx.backorderedItems.length === 0) return '';
   const separator = '-'.repeat(60);
-  const rows = ctx.backorderedItems.map(item => {
+
+  const backorderedRows = ctx.backorderedItems.map(item => {
     const eta = etaToString(item.eta);
-    const etaPart = eta ? `  |  Est. ${eta}` : '';
-    return `${item.title}  |  ${item.sku || '—'}  |  Ordered: ${item.orderedQty}, Available: ${item.availableQty}, Backordered: ${item.backorderedQty}${etaPart}`;
+    const status = eta ? `${item.backorderedQty} backordered — Est. ${eta}` : `${item.backorderedQty} backordered`;
+    return `${item.title}  |  ${item.sku || '—'}  |  ${status}`;
   });
-  return ['Item  |  SKU  |  Qty', separator, ...rows].join('\n');
+
+  const parts = [
+    'Backordered Items',
+    separator,
+    'Item  |  SKU  |  Status',
+    ...backorderedRows,
+  ];
+
+  const availableItems = (ctx.availableItems ?? []) as typeof ctx.backorderedItems;
+  if (availableItems.length > 0) {
+    const availableRows = availableItems.map(item =>
+      `${item.title}  |  ${item.sku || '—'}  |  Ready to ship`
+    );
+    parts.push('', 'Items Ready to Ship', separator, 'Item  |  SKU  |  Status', ...availableRows);
+  }
+
+  return parts.join('\n');
 }
