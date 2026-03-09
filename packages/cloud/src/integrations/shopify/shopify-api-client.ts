@@ -88,14 +88,48 @@ export class ShopifyApiClient {
   }
 
   /**
-   * Finds the variant that owns a given inventory item.
+   * Finds the variant that owns a given inventory item via GraphQL.
    * Shopify: one inventory item → one variant (1:1 relationship).
+   * NOTE: The REST /variants.json?inventory_item_ids= filter is undocumented and ignored by Shopify;
+   * the GraphQL inventoryItem query is the correct approach.
    */
   async getVariantByInventoryItem(inventoryItemId: number): Promise<ShopifyVariant | null> {
-    const data = await this.get<{ variants: ShopifyVariant[] }>(
-      `/variants.json?inventory_item_ids=${inventoryItemId}&fields=id,title,sku,product_id,inventory_item_id`
-    );
-    return data.variants[0] ?? null;
+    const query = `
+      query getVariantByInventoryItem($id: ID!) {
+        inventoryItem(id: $id) {
+          variant {
+            id
+            title
+            sku
+            product { id }
+            inventoryItem { id }
+          }
+        }
+      }
+    `;
+    const result = await this.graphql<{
+      inventoryItem: {
+        variant: {
+          id: string;
+          title: string;
+          sku: string | null;
+          product: { id: string };
+          inventoryItem: { id: string };
+        } | null;
+      } | null;
+    }>(query, { id: `gid://shopify/InventoryItem/${inventoryItemId}` });
+
+    const v = result.inventoryItem?.variant;
+    if (!v) return null;
+
+    const parseGid = (gid: string): number => parseInt(gid.split('/').pop()!, 10);
+    return {
+      id: parseGid(v.id),
+      title: v.title,
+      sku: v.sku ?? '',
+      product_id: parseGid(v.product.id),
+      inventory_item_id: inventoryItemId,
+    };
   }
 
   /**
