@@ -151,6 +151,7 @@ pnpm run dev --filter=@pacore/agent
 ```typescript
 import { PACoreClient } from '@pacore/sdk';
 
+
 // Initialize client
 const client = new PACoreClient({
   apiKey: 'your-api-key',
