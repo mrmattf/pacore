@@ -199,6 +199,7 @@ app.get('/.well-known/oauth-authorization-server', (req: Request, res: Response)
     authorization_endpoint: `${base}/oauth/authorize`,
     token_endpoint: `${base}/oauth/token`,
     registration_endpoint: `${base}/oauth/register`,
+    scopes_supported: ['claudeai'],
     token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic', 'none'],
     grant_types_supported: ['authorization_code'],
     response_types_supported: ['code'],
@@ -223,7 +224,7 @@ app.post('/oauth/register', express.json(), (req: Request, res: Response) => {
 
 // Authorization endpoint — browser opens this, user enters API secret
 app.get('/oauth/authorize', (req: Request, res: Response) => {
-  const { response_type, client_id, redirect_uri, state, code_challenge, code_challenge_method } = req.query as Record<string, string>;
+  const { response_type, client_id, redirect_uri, state, code_challenge, code_challenge_method, scope, resource } = req.query as Record<string, string>;
 
   // Validate redirect_uri against allowlist BEFORE showing any UI
   if (!redirect_uri || !isAllowedRedirectUri(redirect_uri)) {
@@ -236,7 +237,10 @@ app.get('/oauth/authorize', (req: Request, res: Response) => {
     return;
   }
 
-  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'; form-action 'self'");
+  // Use explicit base URL instead of 'self' — 'self' can fail when the page is
+  // loaded inside an iframe from a different origin (e.g. Claude.ai embedding it).
+  const formBase = getBaseUrl(req);
+  res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; form-action ${formBase}`);
   res.send(`<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -271,6 +275,8 @@ app.get('/oauth/authorize', (req: Request, res: Response) => {
       <input type="hidden" name="state"                 value="${escapeHtml(state ?? '')}">
       <input type="hidden" name="code_challenge"        value="${escapeHtml(code_challenge ?? '')}">
       <input type="hidden" name="code_challenge_method" value="${escapeHtml(code_challenge_method ?? 'S256')}">
+      <input type="hidden" name="scope"                 value="${escapeHtml(scope ?? '')}">
+      <input type="hidden" name="resource"              value="${escapeHtml(resource ?? '')}">
       <label for="api_secret">API Secret</label>
       <input type="password" id="api_secret" name="api_secret" placeholder="Enter your API secret" autofocus required>
       <button type="submit">Authorize</button>
@@ -282,7 +288,7 @@ app.get('/oauth/authorize', (req: Request, res: Response) => {
 
 // Authorization form submission
 app.post('/oauth/authorize', express.urlencoded({ extended: false }), (req: Request, res: Response) => {
-  const { client_id, redirect_uri, state, code_challenge, code_challenge_method, api_secret } = req.body as Record<string, string>;
+  const { client_id, redirect_uri, state, code_challenge, code_challenge_method, api_secret, scope, resource } = req.body as Record<string, string>;
 
   // Validate redirect_uri against allowlist — checked again on POST to prevent tampering
   if (!redirect_uri || !isAllowedRedirectUri(redirect_uri)) {
@@ -326,11 +332,12 @@ app.post('/oauth/authorize', express.urlencoded({ extended: false }), (req: Requ
     expiresAt: Date.now() + 5 * 60 * 1000,
   });
 
-  logger.info('oauth.authorize.code_issued', { ip: req.ip, clientId: client_id, redirectUri: redirect_uri });
+  logger.info('oauth.authorize.code_issued', { ip: req.ip, clientId: client_id, redirectUri: redirect_uri, scope, resource });
 
   const url = new URL(redirect_uri);
   url.searchParams.set('code', code);
   if (state) url.searchParams.set('state', state);
+  if (scope) url.searchParams.set('scope', scope);
   res.redirect(url.toString());
 });
 
