@@ -44,6 +44,21 @@ const app = express();
 app.use('/webhook', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
+// CORS for OAuth and discovery endpoints — Claude.ai browser may call these cross-origin
+app.use((req: Request, res: Response, next: NextFunction) => {
+  const origin = req.headers.origin;
+  if (origin === 'https://claude.ai' || origin?.endsWith('.claude.ai')) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, MCP-Protocol-Version');
+  }
+  if (req.method === 'OPTIONS') {
+    res.status(204).end();
+    return;
+  }
+  next();
+});
+
 // ── OAuth security constants ───────────────────────────────────────────────────
 
 // Allow any callback on claude.ai — covers Claude Desktop
@@ -311,7 +326,7 @@ app.post('/oauth/authorize', express.urlencoded({ extended: false }), (req: Requ
     expiresAt: Date.now() + 5 * 60 * 1000,
   });
 
-  logger.info('oauth.authorize.code_issued', { ip: req.ip, clientId: client_id });
+  logger.info('oauth.authorize.code_issued', { ip: req.ip, clientId: client_id, redirectUri: redirect_uri });
 
   const url = new URL(redirect_uri);
   url.searchParams.set('code', code);
