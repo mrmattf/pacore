@@ -1,7 +1,7 @@
 # ADR-005: Domain-Specialized Builder Agent for E-Commerce Operations
 
 ## Status
-Proposed
+Accepted
 
 ## Context
 
@@ -38,6 +38,53 @@ PA Core's differentiation lies in the **intersection** of:
 | Per-seat pricing | Outcome-based pricing potential |
 
 ## Decision
+
+Build a **Domain-Specialized Builder Agent** with two distinct skill creation paths: an external AI client path (primary, bring-your-own-model) and an internal Builder Agent path (optional add-on). The platform's operational intelligence — validation, simulation, execution, deduplication, audit — is PA Core's value regardless of which path creates the skill.
+
+### BYOM: External AI Client as Primary Skill Creation Path
+
+Any MCP-compatible AI client (Claude Desktop, Cursor, or any agent framework) can create, simulate, and activate skills by connecting to PA Core's MCP server directly. The LLM reasoning happens entirely outside PA Core — the customer pays for it through their own AI subscription. PA Core receives the finished SkillDefinition and handles everything after:
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  EXTERNAL AI CLIENT (Claude Desktop, Cursor, etc.)              │
+│  Customer's own LLM subscription — zero PA Core LLM cost       │
+│                                                                  │
+│  "Create a skill: when Shopify order is created and has        │
+│   backordered items, look up ETA in Fulfil and create a        │
+│   Gorgias ticket for the customer with the expected date"      │
+└────────────────────────┬────────────────────────────────────────┘
+                         │  MCP tool calls to PA Core server
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  PA CORE MCP SERVER (pacore-skills)                             │
+│                                                                  │
+│  pacore_list_adapters()      → available triggers + capabilities│
+│  pacore_create_skill(def)    → validate + store as draft        │
+│  pacore_simulate_skill(id)   → dry run + fixture results        │
+│  pacore_get_cost_estimate(id)→ ops/execution + monthly estimate │
+│  pacore_activate_skill(id)   → promote to active                │
+│  pacore_list_skills()        → customer's skill inventory       │
+└────────────────────────┬────────────────────────────────────────┘
+                         │  validated SkillDefinition
+                         ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  PA CORE PLATFORM                                                │
+│  Execution · Deduplication · Audit · Retry · DLQ               │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**Why this is the primary path:**
+- PA Core provides the infrastructure and domain expertise (adapter contracts, validation, simulation, execution reliability) — not the LLM reasoning
+- Customers who already have Claude Desktop or Cursor can create skills immediately, with zero additional AI cost from PA Core
+- No "skill builds" billing unit is needed: customers pay only for operations executed (ADR-011)
+- The platform's value compounds as adapters are added — every new adapter multiplies what external AI clients can compose
+
+### Internal Builder Agent (Optional Add-On)
+
+For customers without their own AI client access, or who prefer an embedded guided experience, PA Core offers an internal AI Composer. This path uses a PA Core-hosted LLM to perform the skill generation conversation and is billed as a flat-fee add-on (or included in Enterprise). Execution pricing is identical to the BYOM path.
+
+---
 
 Build a **Domain-Specialized Builder Agent** focused on e-commerce operations, with planned expansion to adjacent business operations verticals.
 
@@ -90,10 +137,10 @@ This dual-track approach (from [Product Strategy](../product-strategy.md)) ensur
 - Universal agent orchestration (LangChain does this)
 
 **Building** (blue ocean):
-- E-commerce integration patterns (Shopify, WooCommerce, BigCommerce)
-- Support system patterns (Gorgias, Zendesk, Freshdesk)
-- Fulfillment patterns (ShipStation, ShipBob, 3PL APIs)
-- Domain-specific chain templates (backorder, refund, routing, inventory)
+- Adapter contracts with declared events, enrichment tools, and capabilities per integration
+- Validation and simulation infrastructure that external AI clients can call via MCP
+- Domain-specific operational patterns: commerce (Shopify, WooCommerce, BigCommerce), support (Gorgias, Zendesk), fulfillment (ShipStation, ShipBob), workplace (Google Workspace), project management (Monday.com, Ninety)
+- Deterministic execution engine (tool chains) that runs skills reliably regardless of how they were created
 
 ### Architecture
 
@@ -560,8 +607,12 @@ Benchmark Dashboard:
 
 - [Product Strategy](../product-strategy.md) - Go-to-market and business model
 - [AI Agents](../ai-agents.md) - Agent architecture patterns
-- [AI Composer Spec](./specs/ai-composer.md) - Detailed AI Composer design
+- [AI Composer Spec](./specs/ai-composer.md) - Detailed AI Composer design (internal Builder Agent)
+- [specs/agent-codegen.md](./specs/agent-codegen.md) - Declarative SkillDefinition + BYOM creation flow
 - [ADR-001: MCP for Integrations](001-mcp-for-integrations.md) - Foundation protocol
+- [ADR-010: Durable Webhook Ingestion](010-durable-webhook-ingestion.md) - Execution reliability
+- [ADR-011: Skill Pricing Model](011-skill-pricing-model.md) - Per-operation pricing and BYOM billing
+- [ADR-012: Platform Intelligence Layer](012-platform-intelligence-layer.md) - Internal AI alongside BYOM; execution-informed recommendations and alerts
 - [ADR-008: Tool Chain Architecture](../../packages/shopify-backorder/docs/decisions/008-tool-chain-architecture.md) - Deterministic execution
 - [Shopify Backorder Solution](../../packages/shopify-backorder/CLAUDE.md) - Reference implementation
 

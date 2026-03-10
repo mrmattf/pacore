@@ -91,6 +91,11 @@ export class MCPServer {
     router.get('/sse', (req: Request, res: Response) => {
       const sessionId = crypto.randomUUID();
 
+      // Build absolute base URL — required by Claude Desktop and MCP clients
+      const proto = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0].trim() ?? req.protocol;
+      const host = req.headers['host'];
+      const base = `${proto}://${host}`;
+
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache',
@@ -100,8 +105,8 @@ export class MCPServer {
       // Keepalive comment every 30 s — prevents Railway/proxy idle timeout
       const keepalive = setInterval(() => res.write(': keepalive\n\n'), 30_000);
 
-      // Tell the client where to POST JSON-RPC messages
-      res.write(`event: endpoint\ndata: /mcp/message?sessionId=${sessionId}\n\n`);
+      // Tell the client where to POST JSON-RPC messages (absolute URL required)
+      res.write(`event: endpoint\ndata: ${base}/mcp/message?sessionId=${sessionId}\n\n`);
 
       this.sessions.set(sessionId, res);
       logger.info('mcp.sse.connected', { sessionId, activeSessions: this.sessions.size });

@@ -281,6 +281,8 @@ app.post('/oauth/authorize', express.urlencoded({ extended: false }), (req: Requ
 app.post('/oauth/token', express.urlencoded({ extended: false }), (req: Request, res: Response) => {
   const { grant_type, code, code_verifier, redirect_uri } = req.body as Record<string, string>;
 
+  logger.info('oauth.token.request', { ip: req.ip, grant_type, hasCode: !!code, hasVerifier: !!code_verifier });
+
   // Rate limit: 20 attempts per IP per 15 minutes
   if (isRateLimited(req.ip ?? 'unknown', 20, 15 * 60 * 1000)) {
     logger.warn('oauth.token.rate_limited', { ip: req.ip });
@@ -289,6 +291,7 @@ app.post('/oauth/token', express.urlencoded({ extended: false }), (req: Request,
   }
 
   if (grant_type !== 'authorization_code') {
+    logger.warn('oauth.token.unsupported_grant_type', { grant_type });
     res.status(400).json({ error: 'unsupported_grant_type' });
     return;
   }
@@ -297,12 +300,14 @@ app.post('/oauth/token', express.urlencoded({ extended: false }), (req: Request,
 
   if (!pending || Date.now() > pending.expiresAt) {
     pendingCodes.delete(code);
+    logger.warn('oauth.token.invalid_code', { ip: req.ip, codeKnown: !!pending });
     res.status(400).json({ error: 'invalid_grant', error_description: 'Unknown or expired code' });
     return;
   }
 
   // redirect_uri must match what was used during authorization
   if (!redirect_uri || !ALLOWED_REDIRECT_URIS.has(redirect_uri) || pending.redirectUri !== redirect_uri) {
+    logger.warn('oauth.token.redirect_uri_mismatch', { ip: req.ip, redirect_uri });
     res.status(400).json({ error: 'invalid_grant', error_description: 'redirect_uri mismatch' });
     return;
   }
@@ -310,11 +315,13 @@ app.post('/oauth/token', express.urlencoded({ extended: false }), (req: Request,
   // Require S256 PKCE — plain is not accepted
   if (pending.codeChallenge) {
     if (!code_verifier) {
+      logger.warn('oauth.token.missing_verifier', { ip: req.ip });
       res.status(400).json({ error: 'invalid_grant', error_description: 'code_verifier required' });
       return;
     }
     const computed = crypto.createHash('sha256').update(code_verifier).digest('base64url');
     if (computed !== pending.codeChallenge) {
+      logger.warn('oauth.token.pkce_failed', { ip: req.ip });
       res.status(400).json({ error: 'invalid_grant', error_description: 'PKCE verification failed' });
       return;
     }
