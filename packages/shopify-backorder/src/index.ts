@@ -183,10 +183,26 @@ app.get('/.well-known/oauth-authorization-server', (req: Request, res: Response)
     issuer: base,
     authorization_endpoint: `${base}/oauth/authorize`,
     token_endpoint: `${base}/oauth/token`,
+    registration_endpoint: `${base}/oauth/register`,
     token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic', 'none'],
     grant_types_supported: ['authorization_code'],
     response_types_supported: ['code'],
     code_challenge_methods_supported: ['S256'],
+  });
+});
+
+// Dynamic client registration (RFC 7591)
+// Claude.ai registers itself before starting the OAuth flow.
+// Our actual auth is API-secret-based (login form), so we don't validate client credentials —
+// we just issue a client_id and echo back the registration so the flow can proceed.
+app.post('/oauth/register', express.json(), (req: Request, res: Response) => {
+  const clientId = crypto.randomBytes(16).toString('hex');
+  logger.info('oauth.register', { ip: req.ip, clientId });
+  res.status(201).json({
+    ...req.body,
+    client_id: clientId,
+    client_id_issued_at: Math.floor(Date.now() / 1000),
+    client_secret_expires_at: 0,
   });
 });
 
