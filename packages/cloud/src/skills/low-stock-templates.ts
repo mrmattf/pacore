@@ -1,6 +1,6 @@
 import type { TemplateContent } from '@pacore/core';
 import type { LowStockPolicyEvalContext } from '../chains/low-stock-types';
-import { escapeHtml, substituteVars } from './backorder-templates';
+import { escapeHtml, substituteVars, SafeHtml } from './backorder-templates';
 
 /** Converts \n line breaks to <br> tags for HTML rendering. */
 function nl2br(s: string): string {
@@ -72,7 +72,7 @@ export function renderLowStockSubject(
 
 function buildVarMap(ctx: LowStockPolicyEvalContext): Record<string, unknown> {
   const customerName = ctx.customerName || 'Valued Customer';
-  const affectedItemsTable = buildAffectedItemsHtml(ctx);
+  const affectedItemsTable = new SafeHtml(buildAffectedItemsHtml(ctx));
 
   return {
     ...ctx,

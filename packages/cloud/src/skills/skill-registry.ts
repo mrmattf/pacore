@@ -10,8 +10,14 @@ export type SkillScope =
 
 function isSkippedResult(result: unknown): boolean {
   if (!result || typeof result !== 'object') return true;
-  const r = result as { actions?: unknown[] };
-  if (!Array.isArray(r.actions) || r.actions.length === 0) return true;
+  const r = result as { actions?: unknown[]; skipped?: boolean };
+  // LowStockChainResult has no top-level actions array — use the explicit skipped flag instead.
+  // skipped=true → skip billing; skipped=undefined → chain completed with notifications → bill.
+  if (!Array.isArray(r.actions)) {
+    return r.skipped === true;
+  }
+  // All other chains (backorder, high-risk, delivery-exception, dedup) use a top-level actions array.
+  if (r.actions.length === 0) return true;
   return r.actions.every(a => a === 'skip');
 }
 

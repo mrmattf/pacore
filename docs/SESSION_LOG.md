@@ -5,6 +5,9 @@ Brief tracking of significant changes. Keep entries to 1-2 sentences each. Delet
 ---
 
 ## 2026-03 (recent sessions)
+- Low-stock skill bug fixes: (1) `getVariantByInventoryItem` rewrote using GraphQL — `/variants.json?inventory_item_ids=` filter is undocumented and ignored by Shopify, always returning the first variant; (2) `isSkippedResult` updated to handle `LowStockChainResult` which has no top-level `actions` array (uses `skipped` flag instead), fixing false "Skipped" UI status after successful notifications; (3) `low-stock-templates.ts` fixed to wrap `buildAffectedItemsHtml` in `SafeHtml` so the HTML table isn't double-escaped and rendered as raw HTML in Gorgias emails.
+
+
 - Auth bug: SkillsPage and TemplatePickerPage were using raw `fetch()` with token captured at render time; replaced all calls with `apiFetch()` so JWT expiry is handled transparently via refresh.
 - Platform reliability: added exponential-backoff retry in `AdapterRegistry.invokeCapability()`, SHA-256 idempotency-key deduplication in `SkillDispatcher` (`skill_executions.idempotency_key`), and `executeEscalation()` shared utility routing `escalate` policy actions to a configurable support slot.
 - Gorgias adapter fixed: added `sender`, `from_agent: true`, `source.from` fields; corrected `ticketUrl` construction using stored subdomain.

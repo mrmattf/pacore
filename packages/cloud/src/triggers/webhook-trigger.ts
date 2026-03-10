@@ -87,9 +87,6 @@ export class WebhookTriggerHandler {
       { sandbox: sandboxMode }
     );
 
-    // Log full payload for debugging
-    console.log(`[WebhookTrigger] payload for trigger ${token.slice(0, 8)}... skill=${trigger.userSkillId}:`, JSON.stringify(parsedPayload, null, 2));
-
     // Dispatch asynchronously — caller gets 200 immediately
     this.skillDispatcher
       .dispatch(execution.id, trigger.userSkillId, parsedPayload, { dryRun: sandboxMode })
