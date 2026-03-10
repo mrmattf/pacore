@@ -46,11 +46,17 @@ app.use(express.json());
 
 // ── OAuth security constants ───────────────────────────────────────────────────
 
-// Only Claude Desktop's callback is a valid redirect target.
-// Any other redirect_uri is rejected before the form is shown.
-const ALLOWED_REDIRECT_URIS = new Set([
-  'https://claude.ai/api/mcp/auth_callback',
-]);
+// Allow any callback on claude.ai — covers Claude Desktop
+// (https://claude.ai/api/mcp/auth_callback) and Claude.ai web UI
+// (org-specific paths). claude.ai is Anthropic-controlled so this is safe.
+function isAllowedRedirectUri(uri: string): boolean {
+  try {
+    const url = new URL(uri);
+    return url.protocol === 'https:' && url.hostname === 'claude.ai';
+  } catch {
+    return false;
+  }
+}
 
 // ── Simple in-memory rate limiter (no external dependency) ────────────────────
 
@@ -99,8 +105,11 @@ setInterval(() => {
 
 function requireApiKey(req: Request, res: Response, next: NextFunction) {
   const authHeader = req.get('Authorization');
+  const base = getBaseUrl(req);
+  const wwwAuth = `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource"`;
 
   if (!authHeader) {
+    res.set('WWW-Authenticate', wwwAuth);
     res.status(401).json({ error: 'Missing Authorization header' });
     return;
   }
@@ -108,6 +117,7 @@ function requireApiKey(req: Request, res: Response, next: NextFunction) {
   const [type, token] = authHeader.split(' ');
 
   if (type !== 'Bearer' || !token) {
+    res.set('WWW-Authenticate', wwwAuth);
     res.status(401).json({ error: 'Invalid Authorization format. Use: Bearer <token>' });
     return;
   }
@@ -123,11 +133,19 @@ function requireApiKey(req: Request, res: Response, next: NextFunction) {
 
   if (!matchesSecret && !matchesToken) {
     logger.warn('auth.invalid.api.key', { ip: req.ip });
+    res.set('WWW-Authenticate', wwwAuth);
     res.status(401).json({ error: 'Invalid or expired token' });
     return;
   }
 
   next();
+}
+
+// ── Helper: build base URL from request headers ───────────────────────────────
+
+function getBaseUrl(req: Request): string {
+  const proto = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0].trim() ?? req.protocol;
+  return `${proto}://${req.headers['host']}`;
 }
 
 // ── OAuth HTML helper ─────────────────────────────────────────────────────────
@@ -147,17 +165,25 @@ function escapeHtml(s: string): string {
 //   - pendingCodes capped at 100 entries to prevent unbounded growth
 //   - CSP header on the login page
 
-// OAuth metadata discovery
-app.get('/.well-known/oauth-authorization-server', (req: Request, res: Response) => {
-  const proto = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0].trim() ?? req.protocol;
-  const host = req.headers['host'];
-  const base = `${proto}://${host}`;
+// OAuth Protected Resource metadata (RFC 9728) — required by MCP 2025 spec
+// Claude.ai fetches this to discover which authorization server protects the resource.
+app.get('/.well-known/oauth-protected-resource', (req: Request, res: Response) => {
+  const base = getBaseUrl(req);
+  res.json({
+    resource: base,
+    authorization_servers: [base],
+    bearer_methods_supported: ['header'],
+  });
+});
 
+// OAuth Authorization Server metadata (RFC 8414)
+app.get('/.well-known/oauth-authorization-server', (req: Request, res: Response) => {
+  const base = getBaseUrl(req);
   res.json({
     issuer: base,
     authorization_endpoint: `${base}/oauth/authorize`,
     token_endpoint: `${base}/oauth/token`,
-    token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic'],
+    token_endpoint_auth_methods_supported: ['client_secret_post', 'client_secret_basic', 'none'],
     grant_types_supported: ['authorization_code'],
     response_types_supported: ['code'],
     code_challenge_methods_supported: ['S256'],
@@ -169,7 +195,7 @@ app.get('/oauth/authorize', (req: Request, res: Response) => {
   const { response_type, client_id, redirect_uri, state, code_challenge, code_challenge_method } = req.query as Record<string, string>;
 
   // Validate redirect_uri against allowlist BEFORE showing any UI
-  if (!redirect_uri || !ALLOWED_REDIRECT_URIS.has(redirect_uri)) {
+  if (!redirect_uri || !isAllowedRedirectUri(redirect_uri)) {
     res.status(400).send('invalid_redirect_uri');
     return;
   }
@@ -228,7 +254,7 @@ app.post('/oauth/authorize', express.urlencoded({ extended: false }), (req: Requ
   const { client_id, redirect_uri, state, code_challenge, code_challenge_method, api_secret } = req.body as Record<string, string>;
 
   // Validate redirect_uri against allowlist — checked again on POST to prevent tampering
-  if (!redirect_uri || !ALLOWED_REDIRECT_URIS.has(redirect_uri)) {
+  if (!redirect_uri || !isAllowedRedirectUri(redirect_uri)) {
     res.status(400).send('invalid_redirect_uri');
     return;
   }
@@ -306,7 +332,7 @@ app.post('/oauth/token', express.urlencoded({ extended: false }), (req: Request,
   }
 
   // redirect_uri must match what was used during authorization
-  if (!redirect_uri || !ALLOWED_REDIRECT_URIS.has(redirect_uri) || pending.redirectUri !== redirect_uri) {
+  if (!redirect_uri || !isAllowedRedirectUri(redirect_uri) || pending.redirectUri !== redirect_uri) {
     logger.warn('oauth.token.redirect_uri_mismatch', { ip: req.ip, redirect_uri });
     res.status(400).json({ error: 'invalid_grant', error_description: 'redirect_uri mismatch' });
     return;
