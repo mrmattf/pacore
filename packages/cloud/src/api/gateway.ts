@@ -86,12 +86,15 @@ export class APIGateway {
 
     // CORS
     this.app.use((req, res, next) => {
-      const origin = req.headers.origin;
-      if (this.config.corsOrigins?.includes(origin || '')) {
-        res.setHeader('Access-Control-Allow-Origin', origin || '');
+      const origin = req.headers.origin as string | undefined;
+      // Always allow configured origins; also allow claude.ai for OAuth/MCP endpoints
+      const isClaudeOrigin = origin && (origin === 'https://claude.ai' || origin.endsWith('.claude.ai'));
+      if (origin && (this.config.corsOrigins?.includes(origin) || isClaudeOrigin)) {
+        res.setHeader('Access-Control-Allow-Origin', origin);
+        res.setHeader('Access-Control-Allow-Credentials', 'true');
       }
       res.setHeader('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, MCP-Protocol-Version');
       if (req.method === 'OPTIONS') {
         return res.sendStatus(200);
       }
@@ -127,6 +130,9 @@ export class APIGateway {
 
     const authHeader = req.headers.authorization;
     if (!authHeader || !authHeader.startsWith('Bearer ')) {
+      const proto = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0].trim() ?? req.protocol;
+      const host  = req.headers.host as string;
+      res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${proto}://${host}/.well-known/oauth-protected-resource"`);
       res.status(401).json({ error: 'Unauthorized' });
       return;
     }
@@ -143,6 +149,9 @@ export class APIGateway {
         [tokenHash],
       );
       if (!result.rows[0]) {
+        const proto = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0].trim() ?? req.protocol;
+        const host  = req.headers.host as string;
+        res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${proto}://${host}/.well-known/oauth-protected-resource"`);
         res.status(401).json({ error: 'Invalid or expired token' });
         return;
       }
@@ -156,6 +165,9 @@ export class APIGateway {
       req.user = decoded;
       next();
     } catch {
+      const proto = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0].trim() ?? req.protocol;
+      const host  = req.headers.host as string;
+      res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${proto}://${host}/.well-known/oauth-protected-resource"`);
       res.status(401).json({ error: 'Invalid token' });
     }
   }

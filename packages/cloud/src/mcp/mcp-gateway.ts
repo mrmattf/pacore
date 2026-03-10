@@ -62,19 +62,28 @@ export class MCPGateway {
     this.router.get('/sse', (req: AuthenticatedRequest, res: Response) => {
       const userId = req.user?.id;
       if (!userId) {
+        const proto = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0].trim() ?? req.protocol;
+        const host  = req.headers['host'] as string;
+        const base  = `${proto}://${host}`;
+        res.setHeader('WWW-Authenticate', `Bearer resource_metadata="${base}/.well-known/oauth-protected-resource"`);
         res.status(401).json({ error: 'Unauthorized' });
         return;
       }
 
       const sessionId = randomBytes(16).toString('hex');
 
+      // Build absolute base URL — required by Claude Desktop and MCP clients
+      const proto = (req.headers['x-forwarded-proto'] as string | undefined)?.split(',')[0].trim() ?? req.protocol;
+      const host  = req.headers['host'] as string;
+      const base  = `${proto}://${host}`;
+
       res.setHeader('Content-Type', 'text/event-stream');
       res.setHeader('Cache-Control', 'no-cache');
       res.setHeader('Connection', 'keep-alive');
       res.flushHeaders();
 
-      // Send session ID so the client knows where to POST messages
-      res.write(`data: ${JSON.stringify({ type: 'session', sessionId })}\n\n`);
+      // Tell the client where to POST JSON-RPC messages (absolute URL required)
+      res.write(`event: endpoint\ndata: ${base}/v1/mcp/message?sessionId=${sessionId}\n\n`);
 
       this.sseSessions.set(sessionId, res);
 
