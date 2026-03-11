@@ -122,10 +122,10 @@ export class MCPGateway {
       const { id, method, params } = body;
 
       const sendResult = (result: unknown) => {
-        sseRes.write(`data: ${JSON.stringify({ jsonrpc: '2.0', id, result })}\n\n`);
+        sseRes.write(`event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id, result })}\n\n`);
       };
       const sendError = (code: number, message: string) => {
-        sseRes.write(`data: ${JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } })}\n\n`);
+        sseRes.write(`event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } })}\n\n`);
       };
 
       try {
@@ -149,7 +149,8 @@ export class MCPGateway {
             const toolName = params?.name as string;
             const toolArgs = (params?.arguments ?? {}) as Record<string, unknown>;
             if (!toolName) throw new Error('tools/call requires params.name');
-            result = await this.callTool(userId, toolName, toolArgs, req);
+            const toolData = await this.callTool(userId, toolName, toolArgs, req);
+            result = { content: [{ type: 'text', text: JSON.stringify(toolData) }] };
             break;
           }
           default:
@@ -206,7 +207,8 @@ export class MCPGateway {
             if (!toolName) {
               throw new Error('tools/call requires params.name');
             }
-            result = await this.callTool(userId, toolName, toolArgs, req);
+            const toolData = await this.callTool(userId, toolName, toolArgs, req);
+            result = { content: [{ type: 'text', text: JSON.stringify(toolData) }] };
             break;
           }
 
