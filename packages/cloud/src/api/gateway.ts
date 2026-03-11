@@ -83,6 +83,8 @@ export class APIGateway {
     this.app.use('/v1/triggers/webhook', express.raw({ type: '*/*' }));
 
     this.app.use(express.json());
+    // Required for HTML form POSTs (e.g. /oauth/authorize login form)
+    this.app.use(express.urlencoded({ extended: false }));
 
     // CORS
     this.app.use((req, res, next) => {
