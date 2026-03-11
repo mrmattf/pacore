@@ -110,9 +110,11 @@ export function createOAuthRoutes(db: Pool): Router {
   // ---------------------------------------------------------------------------
   router.get('/.well-known/oauth-protected-resource', (req: Request, res: Response) => {
     const base = getBaseUrl(req);
+    // authorization_servers must be issuer URLs (RFC 9728), NOT metadata URLs.
+    // Claude.ai constructs the metadata URL itself: ${issuer}/.well-known/oauth-authorization-server
     res.json({
       resource: base,
-      authorization_servers: [`${base}/.well-known/oauth-authorization-server`],
+      authorization_servers: [base],
     });
   });
 
@@ -137,8 +139,10 @@ export function createOAuthRoutes(db: Pool): Router {
   // ---------------------------------------------------------------------------
   // POST /oauth/register — RFC 7591 Dynamic Client Registration
   // Claude.ai registers itself here before starting the authorization flow.
+  // Also mounted at /register as a fallback (Claude.ai sometimes uses this
+  // path when metadata discovery fails or is not yet cached).
   // ---------------------------------------------------------------------------
-  router.post('/oauth/register', (req: Request, res: Response) => {
+  const handleRegister = (req: Request, res: Response) => {
     const { redirect_uris, client_name } = req.body as {
       redirect_uris?: string[];
       client_name?: string;
@@ -179,7 +183,10 @@ export function createOAuthRoutes(db: Pool): Router {
       response_types: ['code'],
       token_endpoint_auth_method: 'none',
     });
-  });
+  };
+
+  router.post('/oauth/register', handleRegister);
+  router.post('/register', handleRegister);
 
   // ---------------------------------------------------------------------------
   // GET /oauth/authorize — show PA Core login form
