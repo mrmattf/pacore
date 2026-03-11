@@ -275,7 +275,7 @@ export function createOAuthRoutes(db: Pool): Router {
 </html>`;
 
     res.setHeader('Content-Type', 'text/html; charset=utf-8');
-    res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; form-action ${base}/oauth/authorize`);
+    res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; script-src 'none'`);
     res.send(html);
   });
 
@@ -350,7 +350,7 @@ export function createOAuthRoutes(db: Pool): Router {
 </body>
 </html>`;
       res.setHeader('Content-Type', 'text/html; charset=utf-8');
-      res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; form-action ${base}/oauth/authorize`);
+      res.setHeader('Content-Security-Policy', `default-src 'none'; style-src 'unsafe-inline'; script-src 'none'`);
       res.status(400).send(html);
     };
 
