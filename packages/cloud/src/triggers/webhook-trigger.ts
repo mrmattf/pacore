@@ -79,6 +79,12 @@ export class WebhookTriggerHandler {
       }
     }
 
+    // Skill-level test mode: force sandbox regardless of billing plan
+    const skillConfig = userSkill?.configuration as { testMode?: boolean } | undefined;
+    if (skillConfig?.testMode === true) {
+      sandboxMode = true;
+    }
+
     // Start execution record (sandbox flag controls billing increment + dry-run)
     const execution = await this.skillRegistry.createExecution(
       trigger.userSkillId,

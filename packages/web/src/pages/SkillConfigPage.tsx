@@ -57,6 +57,7 @@ export function SkillConfigPage() {
   const [testResult, setTestResult] = useState<any>(null);
   const [testLoading, setTestLoading] = useState(false);
   const [testError, setTestError] = useState<string | null>(null);
+  const [testMode, setTestMode] = useState(false);
 
   useEffect(() => {
     if (!typeId || !templateId || !token) return;
@@ -87,6 +88,7 @@ export function SkillConfigPage() {
       const cfg = skill.configuration ?? {};
       if (cfg.slotConnections) setSlotConnections(cfg.slotConnections);
       if (cfg.fieldOverrides) setFieldOverrides(cfg.fieldOverrides);
+      if (cfg.testMode !== undefined) setTestMode(Boolean(cfg.testMode));
     }
   }
 
@@ -115,6 +117,7 @@ export function SkillConfigPage() {
           templateId,
           slotConnections,
           fieldOverrides,
+          testMode,
         }),
       });
     } finally {
@@ -403,6 +406,36 @@ export function SkillConfigPage() {
                   <div className="text-xs text-gray-500 bg-gray-50 rounded p-2">
                     No backordered items in test order — skill would skip (no ticket created).
                   </div>
+                )}
+              </div>
+
+              {/* Test Mode */}
+              <div className="bg-white border rounded-lg p-5 space-y-3">
+                <div className="flex items-start justify-between gap-4">
+                  <div>
+                    <h3 className="font-medium text-gray-900">Test Mode</h3>
+                    <p className="text-sm text-gray-500 mt-1">
+                      Runs on real webhooks but does not send to {notificationName}.
+                      Executions are logged and do not count toward your quota.
+                    </p>
+                  </div>
+                  <button
+                    role="switch"
+                    aria-checked={testMode}
+                    onClick={() => setTestMode(t => !t)}
+                    className={`relative mt-1 inline-flex h-6 w-11 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2 ${
+                      testMode ? 'bg-amber-500' : 'bg-gray-200'
+                    }`}
+                  >
+                    <span className={`pointer-events-none inline-block h-5 w-5 rounded-full bg-white shadow transform transition-transform ${
+                      testMode ? 'translate-x-5' : 'translate-x-0'
+                    }`} />
+                  </button>
+                </div>
+                {testMode && (
+                  <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1">
+                    Test Mode is ON — webhook events run the full chain but nothing is sent to {notificationName}.
+                  </p>
                 )}
               </div>
 

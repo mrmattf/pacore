@@ -66,6 +66,7 @@ export interface UserSkillConfig {
   slotConnections: Record<string, string>;     // slot key → IntegrationConnection.id
   fieldOverrides: Record<string, unknown>;     // editable field key → user's value
   namedTemplates: NamedTemplates;              // starts as template defaults; user edits go here
+  testMode?: boolean;                          // when true, webhooks run dry-run (no adapter calls, no billing)
 }
 
 // ---- TemplateRequest — coming-soon/vote tracking ----

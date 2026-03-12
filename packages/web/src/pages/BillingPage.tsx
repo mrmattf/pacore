@@ -252,7 +252,7 @@ function SkillCard({ userSkill, currentPlan }: { userSkill: UserSkill; currentPl
             </button>
             <div className="text-right">
               {currentPlan === 'free'
-                ? <span className="text-sm font-semibold text-amber-600">Sandbox</span>
+                ? <span className="text-sm font-semibold text-amber-600">{(userSkill.configuration as any)?.testMode ? 'Test Mode' : 'Sandbox'}</span>
                 : activeTier
                   ? <span className={`text-sm font-semibold ${status === 'paused' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>${activeTier.price}/mo</span>
                   : null}
@@ -330,7 +330,7 @@ function SkillCard({ userSkill, currentPlan }: { userSkill: UserSkill; currentPl
               )}
               {ex.sandbox && (
                 <span className="text-xs bg-amber-100 text-amber-700 px-1 py-0.5 rounded font-medium">
-                  Sandbox
+                  Test Mode
                 </span>
               )}
               {!ex.sandbox && ex.skipped && (
