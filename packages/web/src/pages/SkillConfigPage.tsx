@@ -153,6 +153,7 @@ export function SkillConfigPage() {
           templateId,
           slotConnections,
           fieldOverrides,
+          testMode,
           status: 'active',
         }),
       });

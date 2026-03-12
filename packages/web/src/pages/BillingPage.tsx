@@ -192,6 +192,8 @@ function SkillCard({ userSkill, currentPlan }: { userSkill: UserSkill; currentPl
   const [expanded, setExpanded] = useState<string | null>(null);
   const [status, setStatus] = useState(userSkill.status);
   const [toggling, setToggling] = useState(false);
+  const [testMode, setTestMode] = useState(Boolean((userSkill.configuration as any)?.testMode));
+  const [testModeToggling, setTestModeToggling] = useState(false);
 
   const tierKey = activeTierKey(currentPlan);
   const activeTier = meta?.tiers.find(t => t.key === tierKey);
@@ -206,6 +208,26 @@ function SkillCard({ userSkill, currentPlan }: { userSkill: UserSkill; currentPl
       // ignore — button reverts to previous state
     } finally {
       setToggling(false);
+    }
+  }
+
+  async function toggleTestMode() {
+    setTestModeToggling(true);
+    const newTestMode = !testMode;
+    try {
+      await apiFetch(`/v1/me/skills/${userSkill.id}/configure`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          ...(userSkill.configuration as any),
+          testMode: newTestMode,
+        }),
+      });
+      setTestMode(newTestMode);
+    } catch {
+      // ignore — toggle reverts
+    } finally {
+      setTestModeToggling(false);
     }
   }
 
@@ -241,6 +263,18 @@ function SkillCard({ userSkill, currentPlan }: { userSkill: UserSkill; currentPl
           </div>
           <div className="flex items-center gap-3 shrink-0 ml-4">
             <button
+              onClick={toggleTestMode}
+              disabled={testModeToggling || status === 'pending'}
+              title={testMode ? 'Disable Test Mode (go live)' : 'Enable Test Mode (dry run on real webhooks)'}
+              className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed ${
+                testMode
+                  ? 'bg-amber-100 text-amber-700 hover:bg-amber-200'
+                  : 'bg-gray-100 text-gray-500 hover:bg-gray-200'
+              }`}
+            >
+              {testMode ? 'Test Mode' : 'Live'}
+            </button>
+            <button
               onClick={togglePause}
               disabled={toggling || status === 'pending'}
               title={status === 'active' ? 'Pause skill' : 'Resume skill'}
@@ -252,7 +286,7 @@ function SkillCard({ userSkill, currentPlan }: { userSkill: UserSkill; currentPl
             </button>
             <div className="text-right">
               {currentPlan === 'free'
-                ? <span className="text-sm font-semibold text-amber-600">{(userSkill.configuration as any)?.testMode ? 'Test Mode' : 'Sandbox'}</span>
+                ? <span className="text-sm font-semibold text-amber-600">Sandbox</span>
                 : activeTier
                   ? <span className={`text-sm font-semibold ${status === 'paused' ? 'text-gray-400 line-through' : 'text-gray-900'}`}>${activeTier.price}/mo</span>
                   : null}

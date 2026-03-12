@@ -2026,7 +2026,20 @@ export class APIGateway {
 
     this.app.put('/v1/me/skills/:userSkillId/pause', async (req: AuthenticatedRequest, res: Response) => {
       try {
-        await this.config.skillRegistry.updateSkillStatus(req.params.userSkillId, 'paused');
+        const { userSkillId } = req.params;
+        const userId = req.user!.id;
+        await this.config.skillRegistry.updateSkillStatus(userSkillId, 'paused');
+
+        // Deregister webhooks so the source platform stops sending events while paused
+        const triggers = await this.config.skillRegistry.listTriggersForSkill(userSkillId);
+        for (const trigger of triggers) {
+          try {
+            await this.deregisterAndDeleteTrigger(trigger.id, userSkillId, { type: 'user', userId });
+          } catch (err: any) {
+            console.warn(`[pause] Failed to deregister trigger ${trigger.id}:`, err.message);
+          }
+        }
+
         res.json({ success: true });
       } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -2035,6 +2048,7 @@ export class APIGateway {
 
     this.app.put('/v1/me/skills/:userSkillId/resume', async (req: AuthenticatedRequest, res: Response) => {
       try {
+        const { userSkillId } = req.params;
         const userId = req.user!.id;
 
         // Check slot availability before resuming
@@ -2047,7 +2061,19 @@ export class APIGateway {
           }
         }
 
-        await this.config.skillRegistry.updateSkillStatus(req.params.userSkillId, 'active');
+        await this.config.skillRegistry.updateSkillStatus(userSkillId, 'active');
+
+        // Re-register webhook with source platform now that skill is active again
+        const existing = await this.config.skillRegistry.listTriggersForSkill(userSkillId);
+        if (existing.length === 0) {
+          try {
+            const trigger = await this.config.skillRegistry.createWebhookTrigger(userSkillId, { type: 'none' });
+            await this.autoRegisterWebhook(trigger, userSkillId, { type: 'user', userId });
+          } catch (err: any) {
+            console.warn(`[resume] Failed to re-register webhook for ${userSkillId}:`, err.message);
+          }
+        }
+
         res.json({ success: true });
       } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -2063,6 +2089,16 @@ export class APIGateway {
         const { orgId, userSkillId } = req.params;
         await this.config.orgManager.assertAdmin(orgId, req.user!.id);
         await this.config.skillRegistry.updateSkillStatus(userSkillId, 'paused');
+
+        const triggers = await this.config.skillRegistry.listTriggersForSkill(userSkillId);
+        for (const trigger of triggers) {
+          try {
+            await this.deregisterAndDeleteTrigger(trigger.id, userSkillId, { type: 'org', orgId });
+          } catch (err: any) {
+            console.warn(`[org pause] Failed to deregister trigger ${trigger.id}:`, err.message);
+          }
+        }
+
         res.json({ success: true });
       } catch (error: any) {
         res.status(error.message.includes('Admin') ? 403 : 500).json({ error: error.message });
@@ -2085,6 +2121,17 @@ export class APIGateway {
         }
 
         await this.config.skillRegistry.updateSkillStatus(userSkillId, 'active');
+
+        const existing = await this.config.skillRegistry.listTriggersForSkill(userSkillId);
+        if (existing.length === 0) {
+          try {
+            const trigger = await this.config.skillRegistry.createWebhookTrigger(userSkillId, { type: 'none' });
+            await this.autoRegisterWebhook(trigger, userSkillId, { type: 'org', orgId });
+          } catch (err: any) {
+            console.warn(`[org resume] Failed to re-register webhook for ${userSkillId}:`, err.message);
+          }
+        }
+
         res.json({ success: true });
       } catch (error: any) {
         res.status(error.message.includes('Admin') ? 403 : 500).json({ error: error.message });
