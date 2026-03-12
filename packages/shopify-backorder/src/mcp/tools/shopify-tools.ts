@@ -32,6 +32,20 @@ export const shopifyTools: MCPTool[] = [
       required: ['variant_ids'],
     },
   },
+  {
+    name: 'shopify_get_inventory_eta',
+    description: 'Get the estimated arrival date for a backordered variant by querying Shopify scheduled inventory changes. Returns a human-readable date (e.g. "March 28, 2026") or "soon" if no future arrival date is found.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        variant_id: {
+          type: 'number',
+          description: 'The Shopify variant ID of the backordered item',
+        },
+      },
+      required: ['variant_id'],
+    },
+  },
 ];
 
 // Tool implementations
@@ -46,6 +60,9 @@ export class ShopifyToolExecutor {
 
         case 'shopify_check_inventory':
           return await this.checkInventory(args.variant_ids as number[]);
+
+        case 'shopify_get_inventory_eta':
+          return await this.getInventoryEta(args.variant_id as number);
 
         default:
           return {
@@ -82,6 +99,14 @@ export class ShopifyToolExecutor {
         total_price: order.total_price,
         created_at: order.created_at,
       },
+    };
+  }
+
+  private async getInventoryEta(variantId: number): Promise<MCPToolResult> {
+    const eta = await this.client.getInventoryEta(variantId);
+    return {
+      success: true,
+      data: { variant_id: variantId, eta },
     };
   }
 

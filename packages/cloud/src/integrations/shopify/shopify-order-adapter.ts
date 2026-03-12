@@ -1,7 +1,7 @@
 import type { EcommerceOrderAdapter, NormalizedOrder, InventoryResult } from '@pacore/core';
 import type { SlotAdapter, CredentialField, WebhookSourceAdapter } from '../slot-adapter';
 import { ShopifyApiClient } from './shopify-api-client';
-import type { ShopifyVariant, ShopifyOrder, ShopifyRisk } from './shopify-api-client';
+import type { ShopifyVariant, ShopifyOrder, ShopifyRisk, ScheduledInventoryChange } from './shopify-api-client';
 
 /** Direct OAuth token grant — no caching. Used by adapter for per-call credential injection. */
 class DirectTokenProvider {
@@ -43,6 +43,7 @@ export class ShopifyOrderAdapter implements EcommerceOrderAdapter, SlotAdapter, 
     'get_order',
     'check_inventory',
     'get_variant_metafields',
+    'get_inventory_eta',
     'find_orders_by_variant',
     'get_variant_by_inventory_item',
     'get_order_risks',
@@ -101,6 +102,8 @@ export class ShopifyOrderAdapter implements EcommerceOrderAdapter, SlotAdapter, 
         return this.checkInventory(params.variant_ids as number[], creds);
       case 'get_variant_metafields':
         return this.getVariantMetafields(params.variant_id as number, creds);
+      case 'get_inventory_eta':
+        return this.getInventoryEta(params.variant_id as number, creds);
       case 'find_orders_by_variant':
         return this.findOrdersByVariant(params.variant_id as number, creds);
       case 'get_variant_by_inventory_item':
@@ -181,6 +184,37 @@ export class ShopifyOrderAdapter implements EcommerceOrderAdapter, SlotAdapter, 
       map[`${mf.namespace}.${mf.key}`] = mf.value;
     }
     return map;
+  }
+
+  /**
+   * Returns a human-readable ETA for a backordered variant by querying Shopify's scheduled
+   * inventory changes. These are automatically created when purchase orders or inventory
+   * transfers are marked as "ordered" in Shopify Admin.
+   *
+   * Resolution logic (per customer spec):
+   * - Future `expectedAt` found on an incoming→available change → formatted date ("March 28, 2026")
+   * - No scheduled changes, or all dates are in the past → "soon"
+   */
+  async getInventoryEta(variantId: number, creds: Record<string, unknown>): Promise<string> {
+    const client = this.buildClient(creds);
+
+    let changes: ScheduledInventoryChange[];
+    try {
+      changes = await client.getInventoryScheduledChanges(variantId);
+    } catch {
+      return 'soon';
+    }
+
+    const now = new Date();
+    const futureDates = changes
+      .filter(c => c.fromName === 'incoming' && c.toName === 'available' && c.expectedAt)
+      .map(c => new Date(c.expectedAt!))
+      .filter(d => d > now)
+      .sort((a, b) => a.getTime() - b.getTime()); // earliest first
+
+    if (futureDates.length === 0) return 'soon';
+
+    return futureDates[0].toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
   }
 
   /**

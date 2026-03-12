@@ -170,9 +170,11 @@ function buildBackorderedItemsHtml(ctx: PolicyEvalContext): string {
 
   const backorderedRows = ctx.backorderedItems.map(item => {
     const etaStr = etaToString(item.eta);
-    const status = etaStr
-      ? `${item.backorderedQty} backordered — Est. ${escapeHtml(etaStr)}`
-      : `${item.backorderedQty} backordered`;
+    const status = etaStr === 'soon'
+      ? `${item.backorderedQty} backordered — Back in stock soon`
+      : etaStr
+        ? `${item.backorderedQty} backordered — Est. ${escapeHtml(etaStr)}`
+        : `${item.backorderedQty} backordered`;
     return `
     <tr>
       <td style="padding: 4px 8px;">${escapeHtml(item.title)}</td>
@@ -203,7 +205,11 @@ function buildBackorderedItemsText(ctx: PolicyEvalContext): string {
 
   const backorderedRows = ctx.backorderedItems.map(item => {
     const eta = etaToString(item.eta);
-    const status = eta ? `${item.backorderedQty} backordered — Est. ${eta}` : `${item.backorderedQty} backordered`;
+    const status = eta === 'soon'
+      ? `${item.backorderedQty} backordered — Back in stock soon`
+      : eta
+        ? `${item.backorderedQty} backordered — Est. ${eta}`
+        : `${item.backorderedQty} backordered`;
     return `${item.title}  |  ${item.sku || '—'}  |  ${status}`;
   });
 

@@ -50,6 +50,13 @@ export interface ShopifyRisk {
   cause_cancel: boolean;
 }
 
+export interface ScheduledInventoryChange {
+  expectedAt: string | null;
+  fromName: string;
+  toName: string;
+  quantity: number;
+}
+
 /**
  * Shopify Admin REST API client.
  * Uses ShopifyTokenManager to resolve a valid access token per request.
@@ -174,6 +181,70 @@ export class ShopifyApiClient {
     return data.orders.filter(order =>
       order.line_items.some(li => li.variant_id === variantId)
     );
+  }
+
+  /**
+   * Returns scheduled inventory changes for a variant across all locations.
+   * These are created by Shopify when purchase orders or inventory transfers are marked as "ordered".
+   * The `expectedAt` field is the estimated arrival date.
+   * NOTE: `scheduledChanges` is a deprecated GraphQL field but remains the only read API for this data.
+   */
+  async getInventoryScheduledChanges(variantId: number): Promise<ScheduledInventoryChange[]> {
+    const inventoryItemId = await this.getInventoryItemId(variantId);
+
+    const query = `
+      query GetInventoryScheduledChanges($id: ID!) {
+        inventoryItem(id: $id) {
+          inventoryLevels(first: 10) {
+            edges {
+              node {
+                scheduledChanges(first: 10) {
+                  edges {
+                    node {
+                      expectedAt
+                      fromName
+                      toName
+                      quantity
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    `;
+
+    const result = await this.graphql<{
+      inventoryItem: {
+        inventoryLevels: {
+          edges: Array<{
+            node: {
+              scheduledChanges: {
+                edges: Array<{
+                  node: {
+                    expectedAt: string | null;
+                    fromName: string;
+                    toName: string;
+                    quantity: number;
+                  };
+                }>;
+              };
+            };
+          }>;
+        };
+      } | null;
+    }>(query, { id: `gid://shopify/InventoryItem/${inventoryItemId}` });
+
+    if (!result.inventoryItem) return [];
+
+    const changes: ScheduledInventoryChange[] = [];
+    for (const levelEdge of result.inventoryItem.inventoryLevels.edges) {
+      for (const changeEdge of levelEdge.node.scheduledChanges.edges) {
+        changes.push(changeEdge.node);
+      }
+    }
+    return changes;
   }
 
   private async getInventoryItemId(variantId: number): Promise<number> {

@@ -51,12 +51,14 @@ const sharedPolicy: CompiledPolicy = {
 };
 
 // ---- Shared enrichment spec ----
-// Fetches ETA from Shopify variant metafield (custom.backorder_eta) for each backordered item.
+// Fetches ETA from Shopify scheduled inventory changes for each backordered item.
+// Scheduled changes are created automatically when purchase orders / transfers are marked "ordered".
+// Returns "soon" when no future arrival date is found (past date or no PO on file).
 
 const sharedEnrichmentSpec: DataEnrichmentSpec = {
   steps: [
     {
-      tool: 'shopify__get_variant_metafields',
+      tool: 'shopify__get_inventory_eta',
       iterateOver: 'backorderedItems',
       inputMapping: { variant_id: 'item.variantId' },
       resultPath: 'item.eta',
