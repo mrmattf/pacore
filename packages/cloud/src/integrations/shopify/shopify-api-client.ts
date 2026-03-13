@@ -171,6 +171,23 @@ export class ShopifyApiClient {
   }
 
   /**
+   * Fetches orders created within the last `days` days, up to 250 (one page).
+   * Used by backorder assessment — representative sample for stores with typical order volumes.
+   * For stores with >250 orders in the window, the most recent 250 are returned.
+   */
+  async getOrdersInRange(days: number): Promise<ShopifyOrder[]> {
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const params = new URLSearchParams({
+      status: 'any',
+      limit: '250',
+      fields: 'id,order_number,email,customer,line_items,total_price,created_at',
+      created_at_min: since,
+    });
+    const data = await this.get<{ orders: ShopifyOrder[] }>(`/orders.json?${params}`);
+    return data.orders;
+  }
+
+  /**
    * Finds all open orders containing a given variant (client-side filter, up to 250 orders).
    * For MVP: covers merchants with ≤250 open orders (typical for $500K–$10M Shopify stores).
    */

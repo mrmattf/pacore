@@ -226,7 +226,23 @@ export class APIGateway {
       credentialManager: this.config.credentialManager,
       skillRegistry: this.config.skillRegistry,
       orgManager: this.config.orgManager,
+      adapterRegistry: this.config.adapterRegistry ?? new AdapterRegistry(),
+      listConnections: async (scope: CredentialScope) => {
+        const column = scope.type === 'org' ? 'org_id' : 'user_id';
+        const value  = scope.type === 'org' ? scope.orgId : scope.userId;
+        const result = await this.config.db.query(
+          `SELECT id, integration_key, display_name FROM integration_connections WHERE ${column} = $1 AND status = 'active' ORDER BY created_at ASC`,
+          [value]
+        );
+        return result.rows.map((r: any) => ({
+          id: r.id,
+          integrationKey: r.integration_key,
+          displayName: r.display_name,
+        }));
+      },
     });
+    // Wire MCPGateway into the orchestrator so agent mode can call adapter tools in-process
+    this.orchestrator.setMcpGateway(mcpGateway);
     this.app.use('/v1/mcp', mcpGateway.getRouter());
 
     // -------------------------------------------------------------------------

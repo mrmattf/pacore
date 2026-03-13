@@ -17,12 +17,32 @@ export interface CredentialField {
   required?: boolean;
 }
 
+/**
+ * Describes a capability that is safe to expose to AI agents (read-only, no customer-facing side effects).
+ * Adapters that define agentTools have those capabilities surfaced via the MCPGateway for agentic flows.
+ */
+export interface AgentToolDefinition {
+  /** Must match a capability in SlotAdapter.capabilities. */
+  capability: string;
+  /** Description shown to the LLM in the MCP tool list. */
+  description: string;
+  /** JSON Schema for the capability's parameters. */
+  inputSchema: Record<string, unknown>;
+}
+
 export interface SlotAdapter {
   /** Identifies this integration (matches IntegrationConnection.integrationKey). */
   readonly integrationKey: string;
 
   /** Bare capability names this adapter supports, e.g. ['create_ticket', 'add_message']. */
   readonly capabilities: readonly string[];
+
+  /**
+   * Subset of capabilities that are read-only and safe to expose to AI agents via the MCPGateway.
+   * Write capabilities (create_ticket, send_message, register_webhook) should NOT be listed here.
+   * If undefined, no capabilities are exposed to agents.
+   */
+  readonly agentTools?: readonly AgentToolDefinition[];
 
   /** Credential fields shown in the ConnectionPicker form for this integration. */
   readonly credentialFields: CredentialField[];

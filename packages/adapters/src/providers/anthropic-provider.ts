@@ -7,6 +7,9 @@ import {
   CompletionResponse,
   StreamChunk,
   ValidationResult,
+  ToolCallMessage,
+  AgentTool,
+  AgentCompletionResponse,
 } from '@pacore/core';
 
 /**
@@ -107,6 +110,75 @@ export class AnthropicProvider implements LLMProvider {
         };
       }
     }
+  }
+
+  /**
+   * Run one turn of an agentic conversation with tool support.
+   * Handles Anthropic's structured content blocks for tool use and tool results.
+   */
+  async completeWithTools(
+    messages: ToolCallMessage[],
+    tools: AgentTool[],
+    options?: CompletionOptions
+  ): Promise<AgentCompletionResponse> {
+    if (!this.client) throw new Error('Provider not initialized');
+
+    const anthropicMessages: any[] = messages.map(msg => {
+      if ('toolResults' in msg) {
+        return {
+          role: 'user' as const,
+          content: msg.toolResults.map(r => ({
+            type: 'tool_result',
+            tool_use_id: r.toolUseId,
+            content: r.content,
+          })),
+        };
+      }
+      if ('toolUses' in msg && msg.toolUses.length > 0) {
+        const blocks: any[] = [];
+        if (msg.content) {
+          blocks.push({ type: 'text', text: msg.content });
+        }
+        for (const tu of msg.toolUses) {
+          blocks.push({ type: 'tool_use', id: tu.id, name: tu.name, input: tu.input });
+        }
+        return { role: 'assistant' as const, content: blocks };
+      }
+      return { role: msg.role as 'user' | 'assistant', content: msg.content };
+    });
+
+    const anthropicTools: any[] = tools.map(t => ({
+      name: t.name,
+      description: t.description,
+      input_schema: t.inputSchema,
+    }));
+
+    const response = await (this.client.messages.create as any)({
+      model: options?.model || this.config?.model || 'claude-sonnet-4-6',
+      messages: anthropicMessages,
+      tools: anthropicTools,
+      max_tokens: options?.maxTokens || this.config?.maxTokens || 4000,
+      temperature: options?.temperature ?? this.config?.temperature ?? 0.7,
+    });
+
+    const textContent = (response.content as any[])
+      .filter((b: any) => b.type === 'text')
+      .map((b: any) => b.text as string)
+      .join('');
+
+    const toolUses = (response.content as any[])
+      .filter((b: any) => b.type === 'tool_use')
+      .map((b: any) => ({ id: b.id as string, name: b.name as string, input: b.input as Record<string, unknown> }));
+
+    return {
+      textContent,
+      toolUses,
+      stopReason: (response.stop_reason as string) === 'tool_use' ? 'tool_use' : 'end_turn',
+      usage: {
+        promptTokens: response.usage.input_tokens,
+        completionTokens: response.usage.output_tokens,
+      },
+    };
   }
 
   validateConfig(config: LLMConfig): ValidationResult {

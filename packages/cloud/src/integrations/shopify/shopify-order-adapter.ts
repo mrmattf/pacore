@@ -1,5 +1,5 @@
 import type { EcommerceOrderAdapter, NormalizedOrder, InventoryResult } from '@pacore/core';
-import type { SlotAdapter, CredentialField, WebhookSourceAdapter } from '../slot-adapter';
+import type { SlotAdapter, CredentialField, WebhookSourceAdapter, AgentToolDefinition } from '../slot-adapter';
 import { ShopifyApiClient } from './shopify-api-client';
 import type { ShopifyVariant, ShopifyOrder, ShopifyRisk, ScheduledInventoryChange } from './shopify-api-client';
 
@@ -48,7 +48,99 @@ export class ShopifyOrderAdapter implements EcommerceOrderAdapter, SlotAdapter, 
     'get_variant_by_inventory_item',
     'get_order_risks',
     'get_customer_order_count',
+    'analyze_backorder_history',
   ] as const;
+
+  /**
+   * Read-only capabilities exposed to AI agents via the MCPGateway.
+   * Webhook lifecycle (register/deregister) is excluded — managed by skill activation only.
+   */
+  readonly agentTools: readonly AgentToolDefinition[] = [
+    {
+      capability: 'get_order',
+      description: 'Fetch a Shopify order by ID. Returns order details including line items, customer info, and total price.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          order_id: { type: 'number', description: 'Shopify order ID' },
+        },
+        required: ['order_id'],
+      },
+    },
+    {
+      capability: 'check_inventory',
+      description: 'Check inventory levels for one or more Shopify product variants. Returns available quantity and backorder status.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          variant_ids: {
+            type: 'array',
+            items: { type: 'number' },
+            description: 'List of Shopify variant IDs to check',
+          },
+        },
+        required: ['variant_ids'],
+      },
+    },
+    {
+      capability: 'get_inventory_eta',
+      description: 'Get the estimated restock date for a backordered Shopify variant, based on scheduled inventory changes (purchase orders).',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          variant_id: { type: 'number', description: 'Shopify variant ID' },
+        },
+        required: ['variant_id'],
+      },
+    },
+    {
+      capability: 'get_order_risks',
+      description: 'Get fraud risk assessments for a Shopify order. Returns risk level and recommendation.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          order_id: { type: 'number', description: 'Shopify order ID' },
+        },
+        required: ['order_id'],
+      },
+    },
+    {
+      capability: 'get_customer_order_count',
+      description: 'Get the total all-time order count for a Shopify customer. Useful for distinguishing new vs. returning customers.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          customer_id: { type: 'number', description: 'Shopify customer ID' },
+        },
+        required: ['customer_id'],
+      },
+    },
+    {
+      capability: 'find_orders_by_variant',
+      description: 'Find all open Shopify orders that contain a specific product variant. Useful for identifying customers affected by a stockout.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          variant_id: { type: 'number', description: 'Shopify variant ID' },
+        },
+        required: ['variant_id'],
+      },
+    },
+    {
+      capability: 'analyze_backorder_history',
+      description: 'Analyze historical Shopify order data to assess the potential impact of the backorder notification skill. Returns aggregate stats: how many orders had out-of-stock items, affected order value, most impacted variants, and estimated monthly trigger volume. Use this for Skills Assessment (Path E) to show a customer what the backorder skill would automate.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          days: {
+            type: 'number',
+            description: 'Number of days of order history to analyze (default 90). Analysis covers the most recent 250 orders within that window.',
+          },
+        },
+        required: [],
+      },
+    },
+  ];
 
   readonly credentialFields: CredentialField[] = [
     { key: 'storeDomain',  label: 'Store Domain',  type: 'text',     placeholder: 'my-store.myshopify.com' },
@@ -112,6 +204,8 @@ export class ShopifyOrderAdapter implements EcommerceOrderAdapter, SlotAdapter, 
         return this.getOrderRisks(params.order_id as number, creds);
       case 'get_customer_order_count':
         return this.getCustomerOrderCount(params.customer_id as number, creds);
+      case 'analyze_backorder_history':
+        return this.analyzeBackorderHistory((params.days as number | undefined) ?? 90, creds);
       default:
         throw new Error(`ShopifyOrderAdapter: unsupported capability '${capability}'`);
     }
@@ -265,6 +359,115 @@ export class ShopifyOrderAdapter implements EcommerceOrderAdapter, SlotAdapter, 
   async getCustomerOrderCount(customerId: number, creds: Record<string, unknown>): Promise<number> {
     const client = this.buildClient(creds);
     return client.getCustomerOrderCount(customerId);
+  }
+
+  /**
+   * Analyzes historical Shopify orders to assess the potential impact of the backorder
+   * notification skill. Fetches up to 250 orders from the last `days` days, checks current
+   * inventory for all unique variants, and returns aggregate backorder statistics.
+   *
+   * Used by the Path E Skills Assessment — shows customers what the skill would automate.
+   * Note: inventory is checked at current levels, not at time of order (approximation).
+   */
+  async analyzeBackorderHistory(
+    days: number,
+    creds: Record<string, unknown>
+  ): Promise<{
+    totalOrders: number;
+    ordersWithBackorders: number;
+    backorderRate: number;
+    totalBackorderedOrderValue: number;
+    mostAffectedVariants: Array<{ variantId: number; title: string; sku: string; affectedOrderCount: number }>;
+    estimatedMonthlyEvents: number;
+    analyzedDays: number;
+    note: string;
+  }> {
+    const client = this.buildClient(creds);
+
+    // Fetch orders in the date range (up to 250)
+    const orders = await client.getOrdersInRange(days);
+
+    // Collect unique variant IDs, capped at the 100 most frequently occurring
+    const variantFrequency = new Map<number, { title: string; sku: string; count: number }>();
+    for (const order of orders) {
+      for (const item of order.line_items) {
+        if (!item.variant_id) continue;
+        const existing = variantFrequency.get(item.variant_id);
+        if (existing) {
+          existing.count++;
+        } else {
+          variantFrequency.set(item.variant_id, { title: item.title, sku: item.sku ?? '', count: 1 });
+        }
+      }
+    }
+
+    const topVariantIds = [...variantFrequency.entries()]
+      .sort((a, b) => b[1].count - a[1].count)
+      .slice(0, 100)
+      .map(([id]) => id);
+
+    // Check inventory for unique variants in parallel batches of 5
+    const inventoryMap = new Map<number, number>(); // variantId → available qty
+    const batchSize = 5;
+    for (let i = 0; i < topVariantIds.length; i += batchSize) {
+      const batch = topVariantIds.slice(i, i + batchSize);
+      const results = await Promise.all(batch.map(id => client.checkInventory([id]).then(r => r[0])));
+      for (const result of results) {
+        if (result) inventoryMap.set(result.variantId, result.available);
+      }
+    }
+
+    // Classify orders and aggregate stats
+    let ordersWithBackorders = 0;
+    let totalBackorderedOrderValue = 0;
+    const affectedVariantCounts = new Map<number, number>();
+
+    for (const order of orders) {
+      const hasOosItem = order.line_items.some(item => {
+        const available = inventoryMap.get(item.variant_id);
+        return available !== undefined && available <= 0;
+      });
+
+      if (hasOosItem) {
+        ordersWithBackorders++;
+        totalBackorderedOrderValue += parseFloat(order.total_price) || 0;
+
+        for (const item of order.line_items) {
+          const available = inventoryMap.get(item.variant_id);
+          if (available !== undefined && available <= 0) {
+            affectedVariantCounts.set(item.variant_id, (affectedVariantCounts.get(item.variant_id) ?? 0) + 1);
+          }
+        }
+      }
+    }
+
+    const mostAffectedVariants = [...affectedVariantCounts.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 5)
+      .map(([variantId, affectedOrderCount]) => {
+        const info = variantFrequency.get(variantId)!;
+        return { variantId, title: info.title, sku: info.sku, affectedOrderCount };
+      });
+
+    const backorderRate = orders.length > 0
+      ? Math.round((ordersWithBackorders / orders.length) * 1000) / 10
+      : 0;
+    const estimatedMonthlyEvents = Math.round((ordersWithBackorders / days) * 30);
+
+    const note = orders.length >= 250
+      ? `Analysis based on the most recent 250 orders. Your store may have more orders in this ${days}-day period.`
+      : `Analysis based on all ${orders.length} orders placed in the last ${days} days.`;
+
+    return {
+      totalOrders: orders.length,
+      ordersWithBackorders,
+      backorderRate,
+      totalBackorderedOrderValue: Math.round(totalBackorderedOrderValue * 100) / 100,
+      mostAffectedVariants,
+      estimatedMonthlyEvents,
+      analyzedDays: days,
+      note,
+    };
   }
 
   private buildTokenProvider(creds: Record<string, unknown>): DirectTokenProvider {

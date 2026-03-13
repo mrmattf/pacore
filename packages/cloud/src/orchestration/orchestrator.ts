@@ -1,8 +1,10 @@
 import { nanoid } from 'nanoid';
-import { LLMProviderRegistry, Message, CompletionOptions, CompletionResponse, StreamChunk } from '@pacore/core';
+import { LLMProviderRegistry, Message, CompletionOptions, CompletionResponse, StreamChunk, ToolCallMessage, AgentToolResult } from '@pacore/core';
 import { MemoryManager } from '../memory';
 import { ConversationClassifier } from '../services/conversation-classifier';
 import { WorkflowBuilder, WorkflowManager, WorkflowExecutor } from '../workflow';
+import type { MCPGateway } from '../mcp/mcp-gateway';
+import type { CredentialScope } from '../mcp/credential-manager';
 
 export interface ContextSearchConfig {
   enabled?: boolean;
@@ -24,6 +26,14 @@ export interface RequestOptions extends CompletionOptions {
   autoTag?: boolean; // Auto-generate tags and title (default: true)
   autoClassify?: boolean; // Auto-classify conversation category (default: true)
   detectWorkflowIntent?: boolean; // Detect and offer workflow generation (default: true)
+  /**
+   * When true, uses the agentic tool-calling loop instead of a single LLM call.
+   * Requires the MCPGateway to be configured and the LLM provider to support completeWithTools.
+   * The LLM can call any read-only adapter tools (Shopify, Gorgias, etc.) configured for the user.
+   */
+  agentMode?: boolean;
+  /** Org ID for scoped tool access in agent mode (optional). */
+  orgId?: string;
 }
 
 export interface OrchestrationResponse {
@@ -74,6 +84,8 @@ export class Orchestrator {
   private workflowBuilder?: WorkflowBuilder;
   private workflowManager?: WorkflowManager;
   private workflowExecutor?: WorkflowExecutor;
+  /** MCPGateway for agentic tool-calling mode. Set via setMcpGateway() after construction. */
+  private mcpGateway?: MCPGateway;
 
   constructor(
     registry: LLMProviderRegistry,
@@ -82,6 +94,7 @@ export class Orchestrator {
     workflowBuilder?: WorkflowBuilder,
     workflowManager?: WorkflowManager,
     workflowExecutor?: WorkflowExecutor,
+    mcpGateway?: MCPGateway,
   ) {
     this.registry = registry;
     this.memory = memory;
@@ -89,6 +102,12 @@ export class Orchestrator {
     this.workflowBuilder = workflowBuilder;
     this.workflowManager = workflowManager;
     this.workflowExecutor = workflowExecutor;
+    this.mcpGateway = mcpGateway;
+  }
+
+  /** Wire in the MCPGateway after construction (called by APIGateway after it creates MCPGateway). */
+  setMcpGateway(gateway: MCPGateway): void {
+    this.mcpGateway = gateway;
   }
 
   async processRequest(
@@ -96,6 +115,11 @@ export class Orchestrator {
     input: string,
     options: RequestOptions = {},
   ): Promise<OrchestrationResponse> {
+    // Agent mode: use tool-calling loop instead of single LLM call
+    if (options.agentMode && this.mcpGateway) {
+      return this.runAgentLoop(userId, input, options);
+    }
+
     // 1. Determine context search configuration
     let contextConfig: ContextSearchConfig;
     if (typeof options.contextSearch === 'object') {
@@ -420,6 +444,84 @@ export class Orchestrator {
         metadata,
       });
     }
+  }
+
+  /**
+   * Agentic tool-calling loop.
+   * Discovers available read-only tools from the MCPGateway, lets the LLM decide
+   * which to call, executes them, and loops until the LLM produces a final answer.
+   *
+   * Max 10 tool-call rounds to prevent runaway loops.
+   */
+  private async runAgentLoop(
+    userId: string,
+    input: string,
+    options: RequestOptions,
+  ): Promise<OrchestrationResponse> {
+    const routing = await this.determineRouting(userId, input, options);
+    const provider = await this.registry.getLLMForUser(userId, routing.providerId);
+
+    if (!provider.completeWithTools) {
+      console.warn('[Orchestrator] Agent mode requested but provider does not support completeWithTools. Falling back to standard mode.');
+      return this.processRequest(userId, input, { ...options, agentMode: false });
+    }
+
+    const credScope: CredentialScope = options.orgId
+      ? { type: 'org', orgId: options.orgId }
+      : { type: 'user', userId };
+
+    const tools = await this.mcpGateway!.getAgentTools(credScope);
+
+    const agentTools = tools.map(t => ({
+      name: t.name,
+      description: t.description,
+      inputSchema: t.inputSchema as Record<string, unknown>,
+    }));
+
+    const messages: ToolCallMessage[] = [{ role: 'user', content: input }];
+    const MAX_ROUNDS = 10;
+    let finalText = '';
+
+    for (let round = 0; round < MAX_ROUNDS; round++) {
+      const turn = await provider.completeWithTools(messages, agentTools, options);
+
+      if (turn.stopReason === 'end_turn' || turn.toolUses.length === 0) {
+        finalText = turn.textContent;
+        break;
+      }
+
+      // Append assistant turn with tool uses
+      messages.push({ role: 'assistant', content: turn.textContent, toolUses: turn.toolUses });
+
+      // Execute each tool call and collect results
+      const toolResults: AgentToolResult[] = [];
+      for (const toolUse of turn.toolUses) {
+        try {
+          const result = await this.mcpGateway!.invokeAgentTool(toolUse.name, toolUse.input, credScope);
+          toolResults.push({
+            toolUseId: toolUse.id,
+            content: JSON.stringify(result),
+          });
+        } catch (err: any) {
+          console.error(`[AgentLoop] Tool call failed: ${toolUse.name}`, err.message);
+          toolResults.push({
+            toolUseId: toolUse.id,
+            content: JSON.stringify({ error: err.message }),
+          });
+        }
+      }
+
+      messages.push({ role: 'user', toolResults });
+    }
+
+    if (!finalText) {
+      finalText = 'I was unable to complete the analysis within the allowed number of steps.';
+    }
+
+    return {
+      response: finalText,
+      provider: routing.providerId,
+    };
   }
 
   private async determineRouting(

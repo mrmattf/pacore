@@ -6,12 +6,26 @@ import { MCPClient } from './mcp-client';
 import { CredentialManager, CredentialScope } from './credential-manager';
 import { SkillRegistry, SkillScope } from '../skills/skill-registry';
 import { OrgManager } from '../organizations/org-manager';
+import { AdapterRegistry } from '../integrations/adapter-registry';
+
+export interface UserConnection {
+  id: string;
+  integrationKey: string;
+  displayName: string;
+}
 
 export interface MCPGatewayConfig {
   mcpRegistry: MCPRegistry;
   credentialManager: CredentialManager;
   skillRegistry: SkillRegistry;
   orgManager: OrgManager;
+  /** Registry of all built-in integration adapters (Shopify, Gorgias, etc.) */
+  adapterRegistry: AdapterRegistry;
+  /**
+   * Returns the active integration connections for a user/org scope.
+   * Used to determine which built-in adapter tools are available and to resolve credentials.
+   */
+  listConnections: (scope: CredentialScope) => Promise<UserConnection[]>;
 }
 
 interface AuthenticatedRequest extends Request {
@@ -21,9 +35,11 @@ interface AuthenticatedRequest extends Request {
 /**
  * PA Core MCP Gateway
  *
- * Exposes a single MCP endpoint that aggregates tools from all MCP servers
- * belonging to the authenticated tenant's active skills. Each tool is namespaced
- * as `{server_slug}__{tool_name}` to avoid collisions.
+ * Exposes a single MCP endpoint that aggregates tools from:
+ * 1. Externally registered MCP servers (user/org-scoped)
+ * 2. Built-in integration adapters (Shopify, Gorgias, etc.) — read-only agent tools only
+ *
+ * Each tool is namespaced as `{server_slug}__{tool_name}` to avoid collisions.
  *
  * Meta-tools (list_skills, activate_skill, deactivate_skill) are always included
  * so AI clients can discover and manage skills without leaving the MCP session.
@@ -46,6 +62,31 @@ export class MCPGateway {
   getRouter(): Router {
     return this.router;
   }
+
+  // ---------------------------------------------------------------------------
+  // Public API for in-process agent loops (bypasses HTTP layer)
+  // ---------------------------------------------------------------------------
+
+  /** Returns all agent-available tools for the given scope. Used by the orchestrator agent loop. */
+  async getAgentTools(scope: CredentialScope): Promise<MCPTool[]> {
+    const userId = scope.type === 'user' ? scope.userId : undefined;
+    const orgId  = scope.type === 'org'  ? scope.orgId  : undefined;
+    return this.buildToolList(scope, userId, orgId);
+  }
+
+  /** Calls a tool for the given scope. Used by the orchestrator agent loop. */
+  async invokeAgentTool(
+    toolName: string,
+    args: Record<string, unknown>,
+    scope: CredentialScope
+  ): Promise<unknown> {
+    const userId = scope.type === 'user' ? scope.userId : '';
+    return this.dispatchToolCall(userId, toolName, args, scope);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Routes
+  // ---------------------------------------------------------------------------
 
   private setupRoutes(): void {
     // GET: capability discovery for Streamable HTTP clients
@@ -130,6 +171,7 @@ export class MCPGateway {
 
       try {
         let result: unknown;
+        const { credScope } = await this.resolveScope(userId, req);
 
         switch (method) {
           case 'initialize':
@@ -143,13 +185,13 @@ export class MCPGateway {
             result = {};
             break;
           case 'tools/list':
-            result = { tools: await this.listTools(userId, req) };
+            result = { tools: await this.buildToolList(credScope, userId) };
             break;
           case 'tools/call': {
             const toolName = params?.name as string;
             const toolArgs = (params?.arguments ?? {}) as Record<string, unknown>;
             if (!toolName) throw new Error('tools/call requires params.name');
-            const toolData = await this.callTool(userId, toolName, toolArgs, req);
+            const toolData = await this.dispatchToolCall(userId, toolName, toolArgs, credScope);
             result = { content: [{ type: 'text', text: JSON.stringify(toolData) }] };
             break;
           }
@@ -182,6 +224,7 @@ export class MCPGateway {
 
       try {
         let result: unknown;
+        const { credScope } = await this.resolveScope(userId, req);
 
         switch (method) {
           case 'initialize':
@@ -193,12 +236,11 @@ export class MCPGateway {
             break;
 
           case 'notifications/initialized':
-            // Client acknowledgement — no result needed
             result = {};
             break;
 
           case 'tools/list':
-            result = { tools: await this.listTools(userId, req) };
+            result = { tools: await this.buildToolList(credScope, userId) };
             break;
 
           case 'tools/call': {
@@ -207,7 +249,7 @@ export class MCPGateway {
             if (!toolName) {
               throw new Error('tools/call requires params.name');
             }
-            const toolData = await this.callTool(userId, toolName, toolArgs, req);
+            const toolData = await this.dispatchToolCall(userId, toolName, toolArgs, credScope);
             result = { content: [{ type: 'text', text: JSON.stringify(toolData) }] };
             break;
           }
@@ -262,16 +304,20 @@ export class MCPGateway {
   }
 
   // ---------------------------------------------------------------------------
-  // tools/list
+  // tools/list (core logic, reused by HTTP and in-process paths)
   // ---------------------------------------------------------------------------
 
-  private async listTools(userId: string, req: Request): Promise<MCPTool[]> {
-    const { skillScope } = await this.resolveScope(userId, req);
+  private async buildToolList(
+    credScope: CredentialScope,
+    userId?: string,
+    _orgId?: string
+  ): Promise<MCPTool[]> {
+    const effectiveUserId = userId ?? (credScope.type === 'user' ? credScope.userId : '');
 
     // Determine which tool chains are active for this tenant
-    const activeSkills = skillScope.type === 'org'
-      ? await this.config.skillRegistry.listOrgSkills(skillScope.orgId)
-      : await this.config.skillRegistry.listUserSkills(userId);
+    const activeSkills = credScope.type === 'org'
+      ? await this.config.skillRegistry.listOrgSkills(credScope.orgId)
+      : await this.config.skillRegistry.listUserSkills(effectiveUserId);
 
     const activeToolChains = new Set<string>();
     for (const userSkill of activeSkills) {
@@ -281,7 +327,7 @@ export class MCPGateway {
     }
 
     // All MCP servers visible to this user (personal + org-shared)
-    const servers = await this.config.mcpRegistry.listServersForUser(userId);
+    const servers = await this.config.mcpRegistry.listServersForUser(effectiveUserId);
 
     // Filter to servers whose categories or name match an active skill's tool chain
     const activeServers = activeToolChains.size > 0
@@ -297,7 +343,7 @@ export class MCPGateway {
       try {
         const serverCred: CredentialScope = server.orgId
           ? { type: 'org', orgId: server.orgId }
-          : { type: 'user', userId };
+          : { type: 'user', userId: effectiveUserId };
 
         const creds = await this.config.credentialManager.getCredentials(serverCred, server.id);
         const client = new MCPClient(server, creds ?? undefined);
@@ -316,43 +362,78 @@ export class MCPGateway {
       }
     }
 
+    // Built-in adapter agent tools — read-only capabilities from configured connections
+    const connections = await this.config.listConnections(credScope);
+    const seenIntegrations = new Set<string>();
+
+    for (const conn of connections) {
+      if (seenIntegrations.has(conn.integrationKey)) continue; // first connection wins
+      const adapter = this.config.adapterRegistry.getAdapter(conn.integrationKey);
+      if (!adapter?.agentTools?.length) continue;
+
+      seenIntegrations.add(conn.integrationKey);
+      for (const toolDef of adapter.agentTools) {
+        aggregatedTools.push({
+          name: `${conn.integrationKey}__${toolDef.capability}`,
+          description: `[${conn.displayName}] ${toolDef.description}`,
+          inputSchema: toolDef.inputSchema as any,
+        });
+      }
+    }
+
     // Meta-tools always come first
     return [...this.buildMetaTools(), ...aggregatedTools];
   }
 
   // ---------------------------------------------------------------------------
-  // tools/call
+  // tools/call (core logic, reused by HTTP and in-process paths)
   // ---------------------------------------------------------------------------
 
-  private async callTool(
+  private async dispatchToolCall(
     userId: string,
     toolName: string,
     args: Record<string, unknown>,
-    req: Request
+    credScope: CredentialScope
   ): Promise<unknown> {
     // Meta-tools
     switch (toolName) {
       case 'list_skills':
-        return this.metaListSkills(userId, req);
+        return this.metaListSkills(userId, credScope);
       case 'activate_skill':
-        return this.metaActivateSkill(userId, args.skill_id as string, req);
+        return this.metaActivateSkill(userId, args.skill_id as string, credScope);
       case 'deactivate_skill':
         return this.metaDeactivateSkill(args.user_skill_id as string);
     }
 
-    // Namespaced tool: serverSlug__toolName
+    // Namespaced tool: integrationKey__capability or serverSlug__toolName
     const sepIdx = toolName.indexOf('__');
     if (sepIdx === -1) {
       throw new Error(`Unknown tool: "${toolName}". Use list_skills to see available tools.`);
     }
 
-    const serverSlug = toolName.slice(0, sepIdx);
-    const actualToolName = toolName.slice(sepIdx + 2);
+    const prefix = toolName.slice(0, sepIdx);
+    const actualName = toolName.slice(sepIdx + 2);
 
+    // Try built-in adapter first (e.g., shopify__get_order, gorgias__list_recent_tickets)
+    const adapter = this.config.adapterRegistry.getAdapter(prefix);
+    if (adapter?.agentTools?.some(t => t.capability === actualName)) {
+      const connections = await this.config.listConnections(credScope);
+      const conn = connections.find(c => c.integrationKey === prefix);
+      if (!conn) {
+        throw new Error(`No ${prefix} connection configured. Add one via the Integrations page.`);
+      }
+      const creds = await this.config.credentialManager.getCredentials(credScope, conn.id);
+      if (!creds) {
+        throw new Error(`Credentials not found for ${prefix} connection "${conn.displayName}"`);
+      }
+      return this.config.adapterRegistry.invokeCapability(prefix, actualName, args, creds as Record<string, unknown>);
+    }
+
+    // Fall through to registered external MCP servers
     const servers = await this.config.mcpRegistry.listServersForUser(userId);
-    const server = servers.find(s => slugify(s.name) === serverSlug);
+    const server = servers.find(s => slugify(s.name) === prefix);
     if (!server) {
-      throw new Error(`No MCP server found for tool namespace "${serverSlug}"`);
+      throw new Error(`No MCP server found for tool namespace "${prefix}"`);
     }
 
     const serverCred: CredentialScope = server.orgId
@@ -364,7 +445,7 @@ export class MCPGateway {
 
     const result = await client.callTool({
       serverId: server.id,
-      toolName: actualToolName,
+      toolName: actualName,
       parameters: args,
     });
 
@@ -379,12 +460,10 @@ export class MCPGateway {
   // Meta-tool implementations
   // ---------------------------------------------------------------------------
 
-  private async metaListSkills(userId: string, req: Request): Promise<unknown> {
-    const { skillScope } = await this.resolveScope(userId, req);
-
+  private async metaListSkills(userId: string, credScope: CredentialScope): Promise<unknown> {
     const catalog = this.config.skillRegistry.listSkills();
-    const active = skillScope.type === 'org'
-      ? await this.config.skillRegistry.listOrgSkills(skillScope.orgId)
+    const active = credScope.type === 'org'
+      ? await this.config.skillRegistry.listOrgSkills(credScope.orgId)
       : await this.config.skillRegistry.listUserSkills(userId);
 
     const activeBySkillId = new Map(active.map(s => [s.skillId, s]));
@@ -403,10 +482,12 @@ export class MCPGateway {
   private async metaActivateSkill(
     userId: string,
     skillId: string,
-    req: Request
+    credScope: CredentialScope
   ): Promise<unknown> {
     if (!skillId) throw new Error('activate_skill requires skill_id');
-    const { skillScope } = await this.resolveScope(userId, req);
+    const skillScope: SkillScope = credScope.type === 'org'
+      ? { type: 'org', orgId: credScope.orgId }
+      : { type: 'user', userId };
     const userSkill = await this.config.skillRegistry.activateSkill(skillScope, skillId);
     return { success: true, userSkill };
   }

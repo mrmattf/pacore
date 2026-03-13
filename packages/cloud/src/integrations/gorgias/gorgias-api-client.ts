@@ -81,6 +81,54 @@ export class GorgiasApiClient {
     };
   }
 
+  /**
+   * List recent tickets with tag and channel info.
+   * Used by agents for Skills Assessment (Path E) — read-only.
+   */
+  async listRecentTickets(limit = 50, status?: string): Promise<Array<{
+    id: number;
+    subject: string;
+    status: string;
+    channel: string;
+    tags: string[];
+    createdAt: string;
+    updatedAt: string;
+  }>> {
+    const params = new URLSearchParams({ limit: String(limit) });
+    if (status) params.set('status', status);
+
+    const response = await fetch(`${this.baseUrl}/tickets?${params}`, {
+      headers: { 'Authorization': this.authHeader },
+    });
+
+    if (!response.ok) {
+      const text = await response.text();
+      throw new Error(`Gorgias listRecentTickets failed (${response.status}): ${text}`);
+    }
+
+    const data = await response.json() as {
+      data: Array<{
+        id: number;
+        subject: string;
+        status: string;
+        channel: string;
+        tags: Array<{ name: string }>;
+        created_datetime: string;
+        updated_datetime: string;
+      }>;
+    };
+
+    return (data.data ?? []).map(t => ({
+      id: t.id,
+      subject: t.subject,
+      status: t.status,
+      channel: t.channel,
+      tags: (t.tags ?? []).map(tag => tag.name),
+      createdAt: t.created_datetime,
+      updatedAt: t.updated_datetime,
+    }));
+  }
+
   /** Test credentials by fetching account info. Throws if auth fails. */
   async testConnection(): Promise<{ accountName: string }> {
     const response = await fetch(`${this.baseUrl}/account`, {
