@@ -1,0 +1,68 @@
+# Dependencies (never needed for coding)
+node_modules/
+.pnp
+.pnp.js
+
+# Build output
+dist/
+build/
+.next/
+*.tsbuildinfo
+*.js.map
+*.css.map
+*.min.js
+*.min.css
+
+# Lock files (too large, Claude can't act on them)
+pnpm-lock.yaml
+package-lock.json
+yarn.lock
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# Environment files (security)
+.env
+.env.*
+
+# Coverage reports
+coverage/
+
+# Turbo / build caches
+.turbo/
+
+# OS artifacts
+.DS_Store
+Thumbs.db
+
+# Temp
+tmp/
+temp/
+
+# SECURITY: Secrets must not enter context
+docs/password/
+
+# Postman collections (large JSON, not source code)
+*.postman_collection.json
+*.postman_environment.json
+
+# Root-level standalone test scripts
+test-api.js
+test-orchestrator-workflow.js
+test-workflow-e2e.js
+
+# Archived / stale docs (excluded from context)
+docs/archive/
+
+# Binary / media assets
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.woff
+*.woff2
+*.ttf
+*.eot

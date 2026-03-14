@@ -11,78 +11,41 @@
 
 **When to write an ADR (proactively, during implementation):**
 - New pattern that applies across multiple systems (e.g., retry strategy, rendering strategy)
-- Decision that future contributors would otherwise re-debate (e.g., why plain-text not HTML)
+- Decision that future contributors would otherwise re-debate
 - Trade-off with a clear rejected alternative worth preserving
 - Checklist: does this touch ≥2 packages AND encode a non-obvious design choice? → write ADR
-- ADRs live in `docs/decisions/`, numbered sequentially; update the index in `docs/decisions/README.md`
+- ADRs live in `docs/decisions/`, numbered sequentially; update `docs/decisions/README.md`
+
+**On feature completion (before committing):**
+1. Update `docs/SESSION_LOG.md` — 1-2 sentences max
+2. Update "Current Feature State" checklist below
+3. Update `docs/solutions/README.md` if a new skill type was added
+4. Ask: does this touch ≥2 packages with a non-obvious design choice? → Write ADR
+5. Move any planning docs (`docs/*.md` used as plans) to `docs/archive/`
 
 **Prompts the user can say:**
 - "Update session log" → Add current work to SESSION_LOG.md
 - "Clean up docs" → Remove stale entries, consolidate
 - "Skip docs" → Don't update any documentation this session
 - "Write ADR" → Create a new ADR for the current architectural decision
+- `/update-docs` → Run the feature completion checklist above
 
 ## Project Overview
 
-PA Core is a personal AI assistant platform that orchestrates multiple LLM providers, MCP (Model Context Protocol) servers, and automated workflows. It's designed for both individual users and enterprise deployment.
+PA Core is a Personal Assistants platform — AI-powered assistants that automate tasks, manage business operations, and integrate with tools. Architecture is agent-first: agents decide WHEN to act, tool chains execute HOW (deterministic). No workflow engine — skills + tool chains replace it.
 
-## Product Strategy
+**Key concepts:** Skills (portable capability definitions), BYOK multi-provider LLM, Edge Agent (local execution), Orchestrator business model (we own platform + templates; customers own config + data).
 
-**PA Core is a Personal Assistants platform** - AI-powered assistants that help users automate tasks, manage business operations, and integrate with their tools.
-
-### Agent-First Architecture
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│  CUSTOMER TIERS                                                  │
-│  ┌────────┐ ┌────────┐ ┌────────────┐ ┌─────────────────────┐   │
-│  │ Tier 1 │ │ Tier 2 │ │ Tier 3     │ │ Tier 4              │   │
-│  │ Skills │ │ Compose│ │ Custom Code│ │ Full Agent Mode     │   │
-│  │ (use)  │ │ (build)│ │ (AI-gen)   │ │ (autonomous)        │   │
-│  └────────┘ └────────┘ └────────────┘ └─────────────────────┘   │
-├─────────────────────────────────────────────────────────────────┤
-│  PLATFORM INFRASTRUCTURE (Tier 0)                                │
-│  ┌─────────────┐ ┌─────────────┐ ┌─────────────┐ ┌───────────┐  │
-│  │ Tool Chains │ │ MCP Tools   │ │ Agent       │ │ Validators│  │
-│  │(deterministic)│(integrations)│ │ Runtime     │ │           │  │
-│  └─────────────┘ └─────────────┘ └─────────────┘ └───────────┘  │
-├─────────────────────────────────────────────────────────────────┤
-│  EXECUTION: Cloud Runtime ◄───────────────► Edge Agent          │
-├─────────────────────────────────────────────────────────────────┤
-│  INTEGRATIONS: Shopify │ Gorgias │ Gmail │ Slack │ ...          │
-└─────────────────────────────────────────────────────────────────┘
-```
-
-### Key Concepts
-
-- **Agent-First**: Agents decide WHEN to act, tool chains execute HOW (deterministic)
-- **No Workflow Engine**: We don't build a visual workflow builder - tool chains provide determinism
-- **Skills**: Portable, reusable capability definitions (like "Backorder Detection")
-- **BYOK**: Multi-provider AI support (Claude, OpenAI, Azure, Ollama)
-- **Edge Agent**: Local execution for privacy, desktop access, local LLMs
-- **Orchestrator Business Model**: We own platform + solution templates; customers own configuration + data. See [Product Strategy](docs/product-strategy.md#business-model-orchestrator) for IP ownership.
-
-### Solution Development Lifecycle
-
-1. **Standalone MVP** - Validate concept, build tool chains and MCP tools
-2. **AI Agent Layer** - Add intelligent decision-making
-3. **Skill Packaging** - Multi-tenant deployment, customer configuration
-
-See detailed documentation:
-- [Product Strategy](docs/product-strategy.md) - Vision, architecture, business model
-- [AI Agents](docs/ai-agents.md) - Agent patterns and MCP integration
-- [Solutions Index](docs/solutions/README.md) - Available solutions
+See: [Product Strategy](docs/product-strategy.md) · [AI Agents](docs/ai-agents.md) · [Solutions](docs/solutions/README.md) · [ADRs](docs/decisions/README.md)
 
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────┐
-│                         PA CORE CLOUD                            │
-├─────────────────────────────────────────────────────────────────┤
-│  packages/web          │  React frontend (Vite + TypeScript)    │
-│  packages/cloud        │  Express backend + WebSocket           │
-│  packages/core         │  Shared types and utilities            │
-└─────────────────────────────────────────────────────────────────┘
+packages/web          React frontend (Vite + TypeScript)
+packages/cloud        Express backend + WebSocket
+packages/core         Shared types and utilities
+packages/agent        On-premise edge agent
+packages/shopify-backorder  Customer deliverable (Yota) — standalone Railway deploy
 ```
 
 ### Key Components
@@ -131,12 +94,10 @@ User Message → API Gateway → Orchestrator → LLM Provider → Response
 ### Planned
 - [ ] Agent layer for Tier 2 skills (LLM-driven decision-making on top of tool chains)
 - [ ] Chat channel integrations (WhatsApp, Telegram, Slack)
-- [ ] Voice interface
-- [ ] Multi-tenant enterprise features
 
 ## Key Files
 
-### Backend (packages/cloud)
+### Backend (`packages/cloud`) — see also [packages/cloud/CLAUDE.md](packages/cloud/CLAUDE.md)
 - `src/api/gateway.ts` - All REST endpoints and webhook entry points
 - `src/skills/skill-dispatcher.ts` - Routes webhook events to skill tool chains
 - `src/skills/skill-template-registry.ts` - Skill catalog and template registry
@@ -144,85 +105,28 @@ User Message → API Gateway → Orchestrator → LLM Provider → Response
 - `src/skills/execute-escalation.ts` - Shared escalation action handler
 - `src/utils/retry.ts` - Exponential backoff retry utility
 - `src/mcp/credential-manager.ts` - Encrypted credential storage
-- `src/mcp/mcp-registry.ts` - MCP server management
-- `src/orchestration/index.ts` - LLM orchestration (chat/agent mode)
 
-### Frontend (packages/web)
-- `src/pages/ChatPage.tsx` - Main chat interface
+### Frontend (`packages/web`) — see also [packages/web/CLAUDE.md](packages/web/CLAUDE.md)
 - `src/pages/SkillsPage.tsx` - Browse and activate skills
 - `src/pages/SkillConfigPage.tsx` - Configure slot connections + field overrides
 - `src/pages/TemplatePickerPage.tsx` - Template picker for a skill type
 - `src/pages/BillingPage.tsx` - Usage and execution history
 
-### Shared (packages/core)
+### Shared (`packages/core`)
 - `src/types/policy.ts` - ECA action types (invoke, skip, escalate + targetSlot)
 - `src/types/skill-template.ts` - SkillTemplate, SkillSlot, EditableField interfaces
 - `src/types/skill.ts` - UserSkill, SkillDefinition
-- `src/llm/` - LLM provider interfaces and registry
 
 ### Standalone Services
-- **packages/shopify-backorder/** - Customer integration service (has its own [CLAUDE.md](packages/shopify-backorder/CLAUDE.md))
-  - Shopify order webhook processing
-  - Backorder detection with inventory checks
-  - Gorgias ticket creation
-  - MCP tools for AI agent integration
-  - Deploys independently to Railway
+- **packages/shopify-backorder/** - Customer integration (has its own [CLAUDE.md](packages/shopify-backorder/CLAUDE.md))
 
 ## Database Schema
 
-```sql
--- Identity
-users (id, email, password_hash)
-organizations (id, name)
-org_members (org_id, user_id, role)
-
--- MCP
-mcp_servers (id, user_id, name, server_type, url, capabilities JSONB)
-mcp_credentials (user_id, server_id, encrypted_value, iv, auth_tag)
-
--- Integrations
-integration_connections (id, org_id, integration_key, name, encrypted_creds, iv, auth_tag)
-
--- Skills
-user_skills (id, user_id, template_id, status, configuration JSONB)
-skill_triggers (id, user_skill_id, type, webhook_token)
-skill_executions (id, user_skill_id, status, result JSONB, idempotency_key TEXT)
-
--- Auth
-refresh_tokens (token_hash, user_id, expires_at, idle_expires_at)
-
--- Legacy
-workflows (id, user_id, name, description, category, nodes JSONB)
-workflow_executions (id, workflow_id, user_id, status, execution_log JSONB)
-```
+See actual migration files in `packages/cloud/src/db/` for current schema (the schema below may be outdated — verify against DB before relying on it).
 
 ## API Endpoints
 
-### Chat
-- `POST /v1/chat` - Send message, get AI response
-- `WS /ws` - Real-time chat via WebSocket
-
-### MCP Servers
-- `GET /v1/mcp/servers` - List MCP servers
-- `POST /v1/mcp/servers` - Register MCP server
-- `GET /v1/mcp/servers/:id/tools` - Get server's tools
-- `POST /v1/mcp/servers/:id/execute` - Execute tool
-
-### Skills
-- `GET /v1/skill-types` - List available skill types with template counts
-- `GET /v1/skill-types/:typeId/templates` - Templates for a skill type
-- `GET /v1/me/skills` - User's activated skills
-- `POST /v1/me/skills/:typeId/activate` - Activate a skill (creates user_skill record)
-- `PUT /v1/me/skills/:id/configure` - Save slot connections + field overrides
-- `PUT /v1/me/skills/:id/pause` / `resume` - Pause / resume a skill
-- `DELETE /v1/me/skills/:id` - Remove skill
-- `GET /v1/me/skills/:id/executions` - Recent execution history
-
-### Integrations & Webhooks
-- `GET /v1/integrations/:key/fields` - Credential fields for an integration
-- `GET /v1/integrations/:key/connections` - List saved connections
-- `POST /v1/integrations/:key/connections` - Save a new connection
-- `POST /v1/triggers/webhook/:token` - Inbound webhook entry point (async, returns 200 immediately)
+See [API.md](API.md) for full endpoint reference and design conventions.
 
 ## Development Commands
 
@@ -236,8 +140,8 @@ npm run dev
 # Start frontend (from packages/web)
 npm run dev
 
-# Build all packages
-npm run build (from root)
+# Build all packages (from root)
+npm run build
 
 # Type check
 npm run typecheck
@@ -259,51 +163,11 @@ OLLAMA_BASE_URL=http://localhost:11434
 PORT=3001
 ```
 
-## Architecture Decisions
-
-### Why MCP over custom integrations?
-MCP is an emerging standard for AI-tool communication. Using MCP means:
-- Reuse existing MCP servers (Gmail, GitHub, etc.)
-- Standard protocol for tool schemas
-- Community ecosystem of tools
-
-### Why multi-provider LLM support?
-- Cost optimization (use cheaper models for simple tasks)
-- Redundancy (fallback if one provider is down)
-- Privacy (use local Ollama for sensitive data)
-
-## Common Patterns
-
-### Adding a new skill type
-1. Add `SkillTemplate` variants in `packages/cloud/src/skills/templates/<skill-type>/index.ts`
-2. Create tool chain in `packages/cloud/src/chains/<skill-type>.ts`
-3. Register templates in `skill-template-registry.ts`
-4. Add dispatch case in `skill-dispatcher.ts`
-5. Add `SlotAdapter`(s) in `packages/cloud/src/integrations/<integration>/`
-
-### Adding a new integration adapter
-1. Implement `SlotAdapter` interface in `packages/cloud/src/integrations/<key>/`
-2. Register in the `AdapterRegistry` setup in `gateway.ts`
-3. Add credential fields (`credentialFields`, `setupGuide`) for the Connect UI
-
-### Adding a new MCP server integration
-1. Register via API or UI at `/mcp`
-2. Server's tools auto-discovered via MCP protocol
-3. Tools available to the AI orchestrator for chat/agent interactions
-
-### Adding a new LLM provider
-1. Implement `LLMProvider` interface in `packages/core/src/llm/`
-2. Register in `LLMProviderRegistry`
-3. Add to provider selector UI
-
 ## Testing
 
 ```bash
-# Run tests
-npm test
-
-# Test specific package
-cd packages/cloud && npm test
+npm test                          # Run all tests
+cd packages/cloud && npm test     # Test specific package
 ```
 
 ## Troubleshooting
@@ -312,7 +176,3 @@ cd packages/cloud && npm test
 - Verify server is running and accessible
 - Check credentials are configured
 - Look at `[MCPClient]` logs for protocol errors
-
-## Contact
-
-Project maintained by [Your Name]

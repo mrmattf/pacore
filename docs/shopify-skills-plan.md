@@ -1,5 +1,8 @@
 # Shopify Skills Roadmap — PA Core
 
+> **Status: Implementation Complete (March 2026)** — All 4 skill types (backorder-notification, low-stock-impact, high-risk-order-response, delivery-exception-alert) are built and deployed.
+> The market research and competitive analysis below remains valid strategic context.
+
 ## Market Validation Summary
 
 Research confirms Shopify merchants have a universal automation problem: **every existing tool is trigger → template**. A data event fires, a pre-written message goes out with variable substitution. No tool reads the full context of an order, customer history, and inventory situation to decide what the right action and message actually is. That is the PA Core differentiator.

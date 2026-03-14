@@ -15,11 +15,13 @@ This file contains:
 
 - [Product Strategy](docs/product-strategy.md)
 - [AI Agents](docs/ai-agents.md)
-- [Workflow MCP](docs/workflow-mcp.md)
 - [Solutions Index](docs/solutions/README.md)
+- [API Design Conventions](API.md)
 
 ## Package Documentation
 
+- [cloud backend](packages/cloud/CLAUDE.md)
+- [web frontend](packages/web/CLAUDE.md)
 - [shopify-backorder](packages/shopify-backorder/CLAUDE.md)
 
 ---
