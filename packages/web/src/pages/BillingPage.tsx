@@ -4,7 +4,7 @@ import { useBilling, PlanTier, LimitSummaryItem } from '../hooks/useBilling';
 import { SkillExecution, ExecutionStep } from '../hooks/useSkillExecutions';
 import { apiFetch } from '../services/auth';
 import { useUserSkills, UserSkill } from '../hooks/useUserSkills';
-import { useContextStore } from '../store/contextStore';
+import { useContextStore, skillsBasePath } from '../store/contextStore';
 
 // ─── Usage bar ───────────────────────────────────────────────────────────────
 function UsageBar({
@@ -61,9 +61,12 @@ const STEP_COLORS: Record<ExecutionStep['status'], string> = {
 
 function HtmlPreview({ html }: { html: string }) {
   return (
-    <div
-      className="p-3 bg-white border rounded text-xs overflow-auto max-h-64 prose prose-xs max-w-none"
-      dangerouslySetInnerHTML={{ __html: html }}
+    <iframe
+      srcDoc={html}
+      sandbox=""
+      className="w-full border rounded bg-white"
+      style={{ height: '200px' }}
+      title="Email preview"
     />
   );
 }
@@ -188,6 +191,7 @@ const SKILL_META: Record<string, {
 // ─── SkillCard ───────────────────────────────────────────────────────────────
 function SkillCard({ userSkill, currentPlan }: { userSkill: UserSkill; currentPlan: PlanTier }) {
   const meta = SKILL_META[userSkill.skillId];
+  const { context } = useContextStore();
   const [executions, setExecutions] = useState<SkillExecution[]>([]);
   const [execLoading, setExecLoading] = useState(true);
   const [expanded, setExpanded] = useState<string | null>(null);
@@ -201,9 +205,10 @@ function SkillCard({ userSkill, currentPlan }: { userSkill: UserSkill; currentPl
 
   async function togglePause() {
     setToggling(true);
+    const base = skillsBasePath(context);
     try {
       const action = status === 'active' ? 'pause' : 'resume';
-      await apiFetch(`/v1/me/skills/${userSkill.id}/${action}`, { method: 'PUT' });
+      await apiFetch(`${base}/${userSkill.id}/${action}`, { method: 'PUT' });
       setStatus(status === 'active' ? 'paused' : 'active');
     } catch {
       // ignore — button reverts to previous state
@@ -214,9 +219,10 @@ function SkillCard({ userSkill, currentPlan }: { userSkill: UserSkill; currentPl
 
   async function toggleTestMode() {
     setTestModeToggling(true);
+    const base = skillsBasePath(context);
     const newTestMode = !testMode;
     try {
-      await apiFetch(`/v1/me/skills/${userSkill.id}/configure`, {
+      await apiFetch(`${base}/${userSkill.id}/configure`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -233,12 +239,13 @@ function SkillCard({ userSkill, currentPlan }: { userSkill: UserSkill; currentPl
   }
 
   useEffect(() => {
-    apiFetch(`/v1/me/skills/${userSkill.id}/executions?limit=5`)
+    const base = skillsBasePath(context);
+    apiFetch(`${base}/${userSkill.id}/executions?limit=5`)
       .then(r => r.json())
       .then(setExecutions)
       .catch(() => {})
       .finally(() => setExecLoading(false));
-  }, [userSkill.id]);
+  }, [userSkill.id, context]);
 
   if (!meta) return null;
 

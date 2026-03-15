@@ -10,7 +10,7 @@ interface ContextSwitcherProps {
 
 export function ContextSwitcher({ onManageOrg }: ContextSwitcherProps) {
   const { context, setContext } = useContextStore();
-  const { orgs, loading: orgsLoading, refresh: refreshOrgs } = useOrgs();
+  const { orgs, loading: orgsLoading, error: orgsError, refresh: refreshOrgs } = useOrgs();
   const user = useAuthStore((s) => s.user);
 
   const [open, setOpen] = useState(false);
@@ -42,9 +42,14 @@ export function ContextSwitcher({ onManageOrg }: ContextSwitcherProps) {
       const member = orgData.members.find((m) => m.userId === user?.id);
       const role: OrgRole = (member?.role as OrgRole) ?? 'member';
       setContext({ type: 'org', orgId, orgName, role });
-    } catch {
-      // Fall back to member role if fetch fails
-      setContext({ type: 'org', orgId, orgName, role: 'member' });
+    } catch (e: any) {
+      if (e.message?.includes('403') || e.message?.includes('member')) {
+        // No longer a member — stay on current context, refresh org list
+        await refreshOrgs();
+      } else {
+        // Unknown error — fall back gracefully with member role
+        setContext({ type: 'org', orgId, orgName, role: 'member' });
+      }
     } finally {
       setSwitching(false);
     }
@@ -87,9 +92,6 @@ export function ContextSwitcher({ onManageOrg }: ContextSwitcherProps) {
           <Building2 size={14} className="text-blue-500" />
         )}
         <span className="max-w-[160px] truncate">{label}</span>
-        {context.type === 'org' && (
-          <span className="text-xs text-gray-400 font-normal">{context.role}</span>
-        )}
         <ChevronDown size={12} className="text-gray-400 ml-0.5" />
       </button>
 
@@ -124,6 +126,12 @@ export function ContextSwitcher({ onManageOrg }: ContextSwitcherProps) {
                 {orgsLoading && (
                   <div className="flex items-center gap-2 px-3 py-2 text-sm text-gray-400">
                     <Loader2 size={13} className="animate-spin" /> Loading…
+                  </div>
+                )}
+                {orgsError && !orgsLoading && (
+                  <div className="flex items-center justify-between px-3 py-2">
+                    <span className="text-xs text-red-500">{orgsError}</span>
+                    <button onClick={refreshOrgs} className="text-xs text-blue-500 hover:underline ml-2">Retry</button>
                   </div>
                 )}
                 {orgs.map((org) => {

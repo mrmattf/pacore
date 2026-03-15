@@ -24,15 +24,18 @@ const ROLE_LABELS: Record<string, string> = {
 
 interface OrgPanelProps {
   orgId: string;
-  isAdmin: boolean;
   onClose: () => void;
 }
 
-export function OrgPanel({ orgId, isAdmin, onClose }: OrgPanelProps) {
+export function OrgPanel({ orgId, onClose }: OrgPanelProps) {
   const currentUser = useAuthStore((s) => s.user);
   const [org, setOrg] = useState<OrgWithMembers | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Derived from fresh server response — never from localStorage
+  const [isAdmin, setIsAdmin] = useState(false);
+  // True while any mutation + reload is in flight — locks all inputs
+  const [mutating, setMutating] = useState(false);
 
   // Invite form
   const [inviteUserId, setInviteUserId] = useState('');
@@ -49,6 +52,9 @@ export function OrgPanel({ orgId, isAdmin, onClose }: OrgPanelProps) {
     try {
       const data = await fetchOrgWithMembers(orgId);
       setOrg(data);
+      // Derive admin status from the authoritative server response
+      const self = data.members.find((m) => m.userId === currentUser?.id);
+      setIsAdmin(self?.role === 'admin');
     } catch (e: any) {
       setError(e.message);
     } finally {
@@ -62,6 +68,7 @@ export function OrgPanel({ orgId, isAdmin, onClose }: OrgPanelProps) {
     const userId = inviteUserId.trim();
     if (!userId) return;
     setInviting(true);
+    setMutating(true);
     setInviteError(null);
     try {
       await addOrgMember(orgId, userId, inviteRole);
@@ -72,11 +79,13 @@ export function OrgPanel({ orgId, isAdmin, onClose }: OrgPanelProps) {
       setInviteError(e.message);
     } finally {
       setInviting(false);
+      setMutating(false);
     }
   }
 
   async function handleRoleChange(member: OrgMember, newRole: string) {
     setActionLoading(member.id);
+    setMutating(true);
     try {
       await updateMemberRole(orgId, member.userId, newRole);
       await load();
@@ -84,11 +93,13 @@ export function OrgPanel({ orgId, isAdmin, onClose }: OrgPanelProps) {
       // ignore — role reverts on reload
     } finally {
       setActionLoading(null);
+      setMutating(false);
     }
   }
 
   async function handleRemove(member: OrgMember) {
     setActionLoading(member.id);
+    setMutating(true);
     try {
       await removeOrgMember(orgId, member.userId);
       await load();
@@ -96,6 +107,7 @@ export function OrgPanel({ orgId, isAdmin, onClose }: OrgPanelProps) {
       // ignore
     } finally {
       setActionLoading(null);
+      setMutating(false);
     }
   }
 
@@ -174,7 +186,7 @@ export function OrgPanel({ orgId, isAdmin, onClose }: OrgPanelProps) {
                         {isAdmin && !isSelf ? (
                           <select
                             value={member.role}
-                            disabled={busy}
+                            disabled={busy || mutating}
                             onChange={(e) => handleRoleChange(member, e.target.value)}
                             className="text-xs border border-gray-200 rounded px-1.5 py-1 text-gray-600 bg-white disabled:opacity-50"
                           >
@@ -193,7 +205,7 @@ export function OrgPanel({ orgId, isAdmin, onClose }: OrgPanelProps) {
                         {isAdmin && !isSelf && (
                           <button
                             onClick={() => handleRemove(member)}
-                            disabled={busy}
+                            disabled={busy || mutating}
                             title="Remove member"
                             className="p-1 text-gray-300 hover:text-red-500 hover:bg-red-50 rounded transition-colors disabled:opacity-50"
                           >
@@ -219,15 +231,17 @@ export function OrgPanel({ orgId, isAdmin, onClose }: OrgPanelProps) {
                       type="text"
                       placeholder="User ID"
                       value={inviteUserId}
+                      disabled={mutating}
                       onChange={(e) => setInviteUserId(e.target.value)}
                       onKeyDown={(e) => e.key === 'Enter' && handleInvite()}
-                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400"
+                      className="w-full px-3 py-2 text-sm border border-gray-200 rounded focus:outline-none focus:border-blue-400 disabled:opacity-50"
                     />
                     <div className="flex gap-2">
                       <select
                         value={inviteRole}
+                        disabled={mutating}
                         onChange={(e) => setInviteRole(e.target.value)}
-                        className="text-sm border border-gray-200 rounded px-2 py-1.5 text-gray-600 bg-white"
+                        className="text-sm border border-gray-200 rounded px-2 py-1.5 text-gray-600 bg-white disabled:opacity-50"
                       >
                         <option value="admin">Admin</option>
                         <option value="member">Member</option>
@@ -235,7 +249,7 @@ export function OrgPanel({ orgId, isAdmin, onClose }: OrgPanelProps) {
                       </select>
                       <button
                         onClick={handleInvite}
-                        disabled={inviting || !inviteUserId.trim()}
+                        disabled={inviting || mutating || !inviteUserId.trim()}
                         className="flex-1 flex items-center justify-center gap-1.5 px-3 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
                         {inviting

@@ -14,16 +14,23 @@ export interface OrgSummary {
 export function useOrgs() {
   const [orgs, setOrgs] = useState<OrgSummary[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   const token = useAuthStore((s) => s.token);
 
   const refresh = useCallback(async () => {
     if (!token) return;
     setLoading(true);
+    setError(null);
     try {
       const res = await apiFetch('/v1/organizations');
-      if (res.ok) setOrgs(await res.json());
+      if (res.ok) {
+        setOrgs(await res.json());
+      } else {
+        const body = await res.json().catch(() => ({}));
+        setError(body.error ?? 'Failed to load organizations');
+      }
     } catch {
-      // non-fatal
+      setError('Failed to load organizations');
     } finally {
       setLoading(false);
     }
@@ -31,7 +38,7 @@ export function useOrgs() {
 
   useEffect(() => { refresh(); }, [refresh]);
 
-  return { orgs, loading, refresh };
+  return { orgs, loading, error, refresh };
 }
 
 export interface OrgMember {

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Zap, ChevronRight, ThumbsUp } from 'lucide-react';
 import { apiFetch } from '../services/auth';
+import { useContextStore, skillsBasePath } from '../store/contextStore';
 
 interface SkillTemplate {
   id: string;
@@ -21,6 +22,7 @@ interface TemplateRequest {
 export function TemplatePickerPage() {
   const { typeId } = useParams<{ typeId: string }>();
   const navigate = useNavigate();
+  const { context } = useContextStore();
 
   const [templates, setTemplates] = useState<SkillTemplate[]>([]);
   const [requests, setRequests] = useState<TemplateRequest[]>([]);
@@ -64,9 +66,10 @@ export function TemplatePickerPage() {
 
   async function handleConfigure(template: SkillTemplate) {
     setActivating(template.id);
+    const base = skillsBasePath(context);
     try {
       // Create a user_skill record with pending status
-      const res = await apiFetch(`/v1/me/skills/${template.skillTypeId}/activate`, {
+      const res = await apiFetch(`${base}/${template.skillTypeId}/activate`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ templateId: template.id }),
@@ -80,7 +83,7 @@ export function TemplatePickerPage() {
 
       const userSkill = await res.json();
       // Pre-configure with template metadata so SkillsPage can display and navigate correctly
-      await apiFetch(`/v1/me/skills/${userSkill.id}/configure`, {
+      await apiFetch(`${base}/${userSkill.id}/configure`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({

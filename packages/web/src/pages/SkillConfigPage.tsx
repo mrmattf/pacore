@@ -3,6 +3,8 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, CheckCircle, Copy, Check, Zap } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { ConnectionPicker } from '../components/ConnectionPicker';
+import { useContextStore, skillsBasePath } from '../store/contextStore';
+import { apiFetch } from '../services/auth';
 
 interface SkillSlot {
   key: string;
@@ -45,6 +47,7 @@ export function SkillConfigPage() {
   }>();
   const navigate = useNavigate();
   const token = useAuthStore(s => s.token)!;
+  const { context } = useContextStore();
 
   const [template, setTemplate] = useState<SkillTemplate | null>(null);
   const [slotConnections, setSlotConnections] = useState<Record<string, string>>({});
@@ -67,9 +70,7 @@ export function SkillConfigPage() {
   }, [typeId, templateId, userSkillId, token]);
 
   async function loadTemplate() {
-    const res = await fetch(`/v1/skill-types/${typeId}/templates`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const res = await apiFetch(`/v1/skill-types/${typeId}/templates`);
     if (res.ok) {
       const templates: SkillTemplate[] = await res.json();
       const found = templates.find(t => t.id === templateId);
@@ -79,9 +80,8 @@ export function SkillConfigPage() {
 
   async function loadExistingConfig() {
     if (!userSkillId) return;
-    const res = await fetch(`/v1/me/skills/${userSkillId}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const base = skillsBasePath(context);
+    const res = await apiFetch(`${base}/${userSkillId}`);
     // If skill has existing config, pre-populate
     if (res.ok) {
       const skill = await res.json();
@@ -94,9 +94,8 @@ export function SkillConfigPage() {
 
   async function loadWebhook() {
     if (!userSkillId) return;
-    const res = await fetch(`/v1/me/skills/${userSkillId}/triggers`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
+    const base = skillsBasePath(context);
+    const res = await apiFetch(`${base}/${userSkillId}/triggers`);
     if (res.ok) {
       const triggers = await res.json();
       if (triggers.length > 0) {
@@ -109,10 +108,11 @@ export function SkillConfigPage() {
   async function saveConfig() {
     if (!userSkillId) return;
     setSaving(true);
+    const base = skillsBasePath(context);
     try {
-      await fetch(`/v1/me/skills/${userSkillId}/configure`, {
+      await apiFetch(`${base}/${userSkillId}/configure`, {
         method: 'PUT',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           templateId,
           slotConnections,
@@ -131,11 +131,13 @@ export function SkillConfigPage() {
     try {
       await saveConfig();
 
+      const base = skillsBasePath(context);
+
       // Create webhook trigger if not yet created
       if (!webhookUrl) {
-        const res = await fetch(`/v1/me/skills/${userSkillId}/triggers`, {
+        const res = await apiFetch(`${base}/${userSkillId}/triggers`, {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ verification: { type: 'none' } }),
         });
         if (res.ok) {
@@ -146,9 +148,9 @@ export function SkillConfigPage() {
       }
 
       // Mark skill as active
-      await fetch(`/v1/me/skills/${userSkillId}/configure`, {
+      await apiFetch(`${base}/${userSkillId}/configure`, {
         method: 'PUT',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           templateId,
           slotConnections,
@@ -171,9 +173,10 @@ export function SkillConfigPage() {
     setTestError(null);
     try {
       await saveConfig();
-      const res = await fetch(`/v1/me/skills/${userSkillId}/test-event`, {
+      const base = skillsBasePath(context);
+      const res = await apiFetch(`${base}/${userSkillId}/test-event`, {
         method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
       });
       const data = await res.json();

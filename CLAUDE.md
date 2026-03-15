@@ -88,6 +88,7 @@ User Message → API Gateway → Orchestrator → LLM Provider → Response
 - [x] Skill template customization: editable intro/body/closing/subject, templateVariables chips
 - [x] Execution history: API endpoints + per-skill view in BillingPage
 - [x] Assessment infrastructure: `pacore__list_skill_templates`, `pacore__list_connections`, `pacore__get_execution_log` MCP tools for operator-driven Skills Assessment workflow
+- [x] Frontend org context switching: personal/org context selector, role resolution, admin member management panel
 
 ### In Progress
 - [ ] Edge agent for local desktop integration

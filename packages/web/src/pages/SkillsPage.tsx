@@ -20,7 +20,7 @@ interface TemplateMeta { name: string; skillTypeId: string; }
 
 export function SkillsPage() {
   const navigate = useNavigate();
-  const { context } = useContextStore();
+  const { context, setContext } = useContextStore();
 
   const [skillTypes, setSkillTypes] = useState<SkillTypeCard[]>([]);
   const [mySkills, setMySkills] = useState<UserSkill[]>([]);
@@ -39,6 +39,13 @@ export function SkillsPage() {
         apiFetch('/v1/skill-types'),
         apiFetch(base),
       ]);
+
+      // Stale org context — user was removed from the org
+      if (myRes.status === 403 && context.type === 'org') {
+        setContext({ type: 'personal' });
+        return; // useEffect will re-run load() with personal context
+      }
+
       const types: SkillTypeCard[] = typesRes.ok ? await typesRes.json() : [];
       if (typesRes.ok) setSkillTypes(types);
       if (myRes.ok)   setMySkills(await myRes.json());
@@ -309,7 +316,6 @@ export function SkillsPage() {
       {orgPanelOpen && context.type === 'org' && (
         <OrgPanel
           orgId={context.orgId}
-          isAdmin={isOrgAdmin}
           onClose={() => setOrgPanelOpen(false)}
         />
       )}
