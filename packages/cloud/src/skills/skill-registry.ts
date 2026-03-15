@@ -316,6 +316,22 @@ export class SkillRegistry {
     }));
   }
 
+  async listAllOrgExecutions(orgId: string, limit = 20): Promise<(SkillExecution & { skillTypeId: string | null })[]> {
+    const result = await this.db.query(
+      `SELECT se.*, us.configuration->>'skillTypeId' as skill_type_id
+       FROM skill_executions se
+       JOIN user_skills us ON se.user_skill_id = us.id
+       WHERE us.org_id = $1
+       ORDER BY se.started_at DESC
+       LIMIT $2`,
+      [orgId, limit]
+    );
+    return result.rows.map(row => ({
+      ...this.rowToExecution(row),
+      skillTypeId: (row.skill_type_id as string | null) ?? null,
+    }));
+  }
+
   // ---- Mappers ----
 
   private rowToUserSkill(row: Record<string, unknown>): UserSkill {

@@ -5,6 +5,7 @@ Brief tracking of significant changes. Keep entries to 1-2 sentences each. Delet
 ---
 
 ## 2026-03 (recent sessions)
+- Yota Demo Readiness: Added `listAllOrgExecutions` and `listAllUserExecutions` to SkillRegistry, implemented three new `pacore__` MCP tools (`list_skill_templates`, `list_connections`, `get_execution_log`) for Assessment workflow infrastructure, wired SkillTemplateRegistry into MCPGateway, and created reusable customer onboarding and assessment report templates.
 - Operator Skill Discovery Phase 1 complete: Enhanced `gorgias__list_recent_tickets` with `days_back` parameter, created operator system prompt template (`docs/assessment-prompt-template.md`), and documented two-pass Assessment architecture in ADR-017 (gap clustering + activation gap detection).
 - `packages/shopify-backorder` marked deprecated/archived — Yota migrated from standalone Railway app to the Clarissi `backorder-notification` platform skill; updated root CLAUDE.md, README, solutions index, product strategy, and shopify-backorder CLAUDE.md to reflect archived status.
 

@@ -87,6 +87,7 @@ User Message → API Gateway → Orchestrator → LLM Provider → Response
 - [x] Platform reliability: retry (AdapterRegistry), deduplication (idempotency key), escalation routing
 - [x] Skill template customization: editable intro/body/closing/subject, templateVariables chips
 - [x] Execution history: API endpoints + per-skill view in BillingPage
+- [x] Assessment infrastructure: `pacore__list_skill_templates`, `pacore__list_connections`, `pacore__get_execution_log` MCP tools for operator-driven Skills Assessment workflow
 
 ### In Progress
 - [ ] Edge agent for local desktop integration

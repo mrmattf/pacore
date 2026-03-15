@@ -227,6 +227,7 @@ export class APIGateway {
       skillRegistry: this.config.skillRegistry,
       orgManager: this.config.orgManager,
       adapterRegistry: this.config.adapterRegistry ?? new AdapterRegistry(),
+      skillTemplateRegistry: this.config.skillTemplateRegistry,
       listConnections: async (scope: CredentialScope) => {
         const column = scope.type === 'org' ? 'org_id' : 'user_id';
         const value  = scope.type === 'org' ? scope.orgId : scope.userId;

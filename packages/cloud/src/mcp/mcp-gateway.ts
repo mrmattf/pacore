@@ -5,6 +5,7 @@ import { MCPRegistry } from './mcp-registry';
 import { MCPClient } from './mcp-client';
 import { CredentialManager, CredentialScope } from './credential-manager';
 import { SkillRegistry, SkillScope } from '../skills/skill-registry';
+import { SkillTemplateRegistry } from '../skills/skill-template-registry';
 import { OrgManager } from '../organizations/org-manager';
 import { AdapterRegistry } from '../integrations/adapter-registry';
 
@@ -26,6 +27,11 @@ export interface MCPGatewayConfig {
    * Used to determine which built-in adapter tools are available and to resolve credentials.
    */
   listConnections: (scope: CredentialScope) => Promise<UserConnection[]>;
+  /**
+   * Skill template catalog. When provided, exposes pacore__list_skill_templates,
+   * pacore__list_connections, and pacore__get_execution_log for Assessment agents.
+   */
+  skillTemplateRegistry?: SkillTemplateRegistry;
 }
 
 interface AuthenticatedRequest extends Request {
@@ -381,8 +387,8 @@ export class MCPGateway {
       }
     }
 
-    // Meta-tools always come first
-    return [...this.buildMetaTools(), ...aggregatedTools];
+    // Meta-tools always come first; pacore__ platform tools always follow
+    return [...this.buildMetaTools(), ...this.buildPacoreTools(), ...aggregatedTools];
   }
 
   // ---------------------------------------------------------------------------
@@ -413,6 +419,11 @@ export class MCPGateway {
 
     const prefix = toolName.slice(0, sepIdx);
     const actualName = toolName.slice(sepIdx + 2);
+
+    // Platform introspection tools (pacore__*)
+    if (prefix === 'pacore') {
+      return this.dispatchPacoreToolCall(actualName, args, userId, credScope);
+    }
 
     // Try built-in adapter first (e.g., shopify__get_order, gorgias__list_recent_tickets)
     const adapter = this.config.adapterRegistry.getAdapter(prefix);
@@ -499,6 +510,72 @@ export class MCPGateway {
   }
 
   // ---------------------------------------------------------------------------
+  // pacore__ platform tool dispatch + implementations
+  // ---------------------------------------------------------------------------
+
+  private async dispatchPacoreToolCall(
+    toolName: string,
+    _args: Record<string, unknown>,
+    userId: string,
+    credScope: CredentialScope
+  ): Promise<unknown> {
+    switch (toolName) {
+      case 'list_skill_templates':
+        return this.pacoreListSkillTemplates();
+      case 'list_connections':
+        return this.pacoreListConnections(credScope);
+      case 'get_execution_log':
+        return this.pacoreGetExecutionLog(userId, credScope);
+      default:
+        throw new Error(`Unknown pacore tool: "${toolName}"`);
+    }
+  }
+
+  private pacoreListSkillTemplates(): unknown {
+    if (!this.config.skillTemplateRegistry) return [];
+    return this.config.skillTemplateRegistry.getSkillTypes().map(type => {
+      const templates = this.config.skillTemplateRegistry!.getTemplatesForType(type.id);
+      return {
+        id: type.id,
+        name: type.name,
+        description: type.description,
+        category: type.category,
+        templates: templates.map(t => ({
+          id: t.id,
+          name: t.name,
+          requiredIntegrations: t.slots
+            .filter(s => s.required)
+            .map(s => s.integrationKey),
+        })),
+      };
+    });
+  }
+
+  private async pacoreListConnections(credScope: CredentialScope): Promise<unknown> {
+    const connections = await this.config.listConnections(credScope);
+    return connections.map(c => ({
+      connectionId: c.id,
+      integrationKey: c.integrationKey,
+      name: c.displayName,
+    }));
+  }
+
+  private async pacoreGetExecutionLog(
+    userId: string,
+    credScope: CredentialScope
+  ): Promise<unknown> {
+    const executions = credScope.type === 'org'
+      ? await this.config.skillRegistry.listAllOrgExecutions(credScope.orgId, 30)
+      : await this.config.skillRegistry.listAllUserExecutions(userId, 30);
+
+    return executions.map(e => ({
+      skillId: e.skillTypeId ?? null,
+      timestamp: e.startedAt,
+      status: e.skipped ? 'skipped' : e.status,
+    }));
+  }
+
+  // ---------------------------------------------------------------------------
   // Meta-tool schemas
   // ---------------------------------------------------------------------------
 
@@ -543,6 +620,34 @@ export class MCPGateway {
           },
           required: ['user_skill_id'],
         },
+      },
+    ];
+  }
+  private buildPacoreTools(): MCPTool[] {
+    return [
+      {
+        name: 'pacore__list_skill_templates',
+        description:
+          'List all available skill types and their templates with required integration slots. ' +
+          'Use this during a Skills Assessment to match a customer\'s ticket categories against ' +
+          'automatable skill types and determine which templates they can activate today.',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      {
+        name: 'pacore__list_connections',
+        description:
+          'List the active integration connections for this account (e.g. Shopify, Gorgias, Slack). ' +
+          'Use this during a Skills Assessment to determine which skill templates are immediately ' +
+          'activatable vs. which require additional integrations to be connected.',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      {
+        name: 'pacore__get_execution_log',
+        description:
+          'Return the 30 most recent skill executions for this account, with status and skill type. ' +
+          'Use this during a Skills Assessment to check whether any skills are already active and ' +
+          'firing, and to detect ticket category spikes without corresponding skill executions.',
+        inputSchema: { type: 'object', properties: {}, required: [] },
       },
     ];
   }
