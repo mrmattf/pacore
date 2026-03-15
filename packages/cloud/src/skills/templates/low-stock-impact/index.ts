@@ -15,6 +15,7 @@ export const LowStockImpactSkillType: SkillType = {
   name: 'Low Stock Customer Impact',
   description: 'When inventory drops to zero, identify affected open orders and proactively notify each customer with resolution options — before they ask.',
   category: 'E-commerce',
+  iconKey: 'BarChart2',
 };
 
 // ---- Shared pre-compiled policy ----

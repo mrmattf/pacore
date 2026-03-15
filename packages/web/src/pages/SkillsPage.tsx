@@ -1,6 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Zap, ChevronRight, RefreshCw, Settings, CheckCircle, Clock, Trash2, Pause, Play } from 'lucide-react';
+import { Zap, ChevronRight, RefreshCw, Settings, CheckCircle, Clock, Trash2, Pause, Play, Package, Truck, BarChart2, ShieldAlert, type LucideIcon } from 'lucide-react';
+
+const SKILL_ICONS: Record<string, LucideIcon> = {
+  Package, Truck, BarChart2, ShieldAlert, Zap,
+};
 import { apiFetch } from '../services/auth';
 import { UserSkill } from '../hooks/useSkills';
 import { useContextStore, skillsBasePath } from '../store/contextStore';
@@ -14,6 +18,7 @@ interface SkillTypeCard {
   category: string;
   templateCount: number;
   templateNames: string[];
+  iconKey?: string;
 }
 
 interface TemplateMeta { name: string; skillTypeId: string; }
@@ -128,6 +133,7 @@ export function SkillsPage() {
 
   const isOrgAdmin = context.type === 'org' && context.role === 'admin';
 
+
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       {/* Header */}
@@ -138,8 +144,8 @@ export function SkillsPage() {
               <h1 className="text-2xl font-bold">Skills</h1>
               <p className="text-sm text-gray-600 mt-1">
                 {context.type === 'org'
-                  ? `${context.orgName} · automations`
-                  : 'Browse and activate pre-built automations for your workspace'}
+                  ? `${context.orgName} · skills`
+                  : 'Activate skills that automate your Shopify operations'}
               </p>
             </div>
           </div>
@@ -259,13 +265,13 @@ export function SkillsPage() {
           {/* Skill type catalog */}
           {loading && skillTypes.length === 0 ? (
             <div className="flex items-center justify-center h-32 text-gray-400">
-              Loading skills…
+              Loading…
             </div>
           ) : visibleTypes.length === 0 ? (
             <div className="text-center py-16 text-gray-400">
               <Zap size={48} className="mx-auto mb-4 opacity-30" />
-              <p className="text-lg font-medium">No skills available yet</p>
-              <p className="text-sm mt-1">Platform skills will appear here as they are added.</p>
+              <p className="text-lg font-medium">No skills in this category</p>
+              <p className="text-sm mt-1">Try selecting a different category, or contact your operator to activate a skill.</p>
             </div>
           ) : (
             Object.entries(groupedByCategory).map(([category, types]) => (
@@ -281,8 +287,8 @@ export function SkillsPage() {
                     >
                       <div className="flex items-start justify-between gap-4">
                         <div className="flex gap-3 min-w-0">
-                          <div className="flex-shrink-0 w-10 h-10 bg-blue-50 rounded-lg flex items-center justify-center text-blue-600">
-                            <Zap size={20} />
+                          <div className="flex-shrink-0 w-10 h-10 bg-amber-50 rounded-lg flex items-center justify-center text-amber-600">
+                            {(() => { const Icon = SKILL_ICONS[skillType.iconKey ?? ''] ?? Zap; return <Icon size={20} />; })()}
                           </div>
                           <div className="min-w-0">
                             <h3 className="font-semibold text-gray-900">{skillType.name}</h3>
@@ -299,7 +305,7 @@ export function SkillsPage() {
                           onClick={() => handleBrowseTemplates(skillType.id)}
                           className="flex-shrink-0 flex items-center gap-1 px-4 py-2 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 whitespace-nowrap"
                         >
-                          Browse Templates
+                          Set Up
                           <ChevronRight size={14} />
                         </button>
                       </div>

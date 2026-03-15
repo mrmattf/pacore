@@ -15,6 +15,7 @@ export const HighRiskOrderSkillType: SkillType = {
   name: 'High-Risk Order Response',
   description: 'When Shopify flags an order for fraud risk, automatically alert your team and optionally notify the customer — so high-risk orders are never missed.',
   category: 'E-commerce',
+  iconKey: 'ShieldAlert',
 };
 
 // ---- Shared pre-compiled policy ----

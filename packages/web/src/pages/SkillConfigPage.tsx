@@ -340,7 +340,7 @@ export function SkillConfigPage() {
                 ))}
 
                 <p className="text-xs text-gray-400 border-t pt-3">
-                  ℹ {notificationName} will email your customer when a ticket is created — PA Core never sends email directly.
+                  ℹ Clarissi creates the ticket — {notificationName} handles delivery to your customer.
                 </p>
               </div>
 

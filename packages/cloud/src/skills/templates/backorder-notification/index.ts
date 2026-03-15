@@ -15,6 +15,7 @@ export const BackorderNotificationSkillType: SkillType = {
   name: 'Backorder Notification',
   description: 'Detect backordered items when an order is placed and notify customers via your support tool.',
   category: 'E-commerce',
+  iconKey: 'Package',
 };
 
 // ---- Shared pre-compiled policy (authored once, used by all variants) ----

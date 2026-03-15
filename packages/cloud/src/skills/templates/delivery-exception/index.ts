@@ -15,6 +15,7 @@ export const DeliveryExceptionSkillType: SkillType = {
   name: 'Delivery Exception Alert',
   description: 'When a carrier reports a delivery exception (damaged, lost, wrong address), automatically notify the affected customer with next steps — before they raise a complaint.',
   category: 'E-commerce',
+  iconKey: 'Truck',
 };
 
 // ---- Shared pre-compiled policy ----

@@ -7,6 +7,7 @@ export interface SkillType {
   name: string;        // "Backorder Notification"
   description: string;
   category: string;    // "E-commerce" | "Legal" | "Finance"
+  iconKey?: string;    // lucide-react icon name e.g. "Package", "Truck" — UI display only
 }
 
 // ---- TemplateVariable — an available {{variable}} placeholder exposed to UI and API ----
