@@ -84,8 +84,11 @@ export class GorgiasApiClient {
   /**
    * List recent tickets with tag and channel info.
    * Used by agents for Skills Assessment (Path E) — read-only.
+   *
+   * @param daysBack - If provided, only returns tickets created within the last N days.
+   *                   Use 90 for a standard Skills Assessment window.
    */
-  async listRecentTickets(limit = 50, status?: string): Promise<Array<{
+  async listRecentTickets(limit = 50, status?: string, daysBack?: number): Promise<Array<{
     id: number;
     subject: string;
     status: string;
@@ -96,6 +99,10 @@ export class GorgiasApiClient {
   }>> {
     const params = new URLSearchParams({ limit: String(limit) });
     if (status) params.set('status', status);
+    if (daysBack) {
+      const since = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
+      params.set('created_datetime__gte', since);
+    }
 
     const response = await fetch(`${this.baseUrl}/tickets?${params}`, {
       headers: { 'Authorization': this.authHeader },

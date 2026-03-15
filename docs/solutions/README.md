@@ -26,13 +26,13 @@ These skill types ship as part of the PA Core platform. Users activate them via 
 
 All skill types support an optional `escalation` slot for routing high-priority internal alerts to a separate support channel.
 
-## Customer Deliverables
+## Deprecated Customer Deliverables
 
-These are standalone packages built for specific customers. They are **not** PA Core platform features (see ADR-006).
+These packages were built for specific customers and are no longer active. They are archived for reference only (see ADR-006).
 
 | Solution | Package | Status |
 |----------|---------|--------|
-| Backorder Detection (Yota) | [shopify-backorder](../../packages/shopify-backorder/) | Delivered — customer-owned |
+| Backorder Detection (Yota) | [shopify-backorder](../../packages/shopify-backorder/) | Deprecated — archived; Yota migrated to Clarissi platform skill |
 
 ## Planned Skill Types
 
@@ -108,7 +108,7 @@ A customer's configuration is portable. The platform and reusable components are
 6. **Convert to workflow** (Phase 3): Manageable processing
 7. **Package** (Phase 4): Multi-tenant deployment
 
-See [Backorder Detection](../../packages/shopify-backorder/CLAUDE.md) as the reference implementation.
+See [Backorder Detection](../../packages/shopify-backorder/CLAUDE.md) as a reference implementation (archived).
 
 ## AI Agent Guidelines
 

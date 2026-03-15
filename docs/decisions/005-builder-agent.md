@@ -1,7 +1,15 @@
 # ADR-005: Domain-Specialized Builder Agent for E-Commerce Operations
 
 ## Status
-Accepted
+Accepted — Updated March 2026
+
+## Scope at Initial Release
+
+**Builder Agent and BYOM are operator-only capabilities at initial Clarissi launch.** Customers do not interact with skill creation tooling directly. Clarissi operators use these tools internally to discover, draft, and activate skills on customers' behalf.
+
+Customer-facing skill creation is a **planned future capability**, not a current offering. It will be opened to customers when: (a) the tooling produces reliably good skill drafts without operator oversight, and (b) customer onboarding can guide people through what a good skill definition looks like without a concierge.
+
+This updates the original framing below, which described BYOM as the "primary customer path." That direction is deferred, not abandoned — the underlying architecture is unchanged. What changes is who uses it: operators, not customers, at initial release.
 
 ## Context
 
@@ -41,9 +49,11 @@ PA Core's differentiation lies in the **intersection** of:
 
 Build a **Domain-Specialized Builder Agent** with two distinct skill creation paths: an external AI client path (primary, bring-your-own-model) and an internal Builder Agent path (optional add-on). The platform's operational intelligence — validation, simulation, execution, deduplication, audit — is PA Core's value regardless of which path creates the skill.
 
-### BYOM: External AI Client as Primary Skill Creation Path
+### BYOM: External AI Client Path (Operator-Used at Initial Release)
 
-Any MCP-compatible AI client (Claude Desktop, Cursor, or any agent framework) can create, simulate, and activate skills by connecting to PA Core's MCP server directly. The LLM reasoning happens entirely outside PA Core — the customer pays for it through their own AI subscription. PA Core receives the finished SkillDefinition and handles everything after:
+Any MCP-compatible AI client (Claude Desktop, Cursor, or any agent framework) can create, simulate, and activate skills by connecting to PA Core's MCP server directly. The LLM reasoning happens entirely outside PA Core — the user pays for it through their own AI subscription. PA Core receives the finished SkillDefinition and handles everything after:
+
+> **At initial release:** This path is used by Clarissi operators to build skills on customers' behalf — not by customers directly. The architecture is customer-ready; the onboarding experience and marketing are not yet built. Customer self-service via BYOM is deferred to a future release.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -121,13 +131,16 @@ E-commerce Operations    ───► Business Operations
 
 | Entry Type | Description | Outcome |
 |------------|-------------|---------|
-| **Platform** | Customer discovers PA Core, selects pre-built Skills | Subscription + per-event |
+| **Concierge** | PA Core operator runs Skills Assessment, activates skills on customer's behalf, manages ongoing | Outcome-based retainer (base + per-ticket-deflected) |
+| **Platform** | Customer self-discovers, activates pre-built Skills via app UI (BYOM deferred to future release) | Subscription + per-event |
 | **Customer Engagement** | We build custom solution for specific customer | Solution becomes reusable template for platform |
 
-This dual-track approach (from [Product Strategy](../product-strategy.md)) ensures:
-- Customer engagements fund development and validate concepts
-- Learnings are re-implemented as platform Skills
-- IP remains with PA Core; customer owns configuration/data
+This three-track approach (see also [ADR-013: SEAN Concierge GTM](013-sean-concierge-gtm.md)):
+- **Concierge** is the primary near-term revenue track — direct sales, operator-managed, outcome-priced
+- **Customer Engagements** fund platform development and validate new skill types
+- **Platform** (self-serve) is the Year 2+ scale track once the Concierge model is proven; BYOM for customers follows Platform maturity
+
+For Concierge customers, the PA Core operator is the "skill creator" using the platform and BYOM tools on the customer's behalf — the customer never interacts with the builder agent directly. This does not change the underlying architecture; it changes the user of the architecture.
 
 ### Builder Agent Scope
 

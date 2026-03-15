@@ -37,7 +37,7 @@ Research confirms Shopify merchants have a universal automation problem: **every
 
 **Why it wins:** Every "Back in Stock" app on the market is a pre-purchase waitlist. None handle "order placed, item now backordered — communicate with customer." This scenario has no dedicated product. PA Core owns it.
 
-**Status:** SkillTemplate implemented with Shopify → Gorgias and Shopify → Zendesk variants. Ready to validate with Yota.
+**Status:** SkillTemplate implemented with Shopify → Gorgias and Shopify → Zendesk variants. Validated — Yota migrated from standalone app to this Clarissi skill.
 
 ---
 
@@ -167,6 +167,13 @@ Requires AfterShip adapter — most new infrastructure of the four skills.
 
 **The pitch:** Every automation tool on Shopify is a trigger and a template. PA Core is the first platform that reads the full context — order value, customer history, inventory status, risk signals — and decides what the right action and message actually is. Not fill-in-the-blank. Not if/then rules. Situational intelligence.
 
-**Target merchant:** Shopify stores doing $500K–$10M/year. Large enough to feel the operational pain, small enough that they don't have a 10-person ops team managing 14 separate tools. They pay $200-500/month in point solutions that don't talk to each other.
+**Target merchant:** Shopify stores doing $3M–$20M/year. Large enough to feel the operational pain ($500+ tickets/month, real fraud exposure, inventory events at scale), but without a dedicated automation analyst or ops engineer. They know what processes hurt — they lack the infrastructure to automate them reliably.
 
-**Pricing angle:** Replace 3-4 point solutions with one platform. Comparable or lower monthly cost, dramatically better outcomes because the tools share context.
+**Go-to-market:** Concierge-first (not self-serve app store). The primary motion is an **Assessment → Concierge Retainer** path:
+1. PA Core runs a paid Skills Assessment ($1,500–2,500) using live Shopify + Gorgias data to produce an Automation Readiness Report — which skills to activate and why, with volume projections and ROI estimates
+2. Assessment converts to a Concierge retainer ($1,500–2,000 base + outcome fee per ticket deflected above baseline)
+3. PA Core operator manages skill activation, weekly tuning, and monthly outcome reporting on the customer's behalf
+
+Shopify App Store distribution is a Year 2+ strategy for self-serve scale. Current distribution is direct through Track 1 consulting relationships and outbound to Shopify + Gorgias brands in the ICP.
+
+**Pricing model:** Hybrid retainer + outcome fee. Base retainer covers operator time and platform access. Outcome component ($2–3/ticket deflected above 90-day baseline) aligns PA Core revenue with customer value delivered. Billing via Stripe invoice — not Shopify Billing API.

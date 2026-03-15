@@ -34,7 +34,7 @@ Each system is well-structured, API-accessible, and has a clear operational purp
 | Domain expertise pre-encoded | No | No | No | Yes — e-commerce vertical |
 | Deduplication and audit trail | No | Issues⁴ | You build it | Built-in |
 | Accuracy on structured tasks | Variable | ~26% consistency³ | Depends on build | 92–97% |
-| Cost predictability | Per query | Unpredictable | Per execution | Subscription tier |
+| Cost predictability | Per query | Unpredictable | Per execution | Self-serve: per-op tiers; Concierge: retainer + outcome fee |
 
 **The right model is Clarissi + Claude together.** Clarissi handles the automated 90% — predictable, high-volume operational work that runs without human initiation. Claude handles the analytical 10% — questions your team asks, edge cases, content drafting.
 
@@ -43,7 +43,7 @@ Each system is well-structured, API-accessible, and has a clear operational purp
 ## How Clarissi Enables Yota
 
 ### Available Now — Shopify + Gorgias
-Install from the **Shopify App Store** in under 60 seconds. No API setup, no engineering.
+Clarissi connects to your Shopify and Gorgias accounts directly — your dedicated operator handles setup end-to-end. No credentials to configure yourself.
 
 - **Backorder notification** — order placed with out-of-stock items → Gorgias ticket created automatically, before the customer contacts you
 - **Low-stock customer impact** — inventory hits zero → all affected open orders identified and customers notified proactively
@@ -51,7 +51,7 @@ Install from the **Shopify App Store** in under 60 seconds. No API setup, no eng
 
 Every execution: deduplicated, retried on failure, logged with full audit trail. Reliability target 99%+.
 
-**Pricing:** flat monthly subscription by tier. Activate as many pre-built skills as you need — no per-execution math.
+**Pricing:** Concierge engagement — monthly retainer with outcome-based component tied to ticket deflection. You pay more only when we deliver more.
 
 ### Near-Term — Shopify + Fulfil + Gorgias
 Fulfil's native Claude MCP integration connects directly to Clarissi with no custom API work.
@@ -59,10 +59,10 @@ Fulfil's native Claude MCP integration connects directly to Clarissi with no cus
 - **ETA-aware backorder messaging** — automated messages include the real expected restock date from Fulfil, not "we'll be in touch." Fewer follow-up contacts, better customer experience.
 
 ### 3–6 Months — Your Whole Stack
-- **Natural language skill creation** — describe a workflow to Claude Desktop, Clarissi validates it, simulates it, shows cost before activation, goes live. No developer needed.
+- **Custom skills for your workflows** — your Clarissi operator builds and activates skills tailored to your specific stack and processes. Describe what you need; the operator handles the build, simulation, and activation.
   - *Example: "When a Gorgias ticket is escalated to Tier 2, create a Monday.com task and tag the order in Shopify"*
   - *Example: "Flag in Ninety when our Gorgias first-response SLA drops below 95% for the week"*
-- **Custom skill pricing:** ops-based, calculated at activation time. You see the exact monthly cost before committing.
+- **Cost preview before activation:** when your Clarissi operator activates a new custom skill, the platform calculates the exact per-operation cost at activation time. You see the monthly cost before it goes live — no surprises.
 
 ### 6–12 Months — The Platform Learns
 - **Recommendations from execution data** — "800 high-risk order events per month. Merchants like you deflect 340 support tickets/month with the High-Risk Response skill."
@@ -73,8 +73,8 @@ Fulfil's native Claude MCP integration connects directly to Clarissi with no cus
 
 ## How to Get Started
 
-**Step 1 — Shopify App Store install (today)**
-Clarissi is a certified Shopify Partner app. Install takes under 60 seconds. OAuth connects your store; no credentials to configure manually.
+**Step 1 — Clarissi Concierge onboarding (today)**
+Your Clarissi operator connects your Shopify store and Gorgias account directly. Setup is handled end-to-end — no credentials to configure, no app install required.
 
 **Step 2 — Activate backorder + low-stock skills (Week 1)**
 Every automatically-created ticket is one your team did not have to notice, investigate, and write.

@@ -1,4 +1,4 @@
-# ADR-011: Skill Pricing Model — Per-Operation with Static Cost Preview
+# ADR-011: Clarissi Skill Pricing Model — Per-Operation with Static Cost Preview
 
 ## Status
 Accepted
@@ -7,7 +7,7 @@ Accepted
 
 ### The Pricing Problem for Customer-Created Skills
 
-Customer-created skills (generated via external AI clients or the internal Builder Agent) introduce a pricing challenge. If PA Core charges per "skill build," the cost is unpredictable — a merchant cannot know how many iterations a skill creation will require. Variable LLM costs billed to the customer create anxiety and limit adoption.
+Customer-created skills (generated via external AI clients or the internal Builder Agent) introduce a pricing challenge. If Clarissi charges per "skill build," the cost is unpredictable — a merchant cannot know how many iterations a skill creation will require. Variable LLM costs billed to the customer create anxiety and limit adoption.
 
 General-purpose automation platforms face this problem differently:
 - **Per-seat** (n8n Cloud): predictable but decoupled from actual usage
@@ -16,19 +16,19 @@ General-purpose automation platforms face this problem differently:
 
 None of these align cost with the value delivered.
 
-### BYOM: External AI Clients as the Primary Creation Path
+### Skill Creation Paths (Operator-Only at Initial Release)
 
-The agent-codegen spec establishes that skills are data (SkillDefinition), not code. The LLM reasoning that *creates* a skill can happen in two paths:
+The agent-codegen spec establishes that skills are data (SkillDefinition), not code. The LLM reasoning that *creates* a skill can happen in two paths. At initial release, **both paths are used by Clarissi operators**, not by customers directly. Customer-facing skill creation is planned for a future release.
 
-**1. External AI Client (Primary — Bring Your Own Model)**
+**1. External AI Client (BYOM — Operator-Used)**
 
-Claude Desktop, Cursor, or any MCP-compatible AI client connects to PA Core's MCP server and calls skill creation tools directly. The LLM reasoning happens entirely *outside PA Core* — paid for by the customer through their own AI subscription. PA Core receives the finished SkillDefinition via tool call and handles validation, simulation, and execution.
+The Clarissi operator connects Claude Desktop or any MCP-compatible AI client to Clarissi's MCP server and calls skill creation tools directly. The LLM reasoning happens entirely *outside Clarissi* — paid for through the operator's own AI subscription. Clarissi receives the finished SkillDefinition via tool call and handles validation, simulation, and execution.
 
 **2. Internal Builder Agent (Optional Add-On)**
 
-PA Core hosts an AI Composer that performs the LLM reasoning internally. This path is available for customers without their own AI client access or for customers who prefer a guided, embedded experience.
+Clarissi hosts an AI Composer that performs the LLM reasoning internally. This path is available for operators who prefer a guided, embedded experience.
 
-**Key consequence of BYOM as primary path**: For most customers, there is zero PA Core LLM cost during skill creation. PA Core's costs are purely operational: webhook ingestion, enrichment calls, action dispatch, deduplication, and audit logging. This eliminates "skill builds" as a billing unit.
+**Key consequence for billing**: There is zero Clarissi LLM cost during skill creation via the BYOM path. Clarissi's costs are purely operational: webhook ingestion, enrichment calls, action dispatch, deduplication, and audit logging. This eliminates "skill builds" as a billing unit — customers pay only for operations executed after activation, regardless of which path created the skill.
 
 ### Operations Are Statically Countable
 
@@ -38,7 +38,7 @@ A SkillDefinition is structured data. Its execution cost is fully calculable at 
 - **1 op** per enrichment step (`enrichmentSpec.steps[]` entry)
 - **1 op** per worst-case invoke action (maximum actions across all policy branches)
 
-This means PA Core can show an exact cost-per-execution at activation time, giving customers a cost preview before they commit.
+This means Clarissi can show an exact cost-per-execution at activation time, giving customers a cost preview before they commit.
 
 ## Decision
 
@@ -54,7 +54,7 @@ An **operation** is one discrete unit of platform work during a skill execution:
 | DLQ retry of a failed execution | 1 (same as original) |
 
 Operations are **not** charged for:
-- Skill creation via BYOM path (external LLM handles reasoning; PA Core MCP tools are free to call)
+- Skill creation via BYOM path (external LLM handles reasoning; Clarissi MCP tools are free to call)
 - Skill simulation (dry run against fixture data)
 - Duplicate webhook detection (rejected before queue entry — ADR-010)
 - Keepalive pings and health checks
@@ -128,17 +128,17 @@ Per-skill and per-account guardrails can be configured:
 
 ### BYOM Billing Separation
 
-**BYOM path (primary):**
-- External AI client (Claude Desktop, Cursor, etc.) generates the SkillDefinition at zero PA Core cost
-- Customer pays their AI provider for the LLM reasoning
-- PA Core charges only for operations executed after activation
+**BYOM path (operator-used):**
+- Operator's external AI client (Claude Desktop, Cursor, etc.) generates the SkillDefinition at zero Clarissi cost
+- Operator pays their AI provider for the LLM reasoning (not billed to customer)
+- Clarissi charges only for operations executed after activation
 - MCP tool calls during creation (`pacore_create_skill`, `pacore_simulate_skill`, `pacore_get_cost_estimate`) consume zero ops
 
 **Internal Builder Agent path (optional add-on):**
 - AI Composer LLM calls are billed separately — flat fee per session or included in Enterprise
 - Execution ops are billed identically to the BYOM path
 
-This separation keeps the base pricing model simple: **BYOM customers pay only for what runs, never for how they built it.**
+This separation keeps the base pricing model simple: **customers pay only for what runs, never for how it was built.**
 
 ### Plan Recommendation Engine
 
@@ -159,7 +159,7 @@ The recommendation engine also surfaces at the account dashboard level, aggregat
 ### Positive
 
 - **Predictable**: Exact cost shown before activation — no bill surprises
-- **BYOM-aligned**: External AI clients create skills at zero PA Core LLM cost; only execution is metered
+- **BYOM-aligned**: External AI clients create skills at zero Clarissi LLM cost; only execution is metered
 - **Usage-aligned**: Efficient skills (fewer enrichment steps) cost less — incentivizes good skill design
 - **Auditable**: Every billed operation maps to a real platform action in the execution log
 - **Encourages iteration**: No per-build cost means customers can draft, revise, and simulate without cost anxiety
@@ -187,9 +187,33 @@ The recommendation engine also surfaces at the account dashboard level, aggregat
 | 5 | Budget guardrails: per-account ops counter (Redis), alert webhooks, configurable caps |
 | 6 | Internal Builder Agent billing (add-on, separate line item) |
 
+## Concierge Pricing Overlay
+
+The per-operation model (above) applies to Self-Serve customers. **Self-Serve is currently available** — customers can connect credentials, activate skills, and run at per-op billing without operator involvement today (not a future state). See ADR-016 for the full three-tier customer journey.
+
+Concierge customers (see [ADR-013](013-sean-concierge-gtm.md) and [ADR-014](014-outcome-based-pricing.md)) use a different billing structure that runs alongside, not instead of, the operations model:
+
+**Concierge hybrid pricing:**
+- **Base retainer:** $1,500–2,000/month — covers platform access + operator time (~10 hrs/month)
+- **Outcome fee:** $2–3 per ticket deflected above the 90-day pre-activation baseline — measured via Gorgias execution history
+- **Expansion credit:** −$200/month per new skill activated (operator incentive to expand customer coverage)
+
+**Billing mechanics:**
+- Monthly invoice via Stripe Invoicing — **not Shopify Billing API** (avoids App Store revenue share requirements)
+- Per-operation metering still runs internally for Concierge customers; the operator uses ops data to tune thresholds and generate monthly outcome reports
+- The cost preview (above) is still shown — the operator uses it to scope engagements and show customers projected costs at Assessment time
+
+**Attribution methodology (required for outcome pricing):**
+- 90-day silent measurement before outcome fees begin — establishes baseline ticket volume per category
+- Deflection counted when a skill fires and the corresponding Gorgias ticket category does not appear within 24 hours
+- Attribution methodology agreed in MSA before engagement starts — disputes are resolved by Gorgias execution log
+
 ## Related
 
-- [ADR-005: Builder Agent](005-builder-agent.md) — Primary skill creation paths (BYOM + internal)
+- [ADR-005: Builder Agent](005-builder-agent.md) — Primary skill creation paths (BYOM + internal + Concierge)
 - [ADR-007: Skill Template Architecture](007-skill-template-architecture.md) — SkillDefinition structure
+- [ADR-013: SEAN Concierge GTM](013-sean-concierge-gtm.md) — Concierge business model
+- [ADR-014: Outcome-Based Pricing](014-outcome-based-pricing.md) — Outcome metric definitions and attribution
+- [ADR-016: Three-Tier Customer Journey](016-three-tier-customer-journey.md) — How Self-Serve, Assessment, and Concierge relate; custom skill pricing clarification
 - [specs/agent-codegen.md](specs/agent-codegen.md) — Declarative skill generation and BYOM MCP tools
 - [ADR-010: Durable Webhook Ingestion](010-durable-webhook-ingestion.md) — Operation execution and retry model

@@ -5,6 +5,9 @@ Brief tracking of significant changes. Keep entries to 1-2 sentences each. Delet
 ---
 
 ## 2026-03 (recent sessions)
+- Operator Skill Discovery Phase 1 complete: Enhanced `gorgias__list_recent_tickets` with `days_back` parameter, created operator system prompt template (`docs/assessment-prompt-template.md`), and documented two-pass Assessment architecture in ADR-017 (gap clustering + activation gap detection).
+- `packages/shopify-backorder` marked deprecated/archived — Yota migrated from standalone Railway app to the Clarissi `backorder-notification` platform skill; updated root CLAUDE.md, README, solutions index, product strategy, and shopify-backorder CLAUDE.md to reflect archived status.
+
 - Low-stock skill bug fixes: (1) `getVariantByInventoryItem` rewrote using GraphQL — `/variants.json?inventory_item_ids=` filter is undocumented and ignored by Shopify, always returning the first variant; (2) `isSkippedResult` updated to handle `LowStockChainResult` which has no top-level `actions` array (uses `skipped` flag instead), fixing false "Skipped" UI status after successful notifications; (3) `low-stock-templates.ts` fixed to wrap `buildAffectedItemsHtml` in `SafeHtml` so the HTML table isn't double-escaped and rendered as raw HTML in Gorgias emails.
 
 

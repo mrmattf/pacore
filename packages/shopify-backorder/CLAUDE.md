@@ -1,5 +1,7 @@
 # Shopify Backorder Service
 
+> **DEPRECATED / ARCHIVED** — Yota Xpedition migrated to the Clarissi `backorder-notification` platform skill. This package is retained for reference only and is no longer actively deployed.
+
 ## AI Agent Guidelines
 
 **Keep documentation lean and current:**
@@ -159,11 +161,10 @@ For Railway: Push to connected repo, ensure environment variables are set.
 
 ## Ownership
 
-**This is a customer engagement solution for Yota Xpedition.**
+**This package is archived.** It was a customer engagement solution for Yota Xpedition. Yota has since migrated to the Clarissi `backorder-notification` platform skill.
 
-- **Customer owns**: This specific solution (per licensing agreement)
-- **We gain**: Infrastructure know-how, Shopify/Gorgias integration patterns
-- **Platform Skill**: A separate "Backorder Detection" Skill will be built into PA Core (clean-room)
+- **We gained**: Infrastructure know-how, Shopify/Gorgias integration patterns
+- **Platform Skill**: The `backorder-notification` Skill in PA Core is the active successor (built clean-room)
 
 See [Product Strategy](../../docs/product-strategy.md) for the distinction between customer engagements and platform solutions.
 

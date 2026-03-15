@@ -78,7 +78,7 @@ pacore/
 │   ├── agent/             # On-premise edge agent (in progress)
 │   ├── adapters/          # LLM provider implementations
 │   ├── sdk/               # Client SDK
-│   └── shopify-backorder/ # Customer deliverable (Yota) — standalone Railway deploy
+│   └── shopify-backorder/ # Deprecated — archived (Yota migrated to Clarissi)
 ├── docker-compose.yml
 └── README.md
 ```

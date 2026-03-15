@@ -45,7 +45,7 @@ packages/web          React frontend (Vite + TypeScript)
 packages/cloud        Express backend + WebSocket
 packages/core         Shared types and utilities
 packages/agent        On-premise edge agent
-packages/shopify-backorder  Customer deliverable (Yota) — standalone Railway deploy
+packages/shopify-backorder  (deprecated/archived — Yota migrated to Clarissi skill)
 ```
 
 ### Key Components
@@ -92,6 +92,7 @@ User Message → API Gateway → Orchestrator → LLM Provider → Response
 - [ ] Edge agent for local desktop integration
 
 ### Planned
+- [ ] Builder Agent / BYOM skill creation — operator-only tooling for discovering and drafting new skills; customer-facing self-service deferred until tooling and onboarding mature (see ADR-005)
 - [ ] Agent layer for Tier 2 skills (LLM-driven decision-making on top of tool chains)
 - [ ] Chat channel integrations (WhatsApp, Telegram, Slack)
 
@@ -117,8 +118,8 @@ User Message → API Gateway → Orchestrator → LLM Provider → Response
 - `src/types/skill-template.ts` - SkillTemplate, SkillSlot, EditableField interfaces
 - `src/types/skill.ts` - UserSkill, SkillDefinition
 
-### Standalone Services
-- **packages/shopify-backorder/** - Customer integration (has its own [CLAUDE.md](packages/shopify-backorder/CLAUDE.md))
+### Deprecated / Archived
+- **packages/shopify-backorder/** - Archived customer deliverable; Yota migrated to the Clarissi backorder-notification skill
 
 ## Database Schema
 

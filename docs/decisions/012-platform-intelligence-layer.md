@@ -92,20 +92,22 @@ This is especially valuable in the BYOM path: the external AI submits a SkillDef
 
 ### Role 3: Intent-to-Draft for Simple Cases
 
-For straightforward activations — a customer wants a pre-built skill template with minor adjustments — the internal AI converts a single-sentence intent description into a complete SkillDefinition draft, ready for simulation.
+For straightforward activations — minor adjustments to a pre-built skill template — the internal AI converts a single-sentence intent description into a complete SkillDefinition draft, ready for simulation.
+
+**At initial release, this is an operator capability**, used by Clarissi operators to rapidly build custom skills discovered during Assessments. Customer-facing access to Intent-to-Draft is deferred to a future release.
 
 This path requires no external AI subscription and no conversational back-and-forth. It handles the 80% of cases that are variations of known patterns:
 
 ```
-User: "Create a backorder notification that only fires for orders over $200
-       and includes the Fulfil ETA in the message"
+Operator: "Create a backorder notification that only fires for orders over $200
+           and includes the Fulfil ETA in the message"
 
 → Internal AI drafts SkillDefinition (template + field overrides)
 → Goes directly to pacore_simulate_skill
-→ User reviews simulation results and activates
+→ Operator reviews simulation results and activates on customer's behalf
 ```
 
-For novel or complex skills (new adapter combinations, multi-step enrichment chains, custom business logic), the internal AI surfaces a prompt to continue in the user's external AI client.
+For novel or complex skills (new adapter combinations, multi-step enrichment chains, custom business logic), the internal AI surfaces a prompt to continue in the operator's external AI client.
 
 ### Role 4: Pattern-Based Improvement Alerts
 
@@ -227,10 +229,24 @@ The internal AI does not introduce a new billing unit. Its costs are absorbed in
 | 5 | Intent-to-Draft — LLM converts sentence to SkillDefinition for known patterns | 50+ activated skill templates |
 | 6 | Language-model-powered recommendations — natural language, personalized | 50+ active accounts |
 
+## Concierge Delivery Note
+
+For Concierge customers (see [ADR-013](013-sean-concierge-gtm.md)), the four intelligence roles are delivered by the PA Core operator rather than the product UI:
+
+| Role | Self-Serve Delivery | Concierge Delivery |
+|------|--------------------|--------------------|
+| Recommendation Engine | Dashboard nudges | Assessment report + monthly QBR |
+| Validation Corrections | Inline error messages | Operator catches during skill design |
+| Intent-to-Draft | UI composer | Operator drafts skill, customer approves |
+| Improvement Alerts | Dashboard notifications | Operator surfaces in weekly log review |
+
+The underlying data pipeline and pattern detection are identical — the delivery channel differs. As Concierge customers eventually graduate to self-serve, they gain access to the product UI versions of these features without any data migration.
+
 ## Related
 
 - [ADR-005: Builder Agent](005-builder-agent.md) — BYOM as primary creation path; this ADR defines the complementary internal layer
 - [ADR-007: Skill Template Architecture](007-skill-template-architecture.md) — SkillDefinition structure the intelligence layer reads and generates
 - [ADR-010: Durable Webhook Ingestion](010-durable-webhook-ingestion.md) — Execution data source for the intelligence layer
 - [ADR-011: Skill Pricing Model](011-skill-pricing-model.md) — Intelligence layer roles are included in platform margin, not separately billed
+- [ADR-013: SEAN Concierge GTM](013-sean-concierge-gtm.md) — Concierge delivery model where operator surfaces intelligence instead of product UI
 - [specs/agent-codegen.md](specs/agent-codegen.md) — Declarative skill format the internal AI generates for Intent-to-Draft

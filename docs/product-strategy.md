@@ -30,7 +30,7 @@ Build standalone solutions for customers to validate concepts and fund developme
 |--------|-------------|
 | **Ownership** | Customer owns the specific solution per licensing agreement |
 | **We Gain** | Infrastructure know-how, integration patterns, architecture validation |
-| **Example** | Yota Xpedition Backorder Detection (standalone app) |
+| **Example** | Yota Xpedition Backorder Detection (standalone app — now migrated to Clarissi) |
 
 **Key Principle**: Customer engagements are completely separate from the platform — in code, in deployment, and in operation. We:
 1. Build the solution they need (standalone app, customer owns it)
@@ -349,16 +349,16 @@ Shared across customers:
 
 ## Example: Customer Engagement vs Platform Solution
 
-### Customer Engagement: Yota Backorder Detection
+### Customer Engagement: Yota Backorder Detection (archived)
 
 Built as standalone app for Yota Xpedition:
-- Customer owns the solution (per licensing agreement)
+- Customer owned the solution (per licensing agreement)
 - Standalone Express service, not on PA Core platform
-- We gain: Shopify/Gorgias integration patterns, webhook handling, notification logic
+- We gained: Shopify/Gorgias integration patterns, webhook handling, notification logic
 
-**What Yota gets**: A working backorder detection app they own and can modify.
+**Outcome**: Yota subsequently migrated from the standalone app to the Clarissi `backorder-notification` platform skill — validating the platform approach.
 
-**What we gain**: Know-how for building similar capabilities in the platform.
+**What we gained**: Know-how for building similar capabilities in the platform.
 
 ### Platform Solution: Backorder Detection Skill
 

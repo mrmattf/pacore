@@ -20,7 +20,9 @@ export class GorgiasNotificationAdapter implements NotificationToolAdapter, Slot
       capability: 'list_recent_tickets',
       description:
         'List recent Gorgias support tickets with their tags, channel, and status. ' +
-        'Use this to analyze support ticket volume, common categories, and trends for a Skills Assessment.',
+        'Use this to analyze support ticket volume, common categories, and trends for a Skills Assessment. ' +
+        'Note: returns at most 100 tickets — for high-volume stores (500+/month) use days_back to focus the window, ' +
+        'and treat results as a representative sample rather than a complete count.',
       inputSchema: {
         type: 'object',
         properties: {
@@ -32,6 +34,10 @@ export class GorgiasNotificationAdapter implements NotificationToolAdapter, Slot
             type: 'string',
             enum: ['open', 'closed', 'resolved'],
             description: 'Filter by ticket status (optional)',
+          },
+          days_back: {
+            type: 'number',
+            description: 'Only return tickets created within the last N days. Use 90 for a standard Skills Assessment window.',
           },
         },
         required: [],
@@ -63,7 +69,8 @@ export class GorgiasNotificationAdapter implements NotificationToolAdapter, Slot
       case 'list_recent_tickets':
         return this.buildClient(creds).listRecentTickets(
           (params.limit as number | undefined) ?? 50,
-          params.status as string | undefined
+          params.status as string | undefined,
+          params.days_back as number | undefined
         );
       default:
         throw new Error(`GorgiasNotificationAdapter: unsupported capability '${capability}'`);
