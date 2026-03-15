@@ -1,9 +1,10 @@
 import { useState, useEffect } from 'react';
-import { RefreshCw, Zap, Building2, Users, CheckCircle, XCircle, Clock, ChevronDown, ChevronRight, Minus, Pause, Play } from 'lucide-react';
+import { RefreshCw, Zap, Users, CheckCircle, XCircle, Clock, ChevronDown, ChevronRight, Minus, Pause, Play } from 'lucide-react';
 import { useBilling, PlanTier, LimitSummaryItem } from '../hooks/useBilling';
 import { SkillExecution, ExecutionStep } from '../hooks/useSkillExecutions';
 import { apiFetch } from '../services/auth';
 import { useUserSkills, UserSkill } from '../hooks/useUserSkills';
+import { useContextStore } from '../store/contextStore';
 
 // ─── Usage bar ───────────────────────────────────────────────────────────────
 function UsageBar({
@@ -399,11 +400,9 @@ function SkillCard({ userSkill, currentPlan }: { userSkill: UserSkill; currentPl
 }
 
 // ─── Main page ───────────────────────────────────────────────────────────────
-interface BillingPageProps {
-  orgId?: string;
-}
-
-export function BillingPage({ orgId }: BillingPageProps) {
+export function BillingPage() {
+  const { context } = useContextStore();
+  const orgId = context.type === 'org' ? context.orgId : undefined;
   const { billing, loading, error, refresh } = useBilling(orgId);
   const { userSkills } = useUserSkills();
 
@@ -426,7 +425,7 @@ export function BillingPage({ orgId }: BillingPageProps) {
           <div>
             <h1 className="text-2xl font-bold">Billing</h1>
             <p className="text-sm text-gray-600 mt-1">
-              {orgId ? 'Organization plan & usage' : 'Your plan & usage'}
+              {context.type === 'org' ? `${context.orgName} · plan & usage` : 'Your plan & usage'}
             </p>
           </div>
           <button
@@ -465,13 +464,6 @@ export function BillingPage({ orgId }: BillingPageProps) {
                   icon={Zap}
                   item={summary.activeSkills}
                 />
-                {!orgId && (
-                  <UsageBar
-                    label="Organizations"
-                    icon={Building2}
-                    item={summary.orgs}
-                  />
-                )}
                 {orgId && (
                   <UsageBar
                     label="Org Members"

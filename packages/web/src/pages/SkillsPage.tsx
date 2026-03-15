@@ -3,6 +3,9 @@ import { useNavigate } from 'react-router-dom';
 import { Zap, ChevronRight, RefreshCw, Settings, CheckCircle, Clock, Trash2, Pause, Play } from 'lucide-react';
 import { apiFetch } from '../services/auth';
 import { UserSkill } from '../hooks/useSkills';
+import { useContextStore, skillsBasePath } from '../store/contextStore';
+import { ContextSwitcher } from '../components/ContextSwitcher';
+import { OrgPanel } from '../components/OrgPanel';
 
 interface SkillTypeCard {
   id: string;
@@ -17,6 +20,7 @@ interface TemplateMeta { name: string; skillTypeId: string; }
 
 export function SkillsPage() {
   const navigate = useNavigate();
+  const { context } = useContextStore();
 
   const [skillTypes, setSkillTypes] = useState<SkillTypeCard[]>([]);
   const [mySkills, setMySkills] = useState<UserSkill[]>([]);
@@ -25,13 +29,15 @@ export function SkillsPage() {
   const [templateMap, setTemplateMap] = useState<Record<string, TemplateMeta>>({});
   const [loading, setLoading] = useState(true);
   const [activeCategory, setActiveCategory] = useState<string>('All');
+  const [orgPanelOpen, setOrgPanelOpen] = useState(false);
 
   async function load() {
     setLoading(true);
     try {
+      const base = skillsBasePath(context);
       const [typesRes, myRes] = await Promise.all([
         apiFetch('/v1/skill-types'),
-        apiFetch('/v1/me/skills'),
+        apiFetch(base),
       ]);
       const types: SkillTypeCard[] = typesRes.ok ? await typesRes.json() : [];
       if (typesRes.ok) setSkillTypes(types);
@@ -55,7 +61,8 @@ export function SkillsPage() {
     }
   }
 
-  useEffect(() => { load(); }, []);
+  // Reload when context changes
+  useEffect(() => { load(); }, [context]);
 
   const categories = ['All', ...Array.from(new Set(skillTypes.map(t => t.category)))];
 
@@ -72,7 +79,8 @@ export function SkillsPage() {
 
   async function handleRemoveSkill(skillId: string) {
     try {
-      await apiFetch(`/v1/me/skills/${skillId}`, { method: 'DELETE' });
+      const base = skillsBasePath(context);
+      await apiFetch(`${base}/${skillId}`, { method: 'DELETE' });
       await load();
     } catch (e) {
       console.error('Failed to remove skill', e);
@@ -81,8 +89,9 @@ export function SkillsPage() {
 
   async function handleTogglePause(skill: UserSkill) {
     const action = skill.status === 'active' ? 'pause' : 'resume';
+    const base = skillsBasePath(context);
     try {
-      await apiFetch(`/v1/me/skills/${skill.id}/${action}`, { method: 'PUT' });
+      await apiFetch(`${base}/${skill.id}/${action}`, { method: 'PUT' });
       const newStatus = action === 'pause' ? 'paused' : 'active';
       setMySkills(prev => prev.map(s => s.id === skill.id ? { ...s, status: newStatus as UserSkill['status'] } : s));
     } catch (e) {
@@ -110,25 +119,34 @@ export function SkillsPage() {
     return templateMap[templateId]?.name ?? templateId ?? 'Skill';
   }
 
+  const isOrgAdmin = context.type === 'org' && context.role === 'admin';
+
   return (
     <div className="flex flex-col h-screen bg-gray-50">
       {/* Header */}
       <header className="bg-white border-b px-6 py-4">
         <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">Skills</h1>
-            <p className="text-sm text-gray-600 mt-1">
-              Browse and activate pre-built automations for your workspace
-            </p>
+          <div className="flex items-center gap-4">
+            <div>
+              <h1 className="text-2xl font-bold">Skills</h1>
+              <p className="text-sm text-gray-600 mt-1">
+                {context.type === 'org'
+                  ? `${context.orgName} · automations`
+                  : 'Browse and activate pre-built automations for your workspace'}
+              </p>
+            </div>
           </div>
-          <button
-            onClick={load}
-            disabled={loading}
-            className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded flex items-center gap-2 disabled:opacity-50 text-sm"
-          >
-            <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-            Refresh
-          </button>
+          <div className="flex items-center gap-3">
+            <ContextSwitcher onManageOrg={() => setOrgPanelOpen(true)} />
+            <button
+              onClick={load}
+              disabled={loading}
+              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded flex items-center gap-2 disabled:opacity-50 text-sm"
+            >
+              <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
+              Refresh
+            </button>
+          </div>
         </div>
       </header>
 
@@ -139,7 +157,7 @@ export function SkillsPage() {
           {myConfiguredSkills.length > 0 && (
             <section>
               <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                My Skills
+                {context.type === 'org' ? `${context.orgName} Skills` : 'My Skills'}
               </h2>
               <div className="space-y-2">
                 {myConfiguredSkills.map(skill => {
@@ -150,6 +168,7 @@ export function SkillsPage() {
                   const canConfigure = Boolean(typeId && templateId);
                   const isPaused = skill.status === 'paused';
                   const isPending = skill.status === 'pending';
+                  const canEdit = context.type === 'personal' || isOrgAdmin;
                   return (
                     <div
                       key={skill.id}
@@ -176,29 +195,33 @@ export function SkillsPage() {
                         </span>
                       </div>
                       <div className="flex items-center gap-2 flex-shrink-0">
-                        <button
-                          onClick={() => handleConfigure(skill)}
-                          disabled={!canConfigure}
-                          className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-600 border rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
-                        >
-                          <Settings size={12} /> Configure
-                        </button>
-                        {!isPending && (
-                          <button
-                            onClick={() => handleTogglePause(skill)}
-                            title={isPaused ? 'Resume skill' : 'Pause skill'}
-                            className="p-1.5 text-gray-400 hover:text-gray-700 rounded hover:bg-gray-100 transition-colors"
-                          >
-                            {isPaused ? <Play size={14} /> : <Pause size={14} />}
-                          </button>
+                        {canEdit && (
+                          <>
+                            <button
+                              onClick={() => handleConfigure(skill)}
+                              disabled={!canConfigure}
+                              className="flex items-center gap-1 px-3 py-1.5 text-xs text-gray-600 border rounded hover:bg-gray-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                            >
+                              <Settings size={12} /> Configure
+                            </button>
+                            {!isPending && (
+                              <button
+                                onClick={() => handleTogglePause(skill)}
+                                title={isPaused ? 'Resume skill' : 'Pause skill'}
+                                className="p-1.5 text-gray-400 hover:text-gray-700 rounded hover:bg-gray-100 transition-colors"
+                              >
+                                {isPaused ? <Play size={14} /> : <Pause size={14} />}
+                              </button>
+                            )}
+                            <button
+                              onClick={() => handleRemoveSkill(skill.id)}
+                              className="p-1.5 text-gray-400 hover:text-red-500 rounded hover:bg-red-50 transition-colors"
+                              title="Remove skill"
+                            >
+                              <Trash2 size={14} />
+                            </button>
+                          </>
                         )}
-                        <button
-                          onClick={() => handleRemoveSkill(skill.id)}
-                          className="p-1.5 text-gray-400 hover:text-red-500 rounded hover:bg-red-50 transition-colors"
-                          title="Remove skill"
-                        >
-                          <Trash2 size={14} />
-                        </button>
                       </div>
                     </div>
                   );
@@ -281,6 +304,15 @@ export function SkillsPage() {
           )}
         </div>
       </main>
+
+      {/* Org management panel */}
+      {orgPanelOpen && context.type === 'org' && (
+        <OrgPanel
+          orgId={context.orgId}
+          isAdmin={isOrgAdmin}
+          onClose={() => setOrgPanelOpen(false)}
+        />
+      )}
     </div>
   );
 }
