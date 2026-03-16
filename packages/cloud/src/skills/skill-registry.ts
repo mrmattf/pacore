@@ -231,8 +231,8 @@ export class SkillRegistry {
 
     // Increment billing only for real, non-skipped executions
     if (this.billingManager && !skipped) {
-      const row = await this.db.query<{ user_id: string | null; org_id: string | null; sandbox: boolean }>(
-        `SELECT us.user_id, us.org_id, se.sandbox
+      const row = await this.db.query<{ org_id: string | null; sandbox: boolean }>(
+        `SELECT us.org_id, se.sandbox
          FROM skill_executions se
          JOIN user_skills us ON se.user_skill_id = us.id
          WHERE se.id = $1`,
