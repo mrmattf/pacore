@@ -87,17 +87,16 @@ export function createAdminRoutes(db: Pool): Router {
       if (existing.rows.length > 0) {
         const { force } = req.body;
         if (!force) {
-          return res.status(409).json({ error: 'User already exists. Pass "force": true to reset their temp password.' });
+          return res.status(409).json({ error: 'User already exists. Pass "force": true to grant operator access.' });
         }
         await db.query(
-          'UPDATE users SET password_hash = $1, must_change_password = true, is_operator = true, updated_at = NOW() WHERE email = $2',
-          [passwordHash, email],
+          'UPDATE users SET is_operator = true, updated_at = NOW() WHERE email = $1',
+          [email],
         );
         return res.json({
           success: true,
           email,
-          tempPassword,
-          message: 'Password reset. Share tempPassword securely — operator must change it on next login.',
+          message: 'Operator access granted to existing user. No password change required.',
         });
       }
 
