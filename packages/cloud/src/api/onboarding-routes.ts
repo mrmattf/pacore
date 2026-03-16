@@ -148,6 +148,10 @@ export function createOnboardingRoutes(db: Pool, credentialManager: CredentialMa
     const tokenHash = createHash('sha256').update(req.params.token).digest('hex');
 
     const client = await db.connect();
+    // Declared outside try so the catch block can clean up any mcp_credentials rows
+    // that were committed outside the transaction if COMMIT fails.
+    let storedOrgId = '';
+    const storedConnectionIds: string[] = [];
       try {
         await client.query('BEGIN');
 
@@ -169,6 +173,7 @@ export function createOnboardingRoutes(db: Pool, credentialManager: CredentialMa
         }
 
         const { org_id: orgId } = consumeResult.rows[0];
+        storedOrgId = orgId;
         const scope = { type: 'org' as const, orgId };
         const received: Record<string, { domain: string }> = {};
 
@@ -184,6 +189,7 @@ export function createOnboardingRoutes(db: Pool, credentialManager: CredentialMa
             clientId: shopify.apiKey,
             clientSecret: shopify.apiSecretKey,
           });
+          storedConnectionIds.push(connectionId);
           received.shopify = { domain: maskDomain(shopify.domain) };
         }
 
@@ -199,6 +205,7 @@ export function createOnboardingRoutes(db: Pool, credentialManager: CredentialMa
             email: gorgias.email,
             apiKey: gorgias.apiKey,
           });
+          storedConnectionIds.push(connectionId);
           received.gorgias = { domain: maskDomain(gorgias.domain) };
         }
 
@@ -211,6 +218,12 @@ export function createOnboardingRoutes(db: Pool, credentialManager: CredentialMa
         res.json({ success: true, received });
       } catch (error: any) {
         await client.query('ROLLBACK');
+        // Clean up any mcp_credentials rows that were committed outside the transaction.
+        // storeCredentials uses the pool directly, so a rollback here won't undo those writes.
+        if (storedOrgId && storedConnectionIds.length > 0) {
+          const scope = { type: 'org' as const, orgId: storedOrgId };
+          await Promise.all(storedConnectionIds.map(id => credentialManager.deleteCredentials(scope, id).catch(() => {})));
+        }
         console.error('Onboard POST error:', error);
         res.status(500).json({ error: 'Internal server error' });
       } finally {

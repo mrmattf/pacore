@@ -7,8 +7,8 @@ import { OrgManager } from '../organizations/org-manager';
 import { SkillRegistry } from '../skills/skill-registry';
 import { CredentialManager } from '../mcp/credential-manager';
 
-// ADR-017 assessment schema sections
-const ASSESSMENT_SECTIONS = ['current_exposure', 'skills_match', 'skill_gap', 'roi_projection'] as const;
+// ADR-017 assessment schema sections — must match the JSON output schema in docs/assessment-prompt-template.md
+const ASSESSMENT_SECTIONS = ['assessment', 'ticket_categories', 'activation_gaps', 'summary'] as const;
 
 function validateAssessmentReport(report: any): string[] {
   const missing: string[] = [];
