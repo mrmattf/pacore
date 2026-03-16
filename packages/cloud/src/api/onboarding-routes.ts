@@ -20,9 +20,13 @@ async function verifyTurnstile(token: string): Promise<boolean> {
       body: JSON.stringify({ secret, response: token }),
       signal: controller.signal,
     });
-    const data = await resp.json() as { success: boolean };
+    const data = await resp.json() as { success: boolean; 'error-codes'?: string[] };
+    if (!data.success) {
+      console.warn('[turnstile] verification failed:', data['error-codes']);
+    }
     return data.success === true;
-  } catch {
+  } catch (err) {
+    console.error('[turnstile] fetch error:', err);
     return false;
   } finally {
     clearTimeout(timeout);
@@ -115,7 +119,11 @@ export function createOnboardingRoutes(db: Pool, credentialManager: CredentialMa
     const { shopify, gorgias, cfTurnstileToken } = req.body;
 
     // Verify Turnstile (skipped in dev if CF_TURNSTILE_SECRET not set)
-    if (!cfTurnstileToken || !(await verifyTurnstile(cfTurnstileToken))) {
+    if (!cfTurnstileToken) {
+      console.warn('[turnstile] no token received in request body');
+      return res.status(400).json({ error: 'Bot verification failed. Please try again.' });
+    }
+    if (!(await verifyTurnstile(cfTurnstileToken))) {
       return res.status(400).json({ error: 'Bot verification failed. Please try again.' });
     }
 

@@ -1,6 +1,9 @@
 [build]
 dockerfilePath = "packages/cloud/Dockerfile"
 
+[build.args]
+VITE_CF_TURNSTILE_SITE_KEY = "${{VITE_CF_TURNSTILE_SITE_KEY}}"
+
 [deploy]
 healthcheckPath = "/health"
 healthcheckTimeout = 60

@@ -30,6 +30,10 @@ COPY packages/web ./packages/web
 COPY packages/sdk ./packages/sdk
 COPY packages/agent ./packages/agent
 
+# Build-time env vars for Vite (baked into the frontend bundle at build time)
+ARG VITE_CF_TURNSTILE_SITE_KEY
+ENV VITE_CF_TURNSTILE_SITE_KEY=$VITE_CF_TURNSTILE_SITE_KEY
+
 # Build all packages (turbo handles dependency order; --force bypasses turbo cache)
 RUN ./node_modules/.bin/turbo run build --force
 
