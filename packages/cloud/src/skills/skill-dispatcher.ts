@@ -35,9 +35,9 @@ export class SkillDispatcher {
       return;
     }
 
-    const userId = userSkill.userId;
+    const userId = userSkill.orgId ?? userSkill.userId;
     if (!userId) {
-      await this.skillRegistry.failExecution(executionId, 'Only user-scoped skills are supported');
+      await this.skillRegistry.failExecution(executionId, 'Skill has no owner (no userId or orgId)');
       return;
     }
 
