@@ -1667,6 +1667,67 @@ export class APIGateway {
       }
     });
 
+    // Fire a test event against a skill in dry-run mode (member access)
+    this.app.post('/v1/organizations/:orgId/skills/:userSkillId/test-event', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { orgId, userSkillId } = req.params;
+        await this.config.orgManager.assertMember(orgId, req.user!.id);
+
+        const userSkill = await this.config.skillRegistry.getUserSkill(userSkillId);
+        if (!userSkill) return res.status(404).json({ error: 'Skill not found' });
+
+        const config = userSkill.configuration as unknown as UserSkillConfig;
+        if (!config?.templateId || !this.config.skillTemplateRegistry) {
+          return res.status(400).json({ error: 'Skill has no template configured' });
+        }
+
+        const template = this.config.skillTemplateRegistry.getTemplate(config.templateId);
+        if (!template) return res.status(400).json({ error: 'Template not found' });
+
+        // Build a fixture payload appropriate for the skill type
+        let fixturePayload: unknown;
+        switch (template.skillTypeId) {
+          case 'backorder-notification':
+          case 'high-risk-order-response': {
+            const recentOrderId = await this.fetchMostRecentShopifyOrderId(config, orgId);
+            fixturePayload = { id: recentOrderId ?? 99999999 };
+            break;
+          }
+          case 'low-stock-impact':
+            fixturePayload = { inventory_item_id: 12345678, available: 0 };
+            break;
+          case 'delivery-exception-alert':
+            fixturePayload = {
+              msg: {
+                tracking_number: 'TEST123456789',
+                slug: 'ups',
+                tag: 'Exception',
+                subtag: 'Exception_001',
+                subtag_message: 'Package delayed in transit',
+                order_id: '99999999',
+              },
+            };
+            break;
+          default:
+            return res.status(400).json({ error: `Unsupported skill type for test events: ${template.skillTypeId}` });
+        }
+
+        const execution = await this.config.skillRegistry.createExecution(
+          userSkillId, null, fixturePayload, { sandbox: true }
+        );
+        await this.config.skillDispatcher.dispatch(execution.id, userSkillId, fixturePayload, { dryRun: true });
+
+        const updated = await this.config.db.query(
+          'SELECT * FROM skill_executions WHERE id = $1',
+          [execution.id]
+        );
+        res.json(updated.rows[0] ?? execution);
+      } catch (error: any) {
+        console.error('Test event error:', error);
+        res.status(500).json({ error: error.message });
+      }
+    });
+
     // Deactivate an org skill (admin only)
     this.app.delete('/v1/organizations/:orgId/skills/:userSkillId', async (req: AuthenticatedRequest, res: Response) => {
       try {
