@@ -128,7 +128,7 @@ User Message → API Gateway → Orchestrator → LLM Provider → Response
 
 ## Database Schema
 
-See actual migration files in `packages/cloud/src/db/` for current schema (the schema below may be outdated — verify against DB before relying on it).
+See actual migration files in `packages/cloud/db/` for current schema (the schema below may be outdated — verify against DB before relying on it). Migration files are sequential numbered SQL files applied automatically on deployment — see `packages/cloud/CLAUDE.md` for the naming convention.
 
 ## API Endpoints
 

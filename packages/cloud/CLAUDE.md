@@ -33,6 +33,18 @@ Express API + WebSocket server. Entry point: `src/api/gateway.ts`.
 2. Register in the `AdapterRegistry` setup in `gateway.ts`
 3. Add credential fields (`credentialFields`, `setupGuide`) for the Connect UI
 
+## Adding a Database Migration
+
+Migration files live in **`packages/cloud/db/`** (not `db/migrations/`). Files in this folder are applied automatically on deployment in filename order.
+
+**Convention:**
+1. Name the file `<next-number>_<description>.sql` — e.g. `014_add_audit_events.sql`
+2. Always use `IF NOT EXISTS` / `IF EXISTS` so migrations are idempotent and safe to re-run
+3. Never modify an already-deployed migration — write a new one instead
+4. Verify the next number by listing `packages/cloud/db/*.sql` before creating the file
+
+Current highest: **013** (`013_operator_platform.sql`)
+
 ## Adding a New API Endpoint
 
 Follow conventions in [API.md](../../API.md):
