@@ -4,12 +4,13 @@ import { ArrowLeft, Loader2, AlertCircle, Check } from 'lucide-react';
 import { apiFetch } from '../services/auth';
 import { updateMode, storeAssessment, fetchAssessment, AssessmentReport } from '../hooks/useOperator';
 
-const ASSESSMENT_SECTIONS = ['current_exposure', 'skills_match', 'skill_gap', 'roi_projection'] as const;
+const ASSESSMENT_SECTIONS = ['assessment', 'ticket_categories', 'activation_gaps', 'summary'] as const;
 const SECTION_LABELS: Record<string, string> = {
-  current_exposure: 'Current Exposure',
-  skills_match: 'Skills Match Matrix',
-  skill_gap: 'Skill Gap Analysis',
-  roi_projection: 'ROI Projection',
+  assessment: 'Assessment Summary',
+  ticket_categories: 'Ticket Categories',
+  activation_gaps: 'Activation Gaps',
+  gap_candidates: 'Gap Candidates',
+  summary: 'Summary',
 };
 
 const RECOMMENDATION_OPTIONS = [
@@ -92,7 +93,7 @@ function AssessmentTab({ orgId }: { orgId: string }) {
         <textarea
           value={jsonInput}
           onChange={(e) => handleJsonChange(e.target.value)}
-          placeholder='{ "current_exposure": {...}, "skills_match": {...}, "skill_gap": {...}, "roi_projection": {...} }'
+          placeholder='{ "assessment": {...}, "ticket_categories": [...], "activation_gaps": [...], "summary": {...} }'
           rows={8}
           className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm font-mono focus:outline-none focus:border-blue-400 resize-none"
         />
@@ -154,9 +155,9 @@ function AssessmentTab({ orgId }: { orgId: string }) {
           </div>
           <p className="text-xs text-gray-400">Created {new Date(report.created_at).toLocaleDateString()}</p>
 
-          {ASSESSMENT_SECTIONS.map(section => {
+          {([...ASSESSMENT_SECTIONS, 'gap_candidates'] as string[]).map(section => {
             const data = report.report[section];
-            if (!data) return null;
+            if (data === undefined || data === null) return null;
             return (
               <div key={section}>
                 <h4 className="font-medium text-gray-700 mb-2">{SECTION_LABELS[section]}</h4>

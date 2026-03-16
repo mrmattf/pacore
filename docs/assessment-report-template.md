@@ -1,5 +1,7 @@
 # Automation Readiness Report — [CUSTOMER NAME]
 
+> *Operator: Fill this template from the `roi_projection`, `ticket_categories`, `activation_gaps`, and `gap_candidates` sections of your Assessment JSON. Use the `cost_per_ticket_usd` and `avg_handle_time_minutes` values you set in the Customer Parameters — check the `assumptions[]` array in `roi_projection` to confirm which were operator-supplied vs. defaulted.*
+
 **Prepared by:** [OPERATOR NAME], Clarissi
 **Date:** [DATE]
 **Data window:** 90 days ([START DATE] – [END DATE])
@@ -82,11 +84,12 @@ Beyond the existing skill catalog, we identified the following ticket categories
 
 ## Section 4 — ROI Projection
 
-> *Operator: Use conservative deflection rates. For backorder notification, 60–70% deflection rate is typical. For low-stock, 40–50%. Adjust based on Yota's actual ticket patterns.*
+> *Operator: Pull `cost_per_ticket_usd` and `avg_handle_time_minutes` from the Customer Parameters you set before running the assessment. If you left them as `null`, use the defaults below. Use conservative deflection rates — 60–70% for backorder notification, 40–50% for low-stock. Adjust based on this customer's actual ticket patterns.*
 
 ### Assumptions
 
-- Average cost of a human-handled support ticket: **$5.00**
+- Average cost of a human-handled support ticket: **$[cost_per_ticket_usd — operator-supplied, or $10.00 default]**
+- Average handle time per ticket: **[avg_handle_time_minutes — operator-supplied, or 10 min default]**
 - Backorder Notification deflection rate: **65%** (industry baseline — we'll measure your actual rate in Month 1)
 - Low Stock Impact deflection rate: **45%**
 
@@ -94,8 +97,8 @@ Beyond the existing skill catalog, we identified the following ticket categories
 
 | Skill | Monthly Fires | Deflection Rate | Deflected Tickets | Value Saved |
 |-------|--------------|----------------|-------------------|-------------|
-| Backorder Notification | [N] | 65% | ~[N × 0.65] | ~$[N × 0.65 × 5] |
-| Low Stock Impact | [N] | 45% | ~[N × 0.45] | ~$[N × 0.45 × 5] |
+| Backorder Notification | [N] | 65% | ~[N × 0.65] | ~$[N × 0.65 × cost_per_ticket] |
+| Low Stock Impact | [N] | 45% | ~[N × 0.45] | ~$[N × 0.45 × cost_per_ticket] |
 | **Total** | | | **~[sum]** | **~$[sum]** |
 
 ### Concierge Investment vs. Return
