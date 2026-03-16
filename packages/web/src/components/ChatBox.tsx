@@ -46,22 +46,26 @@ export function ChatBox({ messages, onConfirmExecution, onCreateWorkflow, onDism
         parts.push(content.substring(lastIndex, match.index));
       }
 
-      // Add clickable link
+      // Add clickable link — only allow internal paths (must start with /)
       const linkText = match[1];
       const linkPath = match[2];
-      parts.push(
-        <a
-          key={match.index}
-          href={linkPath}
-          onClick={(e) => {
-            e.preventDefault();
-            navigate(linkPath);
-          }}
-          className="underline hover:text-blue-800 cursor-pointer"
-        >
-          {linkText}
-        </a>
-      );
+      if (!linkPath.startsWith('/')) {
+        parts.push(linkText);
+      } else {
+        parts.push(
+          <a
+            key={match.index}
+            href={linkPath}
+            onClick={(e) => {
+              e.preventDefault();
+              navigate(linkPath);
+            }}
+            className="underline hover:text-blue-800 cursor-pointer"
+          >
+            {linkText}
+          </a>
+        );
+      }
 
       lastIndex = match.index + match[0].length;
     }
