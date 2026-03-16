@@ -384,20 +384,19 @@ export function SkillConfigPage() {
                   <div className="text-xs text-red-600 bg-red-50 rounded p-2">{testError}</div>
                 )}
 
-                {testResult?.wouldCreateTicket && (
+                {testResult?.status === 'failed' && testResult?.error && (
+                  <div className="text-xs text-red-600 bg-red-50 rounded p-2">{testResult.error}</div>
+                )}
+
+                {testResult?.result?.dryRun?.wouldCreateTicket && (
                   <div className="bg-gray-50 rounded p-3 text-xs space-y-1">
-                    {testResult.synthetic && (
-                      <div className="text-amber-600 bg-amber-50 rounded px-2 py-1 mb-2">
-                        {testResult.note}
-                      </div>
-                    )}
                     <div className="font-medium text-gray-700">Would create {notificationName} ticket:</div>
-                    <div><span className="text-gray-500">Subject:</span> {testResult.wouldCreateTicket.subject}</div>
-                    <div><span className="text-gray-500">Priority:</span> {testResult.wouldCreateTicket.priority}</div>
+                    <div><span className="text-gray-500">Subject:</span> {testResult.result.dryRun.wouldCreateTicket.subject}</div>
+                    <div><span className="text-gray-500">Priority:</span> {testResult.result.dryRun.wouldCreateTicket.priority}</div>
                     <details className="mt-1">
                       <summary className="cursor-pointer text-blue-600">Preview message body</summary>
                       <iframe
-                        srcDoc={testResult.wouldCreateTicket.message}
+                        srcDoc={testResult.result.dryRun.wouldCreateTicket.message}
                         className="mt-2 w-full border rounded bg-white"
                         style={{ height: '280px' }}
                         sandbox="allow-same-origin"
@@ -407,9 +406,9 @@ export function SkillConfigPage() {
                   </div>
                 )}
 
-                {testResult?.wouldSkip && (
+                {testResult?.skipped && !testResult?.result?.dryRun?.wouldCreateTicket && (
                   <div className="text-xs text-gray-500 bg-gray-50 rounded p-2">
-                    No backordered items in test order — skill would skip (no ticket created).
+                    No matching items in test order — skill would skip (no ticket created).
                   </div>
                 )}
               </div>
