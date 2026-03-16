@@ -25,7 +25,7 @@ export function createOperatorRoutes(
   skillRegistry: SkillRegistry,
 ): Router {
   const router = Router();
-  router.use(requireOperator);
+  router.use(requireOperator(db));
 
   // ---------------------------------------------------------------------------
   // GET /v1/operator/customers — list this operator's customers
@@ -91,6 +91,9 @@ export function createOperatorRoutes(
 
       res.status(201).json({ success: true, org, managementMode: mode });
     } catch (error: any) {
+      if (error.code === '23505') {
+        return res.status(409).json({ error: 'This customer org is already assigned to you' });
+      }
       console.error('Create customer error:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
@@ -266,6 +269,10 @@ export function createOperatorRoutes(
         return res.status(400).json({ error: 'report is required and must be an object' });
       }
 
+      if (JSON.stringify(report).length > 512_000) {
+        return res.status(400).json({ error: 'Report payload too large (max 512 KB)' });
+      }
+
       const missingSection = validateAssessmentReport(report);
       if (missingSection.length > 0) {
         return res.status(400).json({
@@ -362,6 +369,15 @@ export function createOperatorRoutes(
       const operatorId = req.user!.id;
       const { orgId, userSkillId } = req.params;
       if (!await assertOperatorWriteAccess(operatorId, orgId, db, res)) return;
+
+      // Verify the skill belongs to this org — prevents cross-tenant skill config writes
+      const ownerCheck = await db.query(
+        'SELECT id FROM user_skills WHERE id = $1 AND org_id = $2',
+        [userSkillId, orgId],
+      );
+      if (ownerCheck.rows.length === 0) {
+        return res.status(404).json({ error: 'Skill not found' });
+      }
 
       const { config } = req.body;
       await skillRegistry.configureSkill(userSkillId, config || {});

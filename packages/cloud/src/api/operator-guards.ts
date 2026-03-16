@@ -11,15 +11,24 @@ export interface OperatorRequest extends Request {
 }
 
 /**
- * Express middleware: requires the authenticated user to have is_operator = true in their JWT.
- * Returns 403 if the user is not an operator.
+ * Returns an Express middleware that requires the authenticated user to have is_operator = true.
+ * Performs a live DB check so that operator revocation takes effect immediately — not JWT-expiry-delayed.
+ * Operator routes are low-frequency admin paths; the extra query is acceptable.
  */
-export function requireOperator(req: OperatorRequest, res: Response, next: NextFunction): void {
-  if (!req.user?.isOperator) {
-    res.status(403).json({ error: 'Operator access required' });
-    return;
-  }
-  next();
+export function requireOperator(db: Pool) {
+  return async (req: OperatorRequest, res: Response, next: NextFunction): Promise<void> => {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(403).json({ error: 'Operator access required' });
+      return;
+    }
+    const result = await db.query('SELECT is_operator FROM users WHERE id = $1', [userId]);
+    if (!result.rows[0]?.is_operator) {
+      res.status(403).json({ error: 'Operator access required' });
+      return;
+    }
+    next();
+  };
 }
 
 /**

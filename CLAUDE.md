@@ -89,14 +89,17 @@ User Message → API Gateway → Orchestrator → LLM Provider → Response
 - [x] Execution history: API endpoints + per-skill view in BillingPage
 - [x] Assessment infrastructure: `pacore__list_skill_templates`, `pacore__list_connections`, `pacore__get_execution_log` MCP tools for operator-driven Skills Assessment workflow
 - [x] Frontend org context switching: personal/org context selector, role resolution, admin member management panel
+- [x] Operator Platform: `is_operator` identity, operator-customer relationships, credential intake with one-time tokens (SHA-256 hash), management mode lifecycle (concierge/self-managed), operator dashboard + customer detail views, public onboarding form with Cloudflare Turnstile, atomic credential submission
 
 ### In Progress
 - [ ] Edge agent for local desktop integration
 
 ### Planned
+- [ ] Audit events table for SOC 2 Type II operator action logging
 - [ ] Builder Agent / BYOM skill creation — operator-only tooling for discovering and drafting new skills; customer-facing self-service deferred until tooling and onboarding mature (see ADR-005)
 - [ ] Agent layer for Tier 2 skills (LLM-driven decision-making on top of tool chains)
 - [ ] Chat channel integrations (WhatsApp, Telegram, Slack)
+- [ ] Public signup for self-serve customer acquisition
 
 ## Key Files
 

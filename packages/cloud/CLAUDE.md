@@ -7,6 +7,9 @@ Express API + WebSocket server. Entry point: `src/api/gateway.ts`.
 | File | Purpose |
 |------|---------|
 | `src/api/gateway.ts` | All REST endpoints and webhook entry points |
+| `src/api/operator-routes.ts` | Operator-only routes: customer management, mode transitions, assessment reports |
+| `src/api/operator-guards.ts` | `requireOperator` middleware and operator authorization helpers |
+| `src/api/onboarding-routes.ts` | Public credential intake endpoint (one-time token validation, atomic consumption, Cloudflare Turnstile verification) |
 | `src/skills/skill-dispatcher.ts` | Routes webhook events to skill tool chains |
 | `src/skills/skill-template-registry.ts` | Skill catalog and template registry |
 | `src/integrations/adapter-registry.ts` | Central dispatch for integration adapters (with retry) |

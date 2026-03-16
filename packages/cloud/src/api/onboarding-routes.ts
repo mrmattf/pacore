@@ -11,16 +11,21 @@ async function verifyTurnstile(token: string): Promise<boolean> {
   const secret = process.env.CF_TURNSTILE_SECRET;
   if (!secret) return true; // dev mode: skip verification
 
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
   try {
     const resp = await fetch('https://challenges.cloudflare.com/turnstile/v0/siteverify', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ secret, response: token }),
+      signal: controller.signal,
     });
     const data = await resp.json() as { success: boolean };
     return data.success === true;
   } catch {
     return false;
+  } finally {
+    clearTimeout(timeout);
   }
 }
 

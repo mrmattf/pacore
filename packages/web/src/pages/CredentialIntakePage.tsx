@@ -70,20 +70,19 @@ export function CredentialIntakePage() {
       try {
         const p = JSON.parse(saved);
         if (p.shopifyDomain) setShopifyDomain(p.shopifyDomain);
-        if (p.shopifyApiKey) setShopifyApiKey(p.shopifyApiKey);
         if (p.gorgiasDomain) setGorgiasDomain(p.gorgiasDomain);
         if (p.gorgiasEmail) setGorgiasEmail(p.gorgiasEmail);
-        if (p.gorgiasApiKey) setGorgiasApiKey(p.gorgiasApiKey);
+        // API keys are never persisted — user must re-enter them
       } catch {}
     }
   }, [storageKey]);
 
   function savePartial() {
     if (!storageKey) return;
-    // Do NOT save apiSecretKey
+    // Save only non-credential fields — API keys and secrets are never persisted to localStorage
     localStorage.setItem(storageKey, JSON.stringify({
-      shopifyDomain, shopifyApiKey,
-      gorgiasDomain, gorgiasEmail, gorgiasApiKey,
+      shopifyDomain,
+      gorgiasDomain, gorgiasEmail,
     }));
   }
 
