@@ -123,7 +123,7 @@ export function extractInventoryUpdatePayload(payload: unknown): InventoryUpdate
 export async function runLowStockImpactChain(
   inventoryPayload: InventoryUpdatePayload,
   userSkillConfig: UserSkillConfig,
-  userId: string,
+  orgId: string,
   deps: LowStockChainDeps,
   options: { dryRun?: boolean } = {}
 ): Promise<LowStockChainResult> {
@@ -144,7 +144,7 @@ export async function runLowStockImpactChain(
   }
 
   const shopifyCreds = await credentialManager.getCredentials(
-    { type: 'user', userId },
+    { type: 'org', orgId },
     shopifyConnectionId
   );
   if (!shopifyCreds) {
@@ -319,7 +319,7 @@ export async function runLowStockImpactChain(
       }
 
       if (action.type === 'escalate') {
-        await executeEscalation(action, ctx, userSkillConfig, template, userId, { credentialManager, adapterRegistry });
+        await executeEscalation(action, ctx, userSkillConfig, template, orgId, { credentialManager, adapterRegistry });
         orderResult.actions.push('escalate');
         continue;
       }
@@ -338,7 +338,7 @@ export async function runLowStockImpactChain(
         }
 
         const slotCreds = await credentialManager.getCredentials(
-          { type: 'user', userId },
+          { type: 'org', orgId },
           slotConnectionId
         );
         if (!slotCreds) {

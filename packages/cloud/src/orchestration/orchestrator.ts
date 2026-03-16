@@ -466,9 +466,7 @@ export class Orchestrator {
       return this.processRequest(userId, input, { ...options, agentMode: false });
     }
 
-    const credScope: CredentialScope = options.orgId
-      ? { type: 'org', orgId: options.orgId }
-      : { type: 'user', userId };
+    const credScope: CredentialScope = { type: 'org', orgId: options.orgId! };
 
     const tools = await this.mcpGateway!.getAgentTools(credScope);
 

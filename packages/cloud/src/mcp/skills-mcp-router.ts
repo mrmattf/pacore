@@ -198,14 +198,14 @@ export function createSkillsMcpRouter(
 
   router.post('/tools/call', async (req: Request, res: Response) => {
     const { name, arguments: args = {} } = req.body as { name: string; arguments?: Record<string, unknown> };
-    const userId = req.headers['x-user-id'] as string;
+    const orgId = req.headers['x-org-id'] as string;
 
-    if (!userId) {
-      return res.status(400).json({ error: 'Missing x-user-id header' });
+    if (!orgId) {
+      return res.status(400).json({ error: 'Missing x-org-id header' });
     }
 
     try {
-      const result = await dispatchTool(name, args, userId, {
+      const result = await dispatchTool(name, args, orgId, {
         db, credentialManager, adapterRegistry, skillRegistry, skillTemplateRegistry,
       });
       res.json({ content: [{ type: 'text', text: JSON.stringify(result, null, 2) }] });
@@ -229,7 +229,7 @@ interface ToolDeps {
 async function dispatchTool(
   name: string,
   args: Record<string, unknown>,
-  userId: string,
+  orgId: string,
   deps: ToolDeps
 ): Promise<unknown> {
   switch (name) {
@@ -252,8 +252,8 @@ async function dispatchTool(
     case 'pacore_list_connections': {
       const result = await deps.db.query(
         `SELECT id, integration_key, display_name, status, last_tested_at, created_at
-         FROM integration_connections WHERE user_id = $1 ORDER BY created_at DESC`,
-        [userId]
+         FROM integration_connections WHERE org_id = $1 ORDER BY created_at DESC`,
+        [orgId]
       );
       return result.rows.map(r => ({
         id:             r.id,
@@ -295,12 +295,12 @@ async function dispatchTool(
 
       const connectionId = randomUUID();
       await deps.db.query(
-        `INSERT INTO integration_connections (id, user_id, integration_key, display_name, status, last_tested_at)
+        `INSERT INTO integration_connections (id, org_id, integration_key, display_name, status, last_tested_at)
          VALUES ($1, $2, $3, $4, 'active', NOW())`,
-        [connectionId, userId, integrationKey, displayName]
+        [connectionId, orgId, integrationKey, displayName]
       );
       await deps.credentialManager.storeCredentials(
-        { type: 'user', userId },
+        { type: 'org', orgId },
         connectionId,
         credentials
       );
@@ -312,17 +312,17 @@ async function dispatchTool(
       const template = deps.skillTemplateRegistry.getTemplate(templateId);
       if (!template) throw new Error(`Skill template '${templateId}' not found`);
 
-      // Check if user already has a pending/active skill for this template
+      // Check if org already has a pending/active skill for this template
       const existing = await deps.db.query(
-        `SELECT id FROM user_skills WHERE user_id = $1 AND (configuration->>'templateId') = $2 AND status != 'paused' LIMIT 1`,
-        [userId, templateId]
+        `SELECT id FROM user_skills WHERE org_id = $1 AND (configuration->>'templateId') = $2 AND status != 'paused' LIMIT 1`,
+        [orgId, templateId]
       );
       if (existing.rows.length > 0) {
         return { userSkillId: existing.rows[0].id, templateId, status: 'already_active', message: 'Skill already activated' };
       }
 
       const userSkill = await deps.skillRegistry.activateSkill(
-        { type: 'user', userId },
+        { type: 'org', orgId },
         template.skillTypeId  // skillId in skill catalog; templates use skillTypeId as the catalog key
       );
       // Store templateId immediately so pacore_configure_skill can read it
@@ -384,7 +384,7 @@ async function dispatchTool(
               const connectionId = config.slotConnections[slot.key];
               if (!connectionId) continue;
 
-              const creds = await deps.credentialManager.getCredentials({ type: 'user', userId }, connectionId);
+              const creds = await deps.credentialManager.getCredentials({ type: 'org', orgId }, connectionId);
               if (!creds) continue;
 
               const { externalWebhookId } = await adapter.registerWebhook(topic, webhookUrl, creds as Record<string, unknown>);
@@ -456,7 +456,7 @@ async function dispatchTool(
             const connectionId = config.slotConnections[slot.key];
             if (!connectionId) continue;
 
-            const creds = await deps.credentialManager.getCredentials({ type: 'user', userId }, connectionId);
+            const creds = await deps.credentialManager.getCredentials({ type: 'org', orgId }, connectionId);
             if (!creds) continue;
 
             try {

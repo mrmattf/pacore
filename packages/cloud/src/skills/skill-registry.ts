@@ -4,9 +4,7 @@ import { BillingScope, SkillDefinition, UserSkill, SkillTrigger, SkillExecution,
 import { randomBytes } from 'crypto';
 import { BillingManager } from '../billing';
 
-export type SkillScope =
-  | { type: 'user'; userId: string }
-  | { type: 'org';  orgId: string };
+export type SkillScope = { type: 'org'; orgId: string };
 
 function isSkippedResult(result: unknown): boolean {
   if (!result || typeof result !== 'object') return true;
@@ -77,23 +75,21 @@ export class SkillRegistry {
     }
 
     const id = nanoid();
-    const userId = scope.type === 'user' ? scope.userId : null;
-    const orgId  = scope.type === 'org'  ? scope.orgId  : null;
 
     const result = await this.db.query(
-      `INSERT INTO user_skills (id, user_id, org_id, skill_id, status)
-       VALUES ($1, $2, $3, $4, 'pending')
+      `INSERT INTO user_skills (id, org_id, skill_id, status)
+       VALUES ($1, $2, $3, 'pending')
        RETURNING *`,
-      [id, userId, orgId, skillId]
+      [id, scope.orgId, skillId]
     );
 
     return this.rowToUserSkill(result.rows[0]);
   }
 
-  async findPendingSkill(userId: string, skillId: string): Promise<UserSkill | null> {
+  async findPendingSkill(orgId: string, skillId: string): Promise<UserSkill | null> {
     const result = await this.db.query(
-      `SELECT * FROM user_skills WHERE user_id = $1 AND skill_id = $2 AND status = 'pending' LIMIT 1`,
-      [userId, skillId]
+      `SELECT * FROM user_skills WHERE org_id = $1 AND skill_id = $2 AND status = 'pending' LIMIT 1`,
+      [orgId, skillId]
     );
     return result.rows[0] ? this.rowToUserSkill(result.rows[0]) : null;
   }
@@ -104,14 +100,6 @@ export class SkillRegistry {
       [userSkillId]
     );
     return result.rows[0] ? this.rowToUserSkill(result.rows[0]) : null;
-  }
-
-  async listUserSkills(userId: string): Promise<UserSkill[]> {
-    const result = await this.db.query(
-      'SELECT * FROM user_skills WHERE user_id = $1 ORDER BY created_at DESC',
-      [userId]
-    );
-    return result.rows.map(this.rowToUserSkill);
   }
 
   async listOrgSkills(orgId: string): Promise<UserSkill[]> {
@@ -251,11 +239,10 @@ export class SkillRegistry {
         [executionId]
       );
       if (row.rows.length > 0 && !row.rows[0].sandbox) {
-        const { user_id, org_id } = row.rows[0];
-        const scope: BillingScope = org_id
-          ? { type: 'org', orgId: org_id }
-          : { type: 'user', userId: user_id! };
-        await this.billingManager.incrementExecution(scope);
+        const { org_id } = row.rows[0];
+        if (org_id) {
+          await this.billingManager.incrementExecution({ type: 'org', orgId: org_id });
+        }
       }
     }
   }
@@ -300,22 +287,6 @@ export class SkillRegistry {
     return result.rows.map(this.rowToExecution);
   }
 
-  async listAllUserExecutions(userId: string, limit = 20): Promise<(SkillExecution & { skillTypeId: string | null })[]> {
-    const result = await this.db.query(
-      `SELECT se.*, us.configuration->>'skillTypeId' as skill_type_id
-       FROM skill_executions se
-       JOIN user_skills us ON se.user_skill_id = us.id
-       WHERE us.user_id = $1
-       ORDER BY se.started_at DESC
-       LIMIT $2`,
-      [userId, limit]
-    );
-    return result.rows.map(row => ({
-      ...this.rowToExecution(row),
-      skillTypeId: (row.skill_type_id as string | null) ?? null,
-    }));
-  }
-
   async listAllOrgExecutions(orgId: string, limit = 20): Promise<(SkillExecution & { skillTypeId: string | null })[]> {
     const result = await this.db.query(
       `SELECT se.*, us.configuration->>'skillTypeId' as skill_type_id
@@ -337,8 +308,8 @@ export class SkillRegistry {
   private rowToUserSkill(row: Record<string, unknown>): UserSkill {
     return {
       id: row.id as string,
-      userId: (row.user_id as string | null) ?? null,
-      orgId:  (row.org_id  as string | null) ?? null,
+      userId: null,
+      orgId:  (row.org_id as string | null) ?? null,
       skillId: row.skill_id as string,
       configuration: (row.configuration as Record<string, unknown>) ?? {},
       status: row.status as SkillStatus,

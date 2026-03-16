@@ -64,16 +64,16 @@ export class WebhookTriggerHandler {
         [trigger.userSkillId]
       );
       if (scopeRow.rows.length > 0) {
-        const { user_id, org_id } = scopeRow.rows[0];
-        const scope: BillingScope = org_id
-          ? { type: 'org', orgId: org_id }
-          : { type: 'user', userId: user_id! };
-        const plan = await this.billingManager.getEffectivePlan(scope);
-        sandboxMode = isSandboxPlan(plan);
-        if (!sandboxMode) {
-          const overLimit = await this.billingManager.isOverLimit(scope, 'skillExecutionsPerMonth');
-          if (overLimit) {
-            return { status: 429, body: 'Monthly execution limit reached. Upgrade your plan.' };
+        const { org_id } = scopeRow.rows[0];
+        if (org_id) {
+          const scope: BillingScope = { type: 'org', orgId: org_id };
+          const plan = await this.billingManager.getEffectivePlan(scope);
+          sandboxMode = isSandboxPlan(plan);
+          if (!sandboxMode) {
+            const overLimit = await this.billingManager.isOverLimit(scope, 'skillExecutionsPerMonth');
+            if (overLimit) {
+              return { status: 429, body: 'Monthly execution limit reached. Upgrade your plan.' };
+            }
           }
         }
       }

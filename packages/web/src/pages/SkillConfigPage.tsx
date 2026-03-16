@@ -269,6 +269,7 @@ export function SkillConfigPage() {
                       setSlotConnections(prev => ({ ...prev, [slot.key]: connId }))
                     }
                     token={token}
+                    orgId={context.orgId}
                   />
                 </div>
               ))}

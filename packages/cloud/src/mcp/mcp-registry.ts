@@ -23,8 +23,8 @@ export class MCPRegistry {
 
   async registerServer(request: RegisterMCPServerRequest): Promise<MCPServer> {
     const id = nanoid();
-    const userId = request.scope.type === 'user' ? request.scope.userId : null;
-    const orgId  = request.scope.type === 'org'  ? request.scope.orgId  : null;
+    const userId = null;
+    const orgId  = request.scope.orgId;
 
     const server: MCPServer = {
       id,

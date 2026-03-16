@@ -194,9 +194,8 @@ export class APIGateway {
    * Returns the CredentialScope that matches the server's ownership.
    * Personal servers use user scope; org servers use org scope.
    */
-  private serverScope(server: MCPServer, fallbackUserId: string): CredentialScope {
-    if (server.orgId) return { type: 'org', orgId: server.orgId };
-    return { type: 'user', userId: fallbackUserId };
+  private serverScope(server: MCPServer, _fallbackUserId: string): CredentialScope {
+    return { type: 'org', orgId: server.orgId! };
   }
 
   private setupRoutes(): void {
@@ -219,7 +218,7 @@ export class APIGateway {
     this.app.use(createMcpCredentialRoutes(this.config.db));
 
     // Admin routes — protected by X-Admin-Secret header, bypass JWT auth
-    this.app.use('/v1/admin', createAdminRoutes(this.config.db));
+    this.app.use('/v1/admin', createAdminRoutes(this.config.db, this.config.orgManager));
 
     // Onboarding intake routes — public (no auth), mounted before JWT auth middleware applies
     this.app.use('/v1/onboard', createOnboardingRoutes(this.config.db, this.config.credentialManager));
@@ -246,8 +245,8 @@ export class APIGateway {
       adapterRegistry: this.config.adapterRegistry ?? new AdapterRegistry(),
       skillTemplateRegistry: this.config.skillTemplateRegistry,
       listConnections: async (scope: CredentialScope) => {
-        const column = scope.type === 'org' ? 'org_id' : 'user_id';
-        const value  = scope.type === 'org' ? scope.orgId : scope.userId;
+        const column = 'org_id';
+        const value  = scope.orgId;
         const result = await this.config.db.query(
           `SELECT id, integration_key, display_name FROM integration_connections WHERE ${column} = $1 AND status = 'active' ORDER BY created_at ASC`,
           [value]
@@ -610,15 +609,15 @@ export class APIGateway {
     this.app.post('/v1/mcp/servers', async (req: AuthenticatedRequest, res: Response) => {
       try {
         const userId = req.user!.id;
-        const { name, serverType, protocol, connectionConfig, categories, credentials } = req.body;
+        const { name, serverType, protocol, connectionConfig, categories, credentials, orgId } = req.body;
 
-        if (!name || !serverType || !protocol || !connectionConfig) {
+        if (!name || !serverType || !protocol || !connectionConfig || !orgId) {
           return res.status(400).json({
-            error: 'Missing required fields: name, serverType, protocol, connectionConfig'
+            error: 'Missing required fields: name, serverType, protocol, connectionConfig, orgId'
           });
         }
 
-        const scope: CredentialScope = { type: 'user', userId };
+        const scope: CredentialScope = { type: 'org', orgId };
 
         const server = await this.config.mcpRegistry.registerServer({
           scope,
@@ -1226,16 +1225,6 @@ export class APIGateway {
           return res.status(400).json({ error: 'name is required' });
         }
 
-        // Enforce org count limit
-        if (this.config.billingManager) {
-          try {
-            await this.config.billingManager.checkLimit({ type: 'user', userId }, 'orgs');
-          } catch (e) {
-            if (e instanceof PlanLimitError) return this.planLimitResponse(res, e);
-            throw e;
-          }
-        }
-
         const resolvedSlug = slug ?? OrgManager.toSlug(name);
 
         if (!await this.config.orgManager.isSlugAvailable(resolvedSlug)) {
@@ -1451,170 +1440,6 @@ export class APIGateway {
     });
 
     // -------------------------------------------------------------------------
-    // Personal skill activations  (scope: /v1/me/skills)
-    // -------------------------------------------------------------------------
-
-    // Activate a skill for the current user
-    this.app.post('/v1/me/skills/:skillId/activate', async (req: AuthenticatedRequest, res: Response) => {
-      try {
-        const userId = req.user!.id;
-
-        // Enforce active skill limit
-        if (this.config.billingManager) {
-          try {
-            await this.config.billingManager.checkLimit({ type: 'user', userId }, 'activeSkills');
-          } catch (e) {
-            if (e instanceof PlanLimitError) return this.planLimitResponse(res, e);
-            throw e;
-          }
-        }
-
-        // Reuse any existing pending record for this user+skill to avoid accumulating orphans
-        const existing = await this.config.skillRegistry.findPendingSkill(userId, req.params.skillId);
-        if (existing) {
-          res.json(existing);
-          return;
-        }
-
-        const userSkill = await this.config.skillRegistry.activateSkill(
-          { type: 'user', userId },
-          req.params.skillId
-        );
-        res.status(201).json(userSkill);
-      } catch (error: any) {
-        console.error('Activate skill error:', error);
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    // List my active skills
-    this.app.get('/v1/me/skills', async (req: AuthenticatedRequest, res: Response) => {
-      try {
-        const skills = await this.config.skillRegistry.listUserSkills(req.user!.id);
-        res.json(skills);
-      } catch (error: any) {
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    // Get a single personal skill (for config page pre-population on refresh)
-    this.app.get('/v1/me/skills/:userSkillId', async (req: AuthenticatedRequest, res: Response) => {
-      try {
-        const skill = await this.config.skillRegistry.getUserSkill(req.params.userSkillId);
-        if (!skill) return res.status(404).json({ error: 'Skill not found' });
-        res.json(skill);
-      } catch (error: any) {
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    // Configure a personal skill
-    this.app.put('/v1/me/skills/:userSkillId/configure', async (req: AuthenticatedRequest, res: Response) => {
-      try {
-        const { status, ...configuration } = req.body;
-        const activate = status === 'active';
-        const updated = await this.config.skillRegistry.configureSkill(
-          req.params.userSkillId,
-          configuration,
-          activate
-        );
-        res.json(updated);
-      } catch (error: any) {
-        console.error('Configure skill error:', error);
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    // List triggers for a personal skill
-    this.app.get('/v1/me/skills/:userSkillId/triggers', async (req: AuthenticatedRequest, res: Response) => {
-      try {
-        const triggers = await this.config.skillRegistry.listTriggersForSkill(req.params.userSkillId);
-        res.json(triggers);
-      } catch (error: any) {
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    // Create a webhook trigger for a personal skill
-    this.app.post('/v1/me/skills/:userSkillId/triggers', async (req: AuthenticatedRequest, res: Response) => {
-      try {
-        const { userSkillId } = req.params;
-        const userId = req.user!.id;
-
-        let trigger = await this.config.skillRegistry.createWebhookTrigger(
-          userSkillId,
-          req.body.verification
-        );
-
-        // Auto-register webhook with the source platform (e.g. Shopify) if possible
-        trigger = await this.autoRegisterWebhook(trigger, userSkillId, { type: 'user', userId });
-
-        res.status(201).json(trigger);
-      } catch (error: any) {
-        console.error('Create trigger error:', error);
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    // Delete a webhook trigger for a personal skill (deregisters from source platform)
-    this.app.delete('/v1/me/skills/:userSkillId/triggers/:triggerId', async (req: AuthenticatedRequest, res: Response) => {
-      try {
-        const { userSkillId, triggerId } = req.params;
-        const userId = req.user!.id;
-        await this.deregisterAndDeleteTrigger(triggerId, userSkillId, { type: 'user', userId });
-        res.json({ success: true });
-      } catch (error: any) {
-        console.error('Delete trigger error:', error);
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    // Update trigger verification config
-    this.app.put('/v1/me/skills/:userSkillId/triggers/:triggerId', async (req: AuthenticatedRequest, res: Response) => {
-      try {
-        await this.config.skillRegistry.updateTriggerVerification(
-          req.params.triggerId,
-          req.body as WebhookVerification
-        );
-        res.json({ success: true });
-      } catch (error: any) {
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    // All skill executions for this user (activity feed)
-    this.app.get('/v1/me/skill-executions', async (req: AuthenticatedRequest, res: Response) => {
-      try {
-        const limit = Math.min(parseInt(req.query.limit as string) || 20, 100);
-        const executions = await this.config.skillRegistry.listAllUserExecutions(req.user!.id, limit);
-        res.json(executions);
-      } catch (error: any) {
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    // Execution history for a personal skill
-    this.app.get('/v1/me/skills/:userSkillId/executions', async (req: AuthenticatedRequest, res: Response) => {
-      try {
-        const limit = parseInt(req.query.limit as string) || 50;
-        const executions = await this.config.skillRegistry.listExecutions(req.params.userSkillId, limit);
-        res.json(executions);
-      } catch (error: any) {
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    // Deactivate a personal skill
-    this.app.delete('/v1/me/skills/:userSkillId', async (req: AuthenticatedRequest, res: Response) => {
-      try {
-        await this.config.skillRegistry.deleteUserSkill(req.params.userSkillId);
-        res.json({ success: true });
-      } catch (error: any) {
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    // -------------------------------------------------------------------------
     // Skill Template Registry endpoints
     // -------------------------------------------------------------------------
 
@@ -1708,206 +1533,6 @@ export class APIGateway {
         return res.status(404).json({ error: `No adapter registered for integration '${key}'` });
       }
       res.json(meta);
-    });
-
-    // List user's integration connections
-    this.app.get('/v1/me/connections', async (req: AuthenticatedRequest, res: Response) => {
-      try {
-        const userId = req.user!.id;
-        const result = await this.config.db.query(
-          `SELECT id, integration_key, display_name, status, last_tested_at, created_at
-           FROM integration_connections WHERE user_id = $1 ORDER BY created_at DESC`,
-          [userId]
-        );
-        res.json(result.rows.map(r => ({
-          id: r.id,
-          integrationKey: r.integration_key,
-          displayName: r.display_name,
-          status: r.status,
-          lastTestedAt: r.last_tested_at,
-          createdAt: r.created_at,
-        })));
-      } catch (error: any) {
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    // Create a new integration connection (test → save pattern)
-    this.app.post('/v1/me/connections', async (req: AuthenticatedRequest, res: Response) => {
-      try {
-        const userId = req.user!.id;
-        const { integrationKey, displayName, credentials } = req.body as {
-          integrationKey: string;
-          displayName: string;
-          credentials: Record<string, unknown>;
-        };
-
-        if (!integrationKey || !displayName || !credentials) {
-          return res.status(400).json({ error: 'integrationKey, displayName, and credentials are required' });
-        }
-
-        // Test credentials before saving — delegates to adapter if registered
-        await testIntegrationCredentials(integrationKey, credentials, this.config.adapterRegistry);
-
-        // Create connection record
-        const connectionId = randomUUID();
-
-        await this.config.db.query(
-          `INSERT INTO integration_connections (id, user_id, integration_key, display_name, status, last_tested_at)
-           VALUES ($1, $2, $3, $4, 'active', NOW())`,
-          [connectionId, userId, integrationKey, displayName]
-        );
-
-        // Store credentials in CredentialManager keyed by connection UUID
-        await this.config.credentialManager.storeCredentials(
-          { type: 'user', userId },
-          connectionId,
-          credentials as any
-        );
-
-        res.status(201).json({ connectionId, displayName, status: 'active' });
-      } catch (error: any) {
-        console.error('Create connection error:', error);
-        res.status(400).json({ error: error.message });
-      }
-    });
-
-    // Delete an integration connection
-    this.app.delete('/v1/me/connections/:id', async (req: AuthenticatedRequest, res: Response) => {
-      try {
-        const userId = req.user!.id;
-        const { id } = req.params;
-
-        await this.config.db.query(
-          `DELETE FROM integration_connections WHERE id = $1 AND user_id = $2`,
-          [id, userId]
-        );
-        await this.config.credentialManager.deleteCredentials({ type: 'user', userId }, id);
-        res.json({ success: true });
-      } catch (error: any) {
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    // ---- Skill template management ----
-
-    // Get namedTemplates for a user skill (for editing)
-    this.app.get('/v1/me/skills/:id/templates', async (req: AuthenticatedRequest, res: Response) => {
-      try {
-        const userSkill = await this.config.skillRegistry.getUserSkill(req.params.id);
-        if (!userSkill) return res.status(404).json({ error: 'Skill not found' });
-        const config = userSkill.configuration as any;
-        res.json(config.namedTemplates ?? {});
-      } catch (error: any) {
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    // Update namedTemplates for a user skill
-    this.app.put('/v1/me/skills/:id/templates', async (req: AuthenticatedRequest, res: Response) => {
-      try {
-        const userSkill = await this.config.skillRegistry.getUserSkill(req.params.id);
-        if (!userSkill) return res.status(404).json({ error: 'Skill not found' });
-        const config = userSkill.configuration as Record<string, unknown>;
-        const updated = { ...config, namedTemplates: req.body };
-        await this.config.skillRegistry.configureSkill(req.params.id, updated);
-        res.json({ success: true });
-      } catch (error: any) {
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    // Test event (dry run) for a skill
-    this.app.post('/v1/me/skills/:id/test-event', async (req: AuthenticatedRequest, res: Response) => {
-      try {
-        const userId = req.user!.id;
-        const userSkill = await this.config.skillRegistry.getUserSkill(req.params.id);
-        if (!userSkill) return res.status(404).json({ error: 'Skill not found' });
-
-        const config = userSkill.configuration as any;
-        if (!config.templateId || !this.config.skillTemplateRegistry) {
-          return res.status(400).json({ error: 'Skill is not configured with a template' });
-        }
-
-        const { runBackorderDetectionV2 } = await import('../chains/backorder-detection');
-
-        // Use caller-supplied orderId, or auto-discover the most recent order from the store
-        let testOrderId: number | undefined = req.body?.mockOrderId as number | undefined;
-        if (!testOrderId) {
-          testOrderId = (await this.fetchMostRecentShopifyOrderId(config, userId)) ?? undefined;
-        }
-
-        if (testOrderId) {
-          // Real order found — run against it
-          const result = await runBackorderDetectionV2(
-            testOrderId,
-            config,
-            userId,
-            {
-              credentialManager: this.config.credentialManager,
-              skillTemplateRegistry: this.config.skillTemplateRegistry,
-              adapterRegistry: this.config.adapterRegistry!,
-            },
-            { dryRun: true }
-          );
-          res.json({ orderId: testOrderId, ...(result.dryRun ?? { wouldSkip: true }) });
-        } else {
-          // No real orders — fall back to fully synthetic preview using the configured template
-          const { renderTemplate, renderSubject } = await import('../skills/backorder-templates');
-          const template = this.config.skillTemplateRegistry!.getTemplate(config.templateId);
-          if (!template) return res.status(400).json({ error: `Template not found: ${config.templateId}` });
-
-          const stored = config.namedTemplates;
-          const namedTemplates = (stored && Object.keys(stored).length > 0) ? stored : template.defaultTemplates;
-          const allActions = [
-            ...(template.compiledPolicy?.defaultActions ?? []),
-            ...(template.compiledPolicy?.rules ?? []).flatMap((r: any) => r.actions ?? []),
-          ];
-          const invokeAction = allActions.find((a: any) => a.type === 'invoke' && a.templateKey);
-          const templateKey = invokeAction?.templateKey ?? Object.keys(namedTemplates)[0];
-          const rawTemplate = namedTemplates[templateKey];
-          if (!rawTemplate) return res.status(400).json({ error: 'No message template found in skill configuration' });
-
-          const { applyTemplateFieldOverrides } = await import('../skills/template-utils');
-          const msgTemplate = applyTemplateFieldOverrides(rawTemplate, templateKey, config.fieldOverrides ?? {});
-
-          const syntheticCtx = {
-            orderId: 99999,
-            orderNumber: 9001,
-            customerEmail: 'test.customer@example.com',
-            customerName: 'Test Customer',
-            orderTotal: 149.99,
-            backorderedItems: [{
-              title: 'Sample Product (Blue / L)',
-              sku: 'SAMPLE-BLU-L',
-              orderedQty: 2,
-              availableQty: 0,
-              backorderedQty: 2,
-              variantId: '0',
-            }],
-            allItemsBackordered: true,
-            someItemsBackordered: true,
-            threshold: 0,
-          };
-
-          const branding = {
-            companyName: (config.fieldOverrides?.['companyName'] as string) || '',
-            logoUrl:     (config.fieldOverrides?.['logoUrl']     as string) || '',
-            signature:   (config.fieldOverrides?.['signature']   as string) || '',
-          };
-          const subject = renderSubject(msgTemplate.subject, syntheticCtx as any);
-          const message = renderTemplate(msgTemplate, { ...syntheticCtx, ...branding } as any);
-
-          res.json({
-            synthetic: true,
-            note: 'No orders found in your Shopify store — showing a preview using sample data.',
-            wouldCreateTicket: { subject, message, priority: invokeAction?.params?.priority ?? 'normal' },
-          });
-        }
-      } catch (error: any) {
-        console.error('Test event error:', error);
-        res.status(500).json({ error: error.message });
-      }
     });
 
     // -------------------------------------------------------------------------
@@ -2055,59 +1680,80 @@ export class APIGateway {
     });
 
     // -------------------------------------------------------------------------
-    // Skill Pause / Resume  (personal)
+    // Org connections  (/v1/organizations/:orgId/connections)
     // -------------------------------------------------------------------------
 
-    this.app.put('/v1/me/skills/:userSkillId/pause', async (req: AuthenticatedRequest, res: Response) => {
+    this.app.get('/v1/organizations/:orgId/connections', async (req: AuthenticatedRequest, res: Response) => {
       try {
-        const { userSkillId } = req.params;
         const userId = req.user!.id;
-        await this.config.skillRegistry.updateSkillStatus(userSkillId, 'paused');
-
-        // Deregister webhooks so the source platform stops sending events while paused
-        const triggers = await this.config.skillRegistry.listTriggersForSkill(userSkillId);
-        for (const trigger of triggers) {
-          try {
-            await this.deregisterAndDeleteTrigger(trigger.id, userSkillId, { type: 'user', userId });
-          } catch (err: any) {
-            console.warn(`[pause] Failed to deregister trigger ${trigger.id}:`, err.message);
-          }
-        }
-
-        res.json({ success: true });
+        const { orgId } = req.params;
+        await this.config.orgManager.assertMember(orgId, userId);
+        const result = await this.config.db.query(
+          `SELECT id, integration_key, display_name, status, last_tested_at, created_at
+           FROM integration_connections WHERE org_id = $1 ORDER BY created_at DESC`,
+          [orgId]
+        );
+        res.json(result.rows.map(r => ({
+          id: r.id,
+          integrationKey: r.integration_key,
+          displayName: r.display_name,
+          status: r.status,
+          lastTestedAt: r.last_tested_at,
+          createdAt: r.created_at,
+        })));
       } catch (error: any) {
         res.status(500).json({ error: error.message });
       }
     });
 
-    this.app.put('/v1/me/skills/:userSkillId/resume', async (req: AuthenticatedRequest, res: Response) => {
+    this.app.post('/v1/organizations/:orgId/connections', async (req: AuthenticatedRequest, res: Response) => {
       try {
-        const { userSkillId } = req.params;
         const userId = req.user!.id;
+        const { orgId } = req.params;
+        await this.config.orgManager.assertMember(orgId, userId);
+        const { integrationKey, displayName, credentials } = req.body as {
+          integrationKey: string;
+          displayName: string;
+          credentials: Record<string, unknown>;
+        };
 
-        // Check slot availability before resuming
-        if (this.config.billingManager) {
-          try {
-            await this.config.billingManager.checkLimit({ type: 'user', userId }, 'activeSkills');
-          } catch (e) {
-            if (e instanceof PlanLimitError) return this.planLimitResponse(res, e);
-            throw e;
-          }
+        if (!integrationKey || !displayName || !credentials) {
+          return res.status(400).json({ error: 'integrationKey, displayName, and credentials are required' });
         }
 
-        await this.config.skillRegistry.updateSkillStatus(userSkillId, 'active');
+        await testIntegrationCredentials(integrationKey, credentials, this.config.adapterRegistry);
 
-        // Re-register webhook with source platform now that skill is active again
-        const existing = await this.config.skillRegistry.listTriggersForSkill(userSkillId);
-        if (existing.length === 0) {
-          try {
-            const trigger = await this.config.skillRegistry.createWebhookTrigger(userSkillId, { type: 'none' });
-            await this.autoRegisterWebhook(trigger, userSkillId, { type: 'user', userId });
-          } catch (err: any) {
-            console.warn(`[resume] Failed to re-register webhook for ${userSkillId}:`, err.message);
-          }
-        }
+        const connectionId = randomUUID();
+        await this.config.db.query(
+          `INSERT INTO integration_connections (id, org_id, integration_key, display_name, status, last_tested_at)
+           VALUES ($1, $2, $3, $4, 'active', NOW())`,
+          [connectionId, orgId, integrationKey, displayName]
+        );
 
+        await this.config.credentialManager.storeCredentials(
+          { type: 'org', orgId },
+          connectionId,
+          credentials as any
+        );
+
+        res.status(201).json({ connectionId, displayName, status: 'active' });
+      } catch (error: any) {
+        console.error('Create org connection error:', error);
+        res.status(400).json({ error: error.message });
+      }
+    });
+
+    this.app.delete('/v1/organizations/:orgId/connections/:id', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const userId = req.user!.id;
+        const { orgId, id } = req.params;
+        await this.config.orgManager.assertMember(orgId, userId);
+
+        await this.config.db.query(
+          `DELETE FROM integration_connections WHERE id = $1 AND org_id = $2`,
+          [id, orgId]
+        );
+        await this.config.credentialManager.deleteCredentials({ type: 'org', orgId }, id);
         res.json({ success: true });
       } catch (error: any) {
         res.status(500).json({ error: error.message });
@@ -2180,38 +1826,6 @@ export class APIGateway {
       try {
         if (!this.config.billingManager) return res.json([]);
         res.json(this.config.billingManager.listPlans());
-      } catch (error: any) {
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    // -------------------------------------------------------------------------
-    // Billing — personal (user scope)
-    // -------------------------------------------------------------------------
-
-    this.app.get('/v1/me/billing', async (req: AuthenticatedRequest, res: Response) => {
-      try {
-        if (!this.config.billingManager) return res.json({ plan: 'free', subscription: null, summary: {} });
-        const scope: BillingScope = { type: 'user', userId: req.user!.id };
-        const [plan, subscription, summary] = await Promise.all([
-          this.config.billingManager.getEffectivePlan(scope),
-          this.config.billingManager.getSubscription(scope),
-          this.config.billingManager.getUsageSummary(scope),
-        ]);
-        res.json({ plan, subscription, summary });
-      } catch (error: any) {
-        res.status(500).json({ error: error.message });
-      }
-    });
-
-    this.app.put('/v1/me/billing/plan', async (req: AuthenticatedRequest, res: Response) => {
-      try {
-        if (!this.config.billingManager) return res.status(503).json({ error: 'Billing not configured' });
-        const { plan } = req.body as { plan: PlanTier };
-        if (!plan) return res.status(400).json({ error: 'plan is required' });
-        const scope: BillingScope = { type: 'user', userId: req.user!.id };
-        const subscription = await this.config.billingManager.updatePlan(scope, plan);
-        res.json(subscription);
       } catch (error: any) {
         res.status(500).json({ error: error.message });
       }
@@ -2384,14 +1998,14 @@ export class APIGateway {
    */
   private async fetchMostRecentShopifyOrderId(
     config: UserSkillConfig,
-    userId: string
+    orgId: string
   ): Promise<number | null> {
     try {
       const shopifyConnectionId = config.slotConnections?.['shopify'];
       if (!shopifyConnectionId) return null;
 
       const creds = await this.config.credentialManager.getCredentials(
-        { type: 'user', userId },
+        { type: 'org', orgId },
         shopifyConnectionId
       ) as Record<string, unknown> | null;
       if (!creds) return null;

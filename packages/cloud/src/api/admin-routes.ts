@@ -3,8 +3,9 @@ import bcrypt from 'bcrypt';
 import { randomBytes } from 'crypto';
 import { Pool } from 'pg';
 import { nanoid } from 'nanoid';
+import { OrgManager } from '../organizations/org-manager';
 
-export function createAdminRoutes(db: Pool): Router {
+export function createAdminRoutes(db: Pool, orgManager: OrgManager): Router {
   const router = Router();
 
   // Require X-Admin-Secret header matching ADMIN_SECRET env var
@@ -52,11 +53,22 @@ export function createAdminRoutes(db: Pool): Router {
       }
 
       const userId = nanoid();
-      await db.query(
-        `INSERT INTO users (id, email, password_hash, name, must_change_password, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, true, NOW(), NOW())`,
-        [userId, email, passwordHash, name || null],
-      );
+      await db.query('BEGIN');
+      try {
+        await db.query(
+          `INSERT INTO users (id, email, password_hash, name, must_change_password, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, true, NOW(), NOW())`,
+          [userId, email, passwordHash, name || null],
+        );
+        const orgName = name || email.split('@')[0];
+        let slug = OrgManager.toSlug(orgName);
+        for (let i = 2; !(await orgManager.isSlugAvailable(slug)); i++) slug = `${OrgManager.toSlug(orgName)}-${i}`;
+        await orgManager.createOrg(userId, orgName, slug, 'free');
+        await db.query('COMMIT');
+      } catch (err) {
+        await db.query('ROLLBACK');
+        throw err;
+      }
 
       res.status(201).json({
         success: true,
@@ -101,11 +113,22 @@ export function createAdminRoutes(db: Pool): Router {
       }
 
       const userId = nanoid();
-      await db.query(
-        `INSERT INTO users (id, email, password_hash, name, is_operator, must_change_password, created_at, updated_at)
-         VALUES ($1, $2, $3, $4, true, true, NOW(), NOW())`,
-        [userId, email, passwordHash, name || null],
-      );
+      await db.query('BEGIN');
+      try {
+        await db.query(
+          `INSERT INTO users (id, email, password_hash, name, is_operator, must_change_password, created_at, updated_at)
+           VALUES ($1, $2, $3, $4, true, true, NOW(), NOW())`,
+          [userId, email, passwordHash, name || null],
+        );
+        const orgName = name || email.split('@')[0];
+        let slug = OrgManager.toSlug(orgName);
+        for (let i = 2; !(await orgManager.isSlugAvailable(slug)); i++) slug = `${OrgManager.toSlug(orgName)}-${i}`;
+        await orgManager.createOrg(userId, orgName, slug, 'free');
+        await db.query('COMMIT');
+      } catch (err) {
+        await db.query('ROLLBACK');
+        throw err;
+      }
 
       res.status(201).json({
         success: true,

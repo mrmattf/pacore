@@ -14,8 +14,7 @@ export interface SkillDefinition {
 
 export interface UserSkill {
   id: string;
-  userId: string | null;
-  orgId: string | null;
+  orgId: string;
   skillId: string;
   configuration: Record<string, unknown>;
   status: 'pending' | 'active' | 'paused';
@@ -61,20 +60,22 @@ async function apiFetch(path: string, token: string, init?: RequestInit) {
   return res.json();
 }
 
-/** Hook to work with the skills catalog + personal skill activations. */
-export function useSkills() {
+/** Hook to work with the skills catalog + org skill activations. */
+export function useSkills(orgId: string) {
   const [catalog, setCatalog] = useState<SkillDefinition[]>([]);
   const [mySkills, setMySkills] = useState<UserSkill[]>([]);
   const [loading, setLoading] = useState(false);
   const token = useAuthStore((s) => s.token);
 
+  const base = `/v1/organizations/${orgId}/skills`;
+
   const refresh = useCallback(async () => {
-    if (!token) return;
+    if (!token || !orgId) return;
     setLoading(true);
     try {
       const [cat, mine] = await Promise.all([
         apiFetch('/v1/skills', token),
-        apiFetch('/v1/me/skills', token),
+        apiFetch(base, token),
       ]);
       setCatalog(cat);
       setMySkills(mine);
@@ -83,7 +84,7 @@ export function useSkills() {
     } finally {
       setLoading(false);
     }
-  }, [token]);
+  }, [token, orgId]);
 
   useEffect(() => {
     refresh();
@@ -91,7 +92,7 @@ export function useSkills() {
 
   const activateSkill = async (skillId: string): Promise<UserSkill> => {
     if (!token) throw new Error('Not authenticated');
-    const result = await apiFetch(`/v1/me/skills/${skillId}/activate`, token, { method: 'POST' });
+    const result = await apiFetch(`${base}/${skillId}/activate`, token, { method: 'POST' });
     await refresh();
     return result;
   };
@@ -101,7 +102,7 @@ export function useSkills() {
     configuration: Record<string, unknown>
   ): Promise<UserSkill> => {
     if (!token) throw new Error('Not authenticated');
-    const result = await apiFetch(`/v1/me/skills/${userSkillId}/configure`, token, {
+    const result = await apiFetch(`${base}/${userSkillId}/configure`, token, {
       method: 'PUT',
       body: JSON.stringify(configuration),
     });
@@ -111,23 +112,23 @@ export function useSkills() {
 
   const deleteSkill = async (userSkillId: string): Promise<void> => {
     if (!token) throw new Error('Not authenticated');
-    await apiFetch(`/v1/me/skills/${userSkillId}`, token, { method: 'DELETE' });
+    await apiFetch(`${base}/${userSkillId}`, token, { method: 'DELETE' });
     await refresh();
   };
 
   const createTrigger = async (userSkillId: string): Promise<SkillTrigger> => {
     if (!token) throw new Error('Not authenticated');
-    return apiFetch(`/v1/me/skills/${userSkillId}/triggers`, token, { method: 'POST', body: '{}' });
+    return apiFetch(`${base}/${userSkillId}/triggers`, token, { method: 'POST', body: '{}' });
   };
 
   const getTriggers = async (userSkillId: string): Promise<SkillTrigger[]> => {
     if (!token) throw new Error('Not authenticated');
-    return apiFetch(`/v1/me/skills/${userSkillId}/triggers`, token);
+    return apiFetch(`${base}/${userSkillId}/triggers`, token);
   };
 
   const getExecutions = async (userSkillId: string): Promise<SkillExecution[]> => {
     if (!token) throw new Error('Not authenticated');
-    return apiFetch(`/v1/me/skills/${userSkillId}/executions`, token);
+    return apiFetch(`${base}/${userSkillId}/executions`, token);
   };
 
   return {

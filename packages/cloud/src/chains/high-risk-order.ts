@@ -138,7 +138,7 @@ function resolveRiskRecommendation(
 export async function runHighRiskOrderChain(
   orderId: number,
   userSkillConfig: UserSkillConfig,
-  userId: string,
+  orgId: string,
   deps: HighRiskChainDeps,
   options: { dryRun?: boolean } = {}
 ): Promise<HighRiskChainResult> {
@@ -158,7 +158,7 @@ export async function runHighRiskOrderChain(
   }
 
   const shopifyCreds = await credentialManager.getCredentials(
-    { type: 'user', userId },
+    { type: 'org', orgId },
     shopifyConnectionId
   );
   if (!shopifyCreds) {
@@ -276,7 +276,7 @@ export async function runHighRiskOrderChain(
     }
 
     if (action.type === 'escalate') {
-      await executeEscalation(action, ctx, userSkillConfig, template, userId, { credentialManager, adapterRegistry });
+      await executeEscalation(action, ctx, userSkillConfig, template, orgId, { credentialManager, adapterRegistry });
       result.actions.push('escalate');
       continue;
     }
@@ -295,7 +295,7 @@ export async function runHighRiskOrderChain(
       }
 
       const slotCreds = await credentialManager.getCredentials(
-        { type: 'user', userId },
+        { type: 'org', orgId },
         slotConnectionId
       );
       if (!slotCreds) {

@@ -17,20 +17,24 @@ export function useOrgs() {
   const [error, setError] = useState<string | null>(null);
   const token = useAuthStore((s) => s.token);
 
-  const refresh = useCallback(async () => {
-    if (!token) return;
+  const refresh = useCallback(async (): Promise<OrgSummary[]> => {
+    if (!token) return [];
     setLoading(true);
     setError(null);
     try {
       const res = await apiFetch('/v1/organizations');
       if (res.ok) {
-        setOrgs(await res.json());
+        const data: OrgSummary[] = await res.json();
+        setOrgs(data);
+        return data;
       } else {
         const body = await res.json().catch(() => ({}));
         setError(body.error ?? 'Failed to load organizations');
+        return [];
       }
     } catch {
       setError('Failed to load organizations');
+      return [];
     } finally {
       setLoading(false);
     }

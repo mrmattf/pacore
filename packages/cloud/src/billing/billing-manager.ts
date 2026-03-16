@@ -6,7 +6,6 @@ import { PlanLimitError } from './plan-limit-error';
 
 export interface Subscription {
   id: string;
-  userId: string | null;
   orgId: string | null;
   plan: PlanTier;
   status: string;
@@ -35,7 +34,6 @@ export class BillingManager {
   constructor(private db: Pool) {}
 
   async initialize(): Promise<void> {
-    // Nothing to migrate at startup — schema.sql handles table creation
     console.log('[BillingManager] initialized');
   }
 
@@ -46,7 +44,6 @@ export class BillingManager {
   async getSubscription(scope: BillingScope): Promise<Subscription | null> {
     const { rows } = await this.db.query<{
       id: string;
-      user_id: string | null;
       org_id: string | null;
       plan: string;
       status: string;
@@ -56,16 +53,13 @@ export class BillingManager {
       created_at: Date;
       updated_at: Date;
     }>(
-      scope.type === 'user'
-        ? `SELECT * FROM subscriptions WHERE user_id = $1`
-        : `SELECT * FROM subscriptions WHERE org_id = $1`,
-      [scope.type === 'user' ? scope.userId : scope.orgId]
+      `SELECT * FROM subscriptions WHERE org_id = $1`,
+      [scope.orgId]
     );
     if (rows.length === 0) return null;
     const r = rows[0];
     return {
       id: r.id,
-      userId: r.user_id,
       orgId: r.org_id,
       plan: r.plan as PlanTier,
       status: r.status,
@@ -111,8 +105,6 @@ export class BillingManager {
     switch (limitKey) {
       case 'activeSkills':
         return this.countActiveSkills(scope);
-      case 'orgs':
-        return this.countOrgs(scope);
       case 'orgMembers':
         return this.countOrgMembers(scope);
       case 'skillExecutionsPerMonth':
@@ -121,43 +113,28 @@ export class BillingManager {
   }
 
   private async countActiveSkills(scope: BillingScope): Promise<number> {
-    const col = scope.type === 'user' ? 'user_id' : 'org_id';
-    const id = scope.type === 'user' ? scope.userId : scope.orgId;
     const { rows } = await this.db.query(
-      `SELECT COUNT(*)::int AS cnt FROM user_skills
-       WHERE ${col} = $1 AND status = 'active'`,
-      [id]
-    );
-    return rows[0].cnt;
-  }
-
-  private async countOrgs(scope: BillingScope): Promise<number> {
-    if (scope.type !== 'user') return 0;
-    const { rows } = await this.db.query(
-      `SELECT COUNT(*)::int AS cnt FROM organizations WHERE owner_id = $1`,
-      [scope.userId]
+      `SELECT COUNT(*)::int AS cnt FROM user_skills WHERE org_id = $1 AND status = 'active'`,
+      [scope.orgId]
     );
     return rows[0].cnt;
   }
 
   private async countNonSkippedExecutionsThisMonth(scope: BillingScope): Promise<number> {
-    const col = scope.type === 'user' ? 'us.user_id' : 'us.org_id';
-    const id = scope.type === 'user' ? scope.userId : scope.orgId;
     const { rows } = await this.db.query<{ cnt: number }>(
       `SELECT COUNT(*)::int AS cnt
        FROM skill_executions se
        JOIN user_skills us ON se.user_skill_id = us.id
-       WHERE ${col} = $1
+       WHERE us.org_id = $1
          AND se.sandbox = false
          AND se.skipped = false
          AND se.started_at >= date_trunc('month', NOW())`,
-      [id]
+      [scope.orgId]
     );
     return rows[0]?.cnt ?? 0;
   }
 
   private async countOrgMembers(scope: BillingScope): Promise<number> {
-    if (scope.type !== 'org') return 0;
     const { rows } = await this.db.query(
       `SELECT COUNT(*)::int AS cnt FROM org_members WHERE org_id = $1`,
       [scope.orgId]
@@ -174,12 +151,9 @@ export class BillingManager {
     const y = year ?? now.getFullYear();
     const m = month ?? now.getMonth() + 1;
 
-    const col = scope.type === 'user' ? 'user_id' : 'org_id';
-    const id = scope.type === 'user' ? scope.userId : scope.orgId;
     const { rows } = await this.db.query(
-      `SELECT skill_executions FROM usage_records
-       WHERE ${col} = $1 AND year = $2 AND month = $3`,
-      [id, y, m]
+      `SELECT skill_executions FROM usage_records WHERE org_id = $1 AND year = $2 AND month = $3`,
+      [scope.orgId, y, m]
     );
     return {
       skillExecutions: rows[0]?.skill_executions ?? 0,
@@ -193,23 +167,13 @@ export class BillingManager {
     const year = now.getFullYear();
     const month = now.getMonth() + 1;
 
-    if (scope.type === 'user') {
-      await this.db.query(
-        `INSERT INTO usage_records (user_id, year, month, skill_executions, updated_at)
-         VALUES ($1, $2, $3, 1, NOW())
-         ON CONFLICT ON CONSTRAINT usage_records_unique_user
-         DO UPDATE SET skill_executions = usage_records.skill_executions + 1, updated_at = NOW()`,
-        [scope.userId, year, month]
-      );
-    } else {
-      await this.db.query(
-        `INSERT INTO usage_records (org_id, year, month, skill_executions, updated_at)
-         VALUES ($1, $2, $3, 1, NOW())
-         ON CONFLICT ON CONSTRAINT usage_records_unique_org
-         DO UPDATE SET skill_executions = usage_records.skill_executions + 1, updated_at = NOW()`,
-        [scope.orgId, year, month]
-      );
-    }
+    await this.db.query(
+      `INSERT INTO usage_records (org_id, year, month, skill_executions, updated_at)
+       VALUES ($1, $2, $3, 1, NOW())
+       ON CONFLICT ON CONSTRAINT usage_records_unique_org
+       DO UPDATE SET skill_executions = usage_records.skill_executions + 1, updated_at = NOW()`,
+      [scope.orgId, year, month]
+    );
   }
 
   // -----------------------------------------------------------------------
@@ -220,28 +184,18 @@ export class BillingManager {
     const id = nanoid();
     const now = new Date();
 
-    if (scope.type === 'user') {
-      await this.db.query(
-        `INSERT INTO subscriptions (id, user_id, plan, status, created_at, updated_at)
-         VALUES ($1, $2, $3, 'active', $4, $4)
-         ON CONFLICT ON CONSTRAINT subscriptions_unique_user
-         DO UPDATE SET plan = $3, updated_at = $4`,
-        [id, scope.userId, plan, now]
-      );
-    } else {
-      await this.db.query(
-        `INSERT INTO subscriptions (id, org_id, plan, status, created_at, updated_at)
-         VALUES ($1, $2, $3, 'active', $4, $4)
-         ON CONFLICT ON CONSTRAINT subscriptions_unique_org
-         DO UPDATE SET plan = $3, updated_at = $4`,
-        [id, scope.orgId, plan, now]
-      );
-      // Sync denormalized cache on organizations table
-      await this.db.query(
-        `UPDATE organizations SET plan = $1 WHERE id = $2`,
-        [plan, scope.orgId]
-      );
-    }
+    await this.db.query(
+      `INSERT INTO subscriptions (id, org_id, plan, status, created_at, updated_at)
+       VALUES ($1, $2, $3, 'active', $4, $4)
+       ON CONFLICT ON CONSTRAINT subscriptions_unique_org
+       DO UPDATE SET plan = $3, updated_at = $4`,
+      [id, scope.orgId, plan, now]
+    );
+    // Sync denormalized cache on organizations table
+    await this.db.query(
+      `UPDATE organizations SET plan = $1 WHERE id = $2`,
+      [plan, scope.orgId]
+    );
 
     const sub = await this.getSubscription(scope);
     return sub!;
@@ -254,12 +208,10 @@ export class BillingManager {
   async getUsageSummary(scope: BillingScope): Promise<UsageSummary> {
     const plan = await this.getEffectivePlan(scope);
     const limits = getPlanLimits(plan);
-    const now = new Date();
 
-    const [execCount, activeSkillsCount, orgsCount, orgMembersCount] = await Promise.all([
+    const [execCount, activeSkillsCount, orgMembersCount] = await Promise.all([
       this.countNonSkippedExecutionsThisMonth(scope),
       this.countActiveSkills(scope),
-      this.countOrgs(scope),
       this.countOrgMembers(scope),
     ]);
 
@@ -275,7 +227,6 @@ export class BillingManager {
     return {
       skillExecutionsPerMonth: mkItem(execCount, 'skillExecutionsPerMonth'),
       activeSkills: mkItem(activeSkillsCount, 'activeSkills'),
-      orgs: mkItem(orgsCount, 'orgs'),
       orgMembers: mkItem(orgMembersCount, 'orgMembers'),
     };
   }

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuthStore } from '../store/authStore';
+import { useContextStore } from '../store/contextStore';
 import { login } from '../services/auth';
 
 export function LoginPage() {
@@ -10,6 +11,7 @@ export function LoginPage() {
   const [error, setError] = useState('');
   const navigate = useNavigate();
   const setAuth = useAuthStore((state) => state.setAuth);
+  const setContext = useContextStore((state) => state.setContext);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -17,8 +19,14 @@ export function LoginPage() {
     setError('');
 
     try {
-      const { token, refreshToken, user, mustChangePassword } = await login(email, password);
+      const { token, refreshToken, user, mustChangePassword, orgs } = await login(email, password);
       setAuth(token, user, refreshToken, mustChangePassword);
+
+      // Set org context from login response
+      if (orgs && orgs.length > 0) {
+        setContext({ type: 'org', orgId: orgs[0].id, orgName: orgs[0].name, role: orgs[0].role });
+      }
+
       if (mustChangePassword) {
         navigate('/change-password');
       } else if (user?.isOperator) {

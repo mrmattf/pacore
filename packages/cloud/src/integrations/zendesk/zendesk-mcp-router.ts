@@ -21,15 +21,15 @@ export function createZendeskMcpRouter(
   router.post('/tools/call', async (req: Request, res: Response) => {
     const { name, arguments: args } = req.body as { name: string; arguments: Record<string, unknown> };
     const connectionId = req.headers['x-connection-id'] as string;
-    const userId       = req.headers['x-user-id']       as string;
+    const orgId        = req.headers['x-org-id']        as string;
 
-    if (!connectionId || !userId) {
-      return res.status(400).json({ error: 'Missing X-Connection-Id or X-User-Id header' });
+    if (!connectionId || !orgId) {
+      return res.status(400).json({ error: 'Missing X-Connection-Id or X-Org-Id header' });
     }
 
     try {
       const creds = await credentialManager.getCredentials(
-        { type: 'user', userId },
+        { type: 'org', orgId },
         connectionId
       );
       if (!creds) {

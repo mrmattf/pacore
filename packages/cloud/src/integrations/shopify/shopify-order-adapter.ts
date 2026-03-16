@@ -144,12 +144,12 @@ export class ShopifyOrderAdapter implements EcommerceOrderAdapter, SlotAdapter, 
 
   readonly credentialFields: CredentialField[] = [
     { key: 'storeDomain',  label: 'Store Domain',  type: 'text',     placeholder: 'my-store.myshopify.com' },
-    { key: 'clientId',     label: 'Client ID',     type: 'text',     hint: 'Shopify Admin → Apps → Develop Apps → Create App → API credentials' },
-    { key: 'clientSecret', label: 'Client Secret', type: 'password', hint: 'Same location as Client ID — keep this secret' },
+    { key: 'clientId',     label: 'Client ID',     type: 'text',     hint: 'Shopify Admin → Settings → Apps and sales channels → Develop apps → Your app → API credentials' },
+    { key: 'clientSecret', label: 'Client Secret', type: 'password', hint: 'Same page as Client ID under API credentials — keep this secret' },
   ];
 
   readonly setupGuide =
-    'Shopify Admin → Apps → Develop Apps → Create App → Configure API scopes: read_orders, read_inventory, read_products, read_customers → Install app';
+    '1. Shopify Admin → Settings → Apps and sales channels → Develop apps\n2. Create app → Configuration → configure Admin API scopes: read_orders, read_inventory, read_products, read_customers\n3. Install app\n4. API credentials tab → copy Client ID and Client secret';
 
   /** Maps skillTypeId → Shopify webhook topic (REST-style, converted to GraphQL enum internally). */
   readonly webhookTopics: Record<string, string> = {

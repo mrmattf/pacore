@@ -210,17 +210,17 @@ export function createOperatorRoutes(
       const tokenId = nanoid();
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
-      await db.query(
+      const insertResult = await db.query(
         `INSERT INTO credential_intake_tokens (id, token_hash, operator_id, org_id, expires_at)
          VALUES ($1, $2, $3, $4, $5)`,
         [tokenId, tokenHash, operatorId, orgId, expiresAt],
       );
-
       // Get org name for the email template
       const orgResult = await db.query('SELECT name FROM organizations WHERE id = $1', [orgId]);
       const orgName = orgResult.rows[0]?.name || 'your account';
 
-      const intakeUrl = `https://app.clarissi.com/onboard/${rawToken}`;
+      const appBase = process.env.APP_BASE_URL || 'http://localhost:3001';
+      const intakeUrl = `${appBase}/onboard/${rawToken}`;
 
       res.status(201).json({
         id: tokenId,

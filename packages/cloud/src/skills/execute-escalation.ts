@@ -27,7 +27,7 @@ export async function executeEscalation(
   ctx: EscalationContext,
   userSkillConfig: UserSkillConfig,
   template: SkillTemplate,
-  userId: string,
+  orgId: string,
   deps: {
     credentialManager: CredentialManager;
     adapterRegistry: AdapterRegistry;
@@ -55,7 +55,7 @@ export async function executeEscalation(
     return;
   }
 
-  const creds = await credentialManager.getCredentials({ type: 'user', userId }, connectionId);
+  const creds = await credentialManager.getCredentials({ type: 'org', orgId }, connectionId);
   if (!creds) {
     console.warn(`[Escalation] order #${ctx.orderNumber}: no credentials for '${slot.integrationKey}' connection '${connectionId}' — skipping`);
     return;

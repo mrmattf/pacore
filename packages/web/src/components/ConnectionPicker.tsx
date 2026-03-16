@@ -29,6 +29,7 @@ interface ConnectionPickerProps {
   selectedConnectionId: string | null;
   onSelect: (connectionId: string) => void;
   token: string;
+  orgId: string;
 }
 
 export function ConnectionPicker({
@@ -37,6 +38,7 @@ export function ConnectionPicker({
   selectedConnectionId,
   onSelect,
   token,
+  orgId,
 }: ConnectionPickerProps) {
   const [connections, setConnections] = useState<Connection[]>([]);
   const [integrationMeta, setIntegrationMeta] = useState<IntegrationMeta | null>(null);
@@ -64,7 +66,7 @@ export function ConnectionPicker({
   async function loadConnections() {
     try {
       setLoading(true);
-      const res = await fetch('/v1/me/connections', {
+      const res = await fetch(`/v1/organizations/${orgId}/connections`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -79,7 +81,7 @@ export function ConnectionPicker({
   async function handleDelete(connectionId: string) {
     setDeletingId(connectionId);
     try {
-      await fetch(`/v1/me/connections/${connectionId}`, {
+      await fetch(`/v1/organizations/${orgId}/connections/${connectionId}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${token}` },
       });
@@ -100,7 +102,7 @@ export function ConnectionPicker({
     setSaving(true);
     setSaveError(null);
     try {
-      const res = await fetch('/v1/me/connections', {
+      const res = await fetch(`/v1/organizations/${orgId}/connections`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({ integrationKey, displayName: displayName.trim(), credentials: newCreds }),

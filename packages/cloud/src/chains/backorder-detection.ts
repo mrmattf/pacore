@@ -78,7 +78,7 @@ export function verifyShopifyWebhookHmac(
 export async function runBackorderDetectionV2(
   orderId: number,
   userSkillConfig: UserSkillConfig,
-  userId: string,
+  orgId: string,
   deps: BackorderChainDeps,
   options: { dryRun?: boolean; hmacHeader?: string; rawBody?: Buffer } = {}
 ): Promise<BackorderChainResult> {
@@ -98,7 +98,7 @@ export async function runBackorderDetectionV2(
   }
 
   const shopifyCreds = await credentialManager.getCredentials(
-    { type: 'user', userId },
+    { type: 'org', orgId },
     shopifyConnectionId
   );
   if (!shopifyCreds) {
@@ -245,7 +245,7 @@ export async function runBackorderDetectionV2(
     }
 
     if (action.type === 'escalate') {
-      await executeEscalation(action, ctx, userSkillConfig, template, userId, { credentialManager, adapterRegistry });
+      await executeEscalation(action, ctx, userSkillConfig, template, orgId, { credentialManager, adapterRegistry });
       result.actions.push('escalate');
       continue;
     }
@@ -264,7 +264,7 @@ export async function runBackorderDetectionV2(
       }
 
       const slotCreds = await credentialManager.getCredentials(
-        { type: 'user', userId },
+        { type: 'org', orgId },
         slotConnectionId
       );
       if (!slotCreds) {

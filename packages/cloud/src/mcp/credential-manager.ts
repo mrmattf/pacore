@@ -19,13 +19,11 @@ export interface MCPCredentials {
   storeDomain?: string;
 }
 
-export type CredentialScope =
-  | { type: 'user'; userId: string }
-  | { type: 'org';  orgId: string };
+export type CredentialScope = { type: 'org'; orgId: string };
 
 /**
  * Manages encrypted credentials for MCP servers.
- * Supports both personal (user-scoped) and org-scoped credentials.
+ * All credentials are org-scoped.
  * Uses AES-256-GCM for encryption.
  */
 export class CredentialManager {
@@ -50,19 +48,18 @@ export class CredentialManager {
     if (!this.encryptionKey) throw new Error('CredentialManager not initialized');
 
     const { encrypted, iv, authTag } = await this.encrypt(JSON.stringify(credentials));
-    const { userCol, orgCol, userVal, orgVal } = this.scopeToColumns(scope);
 
     await this.db.query(
-      `INSERT INTO mcp_credentials (${userCol}, ${orgCol}, server_id, encrypted_data, iv, auth_tag, expires_at)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
-       ON CONFLICT (${userCol}, server_id) WHERE ${userCol} IS NOT NULL
+      `INSERT INTO mcp_credentials (org_id, server_id, encrypted_data, iv, auth_tag, expires_at)
+       VALUES ($1, $2, $3, $4, $5, $6)
+       ON CONFLICT ON CONSTRAINT mcp_credentials_org_server_uniq
        DO UPDATE SET
          encrypted_data = EXCLUDED.encrypted_data,
          iv             = EXCLUDED.iv,
          auth_tag       = EXCLUDED.auth_tag,
          expires_at     = EXCLUDED.expires_at,
          updated_at     = NOW()`,
-      [userVal, orgVal, serverId, encrypted, iv, authTag, expiresAt ?? null]
+      [scope.orgId, serverId, encrypted, iv, authTag, expiresAt ?? null]
     );
   }
 
@@ -72,12 +69,11 @@ export class CredentialManager {
   ): Promise<MCPCredentials | null> {
     if (!this.encryptionKey) throw new Error('CredentialManager not initialized');
 
-    const { col, val } = this.scopeToFilter(scope);
     const result = await this.db.query(
       `SELECT encrypted_data, iv, auth_tag
        FROM mcp_credentials
-       WHERE ${col} = $1 AND server_id = $2`,
-      [val, serverId]
+       WHERE org_id = $1 AND server_id = $2`,
+      [scope.orgId, serverId]
     );
 
     if (result.rows.length === 0) return null;
@@ -88,53 +84,21 @@ export class CredentialManager {
   }
 
   async deleteCredentials(scope: CredentialScope, serverId: string): Promise<void> {
-    const { col, val } = this.scopeToFilter(scope);
     await this.db.query(
-      `DELETE FROM mcp_credentials WHERE ${col} = $1 AND server_id = $2`,
-      [val, serverId]
+      `DELETE FROM mcp_credentials WHERE org_id = $1 AND server_id = $2`,
+      [scope.orgId, serverId]
     );
   }
 
   async hasCredentials(scope: CredentialScope, serverId: string): Promise<boolean> {
-    const { col, val } = this.scopeToFilter(scope);
     const result = await this.db.query(
-      `SELECT 1 FROM mcp_credentials WHERE ${col} = $1 AND server_id = $2`,
-      [val, serverId]
+      `SELECT 1 FROM mcp_credentials WHERE org_id = $1 AND server_id = $2`,
+      [scope.orgId, serverId]
     );
     return result.rows.length > 0;
   }
 
-  // ---- Legacy helpers (user-scoped only, kept for backwards compat) ----
-
-  async storeUserCredentials(userId: string, serverId: string, credentials: MCPCredentials): Promise<void> {
-    return this.storeCredentials({ type: 'user', userId }, serverId, credentials);
-  }
-
-  async getUserCredentials(userId: string, serverId: string): Promise<MCPCredentials | null> {
-    return this.getCredentials({ type: 'user', userId }, serverId);
-  }
-
-  async deleteUserCredentials(userId: string, serverId: string): Promise<void> {
-    return this.deleteCredentials({ type: 'user', userId }, serverId);
-  }
-
-  async hasUserCredentials(userId: string, serverId: string): Promise<boolean> {
-    return this.hasCredentials({ type: 'user', userId }, serverId);
-  }
-
   // ---- Private helpers ----
-
-  private scopeToColumns(scope: CredentialScope) {
-    if (scope.type === 'user') {
-      return { userCol: 'user_id', orgCol: 'org_id', userVal: scope.userId, orgVal: null };
-    }
-    return { userCol: 'user_id', orgCol: 'org_id', userVal: null, orgVal: scope.orgId };
-  }
-
-  private scopeToFilter(scope: CredentialScope) {
-    if (scope.type === 'user') return { col: 'user_id', val: scope.userId };
-    return { col: 'org_id', val: scope.orgId };
-  }
 
   private async encrypt(data: string): Promise<{ encrypted: string; iv: string; authTag: string }> {
     if (!this.encryptionKey) throw new Error('Encryption key not initialized');

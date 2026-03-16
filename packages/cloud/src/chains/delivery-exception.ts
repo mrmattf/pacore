@@ -135,7 +135,7 @@ function evaluateDeliveryExceptionPolicy(
 export async function runDeliveryExceptionChain(
   rawPayload: unknown,
   userSkillConfig: UserSkillConfig,
-  userId: string,
+  orgId: string,
   deps: DeliveryExceptionChainDeps,
   options: { dryRun?: boolean } = {}
 ): Promise<DeliveryExceptionChainResult> {
@@ -183,7 +183,7 @@ export async function runDeliveryExceptionChain(
   }
 
   const shopifyCreds = await credentialManager.getCredentials(
-    { type: 'user', userId },
+    { type: 'org', orgId },
     shopifyConnectionId
   );
   if (!shopifyCreds) {
@@ -284,7 +284,7 @@ export async function runDeliveryExceptionChain(
     }
 
     if (action.type === 'escalate') {
-      await executeEscalation(action, ctx, userSkillConfig, template, userId, { credentialManager, adapterRegistry });
+      await executeEscalation(action, ctx, userSkillConfig, template, orgId, { credentialManager, adapterRegistry });
       result.actions.push('escalate');
       continue;
     }
@@ -303,7 +303,7 @@ export async function runDeliveryExceptionChain(
       }
 
       const slotCreds = await credentialManager.getCredentials(
-        { type: 'user', userId },
+        { type: 'org', orgId },
         slotConnectionId
       );
       if (!slotCreds) {

@@ -109,12 +109,20 @@ export function createAuthRoutes(config: AuthConfig): Router {
       const refreshToken = generateRefreshToken();
       await storeRefreshToken(config.db, user.id, refreshToken);
 
+      const orgResult = await config.db.query(
+        `SELECT om.org_id AS id, o.name, om.role
+         FROM org_members om JOIN organizations o ON o.id = om.org_id
+         WHERE om.user_id = $1 ORDER BY o.created_at LIMIT 1`,
+        [user.id],
+      );
+
       res.json({
         success: true,
         user: { id: user.id, email: user.email, name: user.name, isOperator: user.is_operator === true },
         token: accessToken,
         refreshToken,
         mustChangePassword: user.must_change_password === true,
+        orgs: orgResult.rows,
       });
     } catch (error: any) {
       console.error('Login error:', error);

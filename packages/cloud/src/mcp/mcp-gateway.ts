@@ -75,9 +75,7 @@ export class MCPGateway {
 
   /** Returns all agent-available tools for the given scope. Used by the orchestrator agent loop. */
   async getAgentTools(scope: CredentialScope): Promise<MCPTool[]> {
-    const userId = scope.type === 'user' ? scope.userId : undefined;
-    const orgId  = scope.type === 'org'  ? scope.orgId  : undefined;
-    return this.buildToolList(scope, userId, orgId);
+    return this.buildToolList(scope, undefined, scope.orgId);
   }
 
   /** Calls a tool for the given scope. Used by the orchestrator agent loop. */
@@ -86,8 +84,7 @@ export class MCPGateway {
     args: Record<string, unknown>,
     scope: CredentialScope
   ): Promise<unknown> {
-    const userId = scope.type === 'user' ? scope.userId : '';
-    return this.dispatchToolCall(userId, toolName, args, scope);
+    return this.dispatchToolCall('', toolName, args, scope);
   }
 
   // ---------------------------------------------------------------------------
@@ -291,21 +288,18 @@ export class MCPGateway {
   ): Promise<{ skillScope: SkillScope; credScope: CredentialScope }> {
     const orgId = req.headers['x-org-id'] as string | undefined;
 
-    if (orgId) {
-      // Verify the user is actually a member of the requested org
-      const role = await this.config.orgManager.getMemberRole(orgId, userId);
-      if (!role) {
-        throw new Error('Not a member of the requested organization');
-      }
-      return {
-        skillScope: { type: 'org', orgId },
-        credScope: { type: 'org', orgId },
-      };
+    if (!orgId) {
+      throw new Error('Missing X-Org-Id header — org scope is required');
     }
 
+    // Verify the user is actually a member of the requested org
+    const role = await this.config.orgManager.getMemberRole(orgId, userId);
+    if (!role) {
+      throw new Error('Not a member of the requested organization');
+    }
     return {
-      skillScope: { type: 'user', userId },
-      credScope: { type: 'user', userId },
+      skillScope: { type: 'org', orgId },
+      credScope: { type: 'org', orgId },
     };
   }
 
@@ -315,15 +309,11 @@ export class MCPGateway {
 
   private async buildToolList(
     credScope: CredentialScope,
-    userId?: string,
+    _userId?: string,
     _orgId?: string
   ): Promise<MCPTool[]> {
-    const effectiveUserId = userId ?? (credScope.type === 'user' ? credScope.userId : '');
-
     // Determine which tool chains are active for this tenant
-    const activeSkills = credScope.type === 'org'
-      ? await this.config.skillRegistry.listOrgSkills(credScope.orgId)
-      : await this.config.skillRegistry.listUserSkills(effectiveUserId);
+    const activeSkills = await this.config.skillRegistry.listOrgSkills(credScope.orgId);
 
     const activeToolChains = new Set<string>();
     for (const userSkill of activeSkills) {
@@ -332,8 +322,8 @@ export class MCPGateway {
       if (def?.toolChain) activeToolChains.add(def.toolChain);
     }
 
-    // All MCP servers visible to this user (personal + org-shared)
-    const servers = await this.config.mcpRegistry.listServersForUser(effectiveUserId);
+    // All MCP servers visible to this org
+    const servers = await this.config.mcpRegistry.listOrgServers(credScope.orgId);
 
     // Filter to servers whose categories or name match an active skill's tool chain
     const activeServers = activeToolChains.size > 0
@@ -347,9 +337,7 @@ export class MCPGateway {
 
     for (const server of activeServers) {
       try {
-        const serverCred: CredentialScope = server.orgId
-          ? { type: 'org', orgId: server.orgId }
-          : { type: 'user', userId: effectiveUserId };
+        const serverCred: CredentialScope = { type: 'org', orgId: server.orgId ?? credScope.orgId };
 
         const creds = await this.config.credentialManager.getCredentials(serverCred, server.id);
         const client = new MCPClient(server, creds ?? undefined);
@@ -441,15 +429,13 @@ export class MCPGateway {
     }
 
     // Fall through to registered external MCP servers
-    const servers = await this.config.mcpRegistry.listServersForUser(userId);
+    const servers = await this.config.mcpRegistry.listOrgServers(credScope.orgId);
     const server = servers.find(s => slugify(s.name) === prefix);
     if (!server) {
       throw new Error(`No MCP server found for tool namespace "${prefix}"`);
     }
 
-    const serverCred: CredentialScope = server.orgId
-      ? { type: 'org', orgId: server.orgId }
-      : { type: 'user', userId };
+    const serverCred: CredentialScope = { type: 'org', orgId: server.orgId ?? credScope.orgId };
 
     const creds = await this.config.credentialManager.getCredentials(serverCred, server.id);
     const client = new MCPClient(server, creds ?? undefined);
@@ -471,11 +457,9 @@ export class MCPGateway {
   // Meta-tool implementations
   // ---------------------------------------------------------------------------
 
-  private async metaListSkills(userId: string, credScope: CredentialScope): Promise<unknown> {
+  private async metaListSkills(_userId: string, credScope: CredentialScope): Promise<unknown> {
     const catalog = this.config.skillRegistry.listSkills();
-    const active = credScope.type === 'org'
-      ? await this.config.skillRegistry.listOrgSkills(credScope.orgId)
-      : await this.config.skillRegistry.listUserSkills(userId);
+    const active = await this.config.skillRegistry.listOrgSkills(credScope.orgId);
 
     const activeBySkillId = new Map(active.map(s => [s.skillId, s]));
 
@@ -491,14 +475,12 @@ export class MCPGateway {
   }
 
   private async metaActivateSkill(
-    userId: string,
+    _userId: string,
     skillId: string,
     credScope: CredentialScope
   ): Promise<unknown> {
     if (!skillId) throw new Error('activate_skill requires skill_id');
-    const skillScope: SkillScope = credScope.type === 'org'
-      ? { type: 'org', orgId: credScope.orgId }
-      : { type: 'user', userId };
+    const skillScope: SkillScope = { type: 'org', orgId: credScope.orgId };
     const userSkill = await this.config.skillRegistry.activateSkill(skillScope, skillId);
     return { success: true, userSkill };
   }
@@ -561,12 +543,10 @@ export class MCPGateway {
   }
 
   private async pacoreGetExecutionLog(
-    userId: string,
+    _userId: string,
     credScope: CredentialScope
   ): Promise<unknown> {
-    const executions = credScope.type === 'org'
-      ? await this.config.skillRegistry.listAllOrgExecutions(credScope.orgId, 30)
-      : await this.config.skillRegistry.listAllUserExecutions(userId, 30);
+    const executions = await this.config.skillRegistry.listAllOrgExecutions(credScope.orgId, 30);
 
     return executions.map(e => ({
       skillId: e.skillTypeId ?? null,

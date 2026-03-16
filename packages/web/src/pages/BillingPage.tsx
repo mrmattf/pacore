@@ -409,9 +409,9 @@ function SkillCard({ userSkill, currentPlan }: { userSkill: UserSkill; currentPl
 // ─── Main page ───────────────────────────────────────────────────────────────
 export function BillingPage() {
   const { context } = useContextStore();
-  const orgId = context.type === 'org' ? context.orgId : undefined;
+  const orgId = context.orgId;
   const { billing, loading, error, refresh } = useBilling(orgId);
-  const { userSkills } = useUserSkills();
+  const { userSkills } = useUserSkills(orgId);
 
   const currentPlan: PlanTier = billing?.plan ?? 'free';
   const summary = billing?.summary;
@@ -431,9 +431,7 @@ export function BillingPage() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">Billing</h1>
-            <p className="text-sm text-gray-600 mt-1">
-              {context.type === 'org' ? `${context.orgName} · plan & usage` : 'Your plan & usage'}
-            </p>
+            <p className="text-sm text-gray-600 mt-1">{context.orgName} · plan & usage</p>
           </div>
           <button
             onClick={() => refresh()}
@@ -471,13 +469,11 @@ export function BillingPage() {
                   icon={Zap}
                   item={summary.activeSkills}
                 />
-                {orgId && (
-                  <UsageBar
-                    label="Org Members"
-                    icon={Users}
-                    item={summary.orgMembers}
-                  />
-                )}
+                <UsageBar
+                  label="Org Members"
+                  icon={Users}
+                  item={summary.orgMembers}
+                />
               </div>
             </div>
           )}

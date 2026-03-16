@@ -46,7 +46,8 @@ export function createOnboardingRoutes(db: Pool, credentialManager: CredentialMa
   // ---------------------------------------------------------------------------
   router.get('/:token', async (req: Request, res: Response) => {
     try {
-      const tokenHash = createHash('sha256').update(req.params.token).digest('hex');
+      const rawToken = req.params.token;
+      const tokenHash = createHash('sha256').update(rawToken).digest('hex');
 
       const result = await db.query(
         `SELECT cit.id, cit.org_id, cit.operator_id, cit.expires_at, cit.used_at,
@@ -111,85 +112,90 @@ export function createOnboardingRoutes(db: Pool, credentialManager: CredentialMa
   // }
   // ---------------------------------------------------------------------------
   router.post('/:token', async (req: Request, res: Response) => {
-    try {
-      const { shopify, gorgias, cfTurnstileToken } = req.body;
+    const { shopify, gorgias, cfTurnstileToken } = req.body;
 
-      // Verify Turnstile (skipped in dev if CF_TURNSTILE_SECRET not set)
-      if (!cfTurnstileToken || !(await verifyTurnstile(cfTurnstileToken))) {
-        return res.status(400).json({ error: 'Bot verification failed. Please try again.' });
-      }
-
-      if (!shopify && !gorgias) {
-        return res.status(400).json({ error: 'At least one credential set (shopify or gorgias) is required' });
-      }
-
-      if (shopify) {
-        const { domain, apiKey, apiSecretKey } = shopify;
-        if (!domain || !apiKey || !apiSecretKey) {
-          return res.status(400).json({ error: 'shopify requires domain, apiKey, and apiSecretKey' });
-        }
-      }
-
-      if (gorgias) {
-        const { domain, email, apiKey } = gorgias;
-        if (!domain || !email || !apiKey) {
-          return res.status(400).json({ error: 'gorgias requires domain, email, and apiKey' });
-        }
-      }
-
-      const tokenHash = createHash('sha256').update(req.params.token).digest('hex');
-
-      // Atomic token consumption — check + consume in a single UPDATE...RETURNING
-      const consumeResult = await db.query(
-        `UPDATE credential_intake_tokens
-         SET used_at = NOW()
-         WHERE token_hash = $1 AND expires_at > NOW() AND used_at IS NULL
-         RETURNING org_id, operator_id`,
-        [tokenHash],
-      );
-
-      if (consumeResult.rows.length === 0) {
-        return res.status(409).json({
-          error: 'This link has expired or has already been used.',
-          hint: 'Contact your operator for a new link.',
-        });
-      }
-
-      const { org_id: orgId } = consumeResult.rows[0];
-      const scope = { type: 'org' as const, orgId };
-      const received: Record<string, { domain: string }> = {};
-
-      // Store Shopify credentials — use field names the ShopifyOrderAdapter expects
-      if (shopify) {
-        await credentialManager.storeCredentials(scope, 'shopify', {
-          storeDomain: shopify.domain,
-          clientId: shopify.apiKey,
-          clientSecret: shopify.apiSecretKey,
-        });
-        received.shopify = { domain: maskDomain(shopify.domain) };
-      }
-
-      // Store Gorgias credentials — use field names the GorgiasNotificationAdapter expects
-      if (gorgias) {
-        await credentialManager.storeCredentials(scope, 'gorgias', {
-          subdomain: gorgias.domain,
-          email: gorgias.email,
-          apiKey: gorgias.apiKey,
-        });
-        received.gorgias = { domain: maskDomain(gorgias.domain) };
-      }
-
-      // Mark customer as onboarded
-      await db.query(
-        `UPDATE customer_profiles SET onboarded_at = NOW(), updated_at = NOW() WHERE org_id = $1`,
-        [orgId],
-      );
-
-      res.json({ success: true, received });
-    } catch (error: any) {
-      console.error('Onboard POST error:', error);
-      res.status(500).json({ error: 'Internal server error' });
+    // Verify Turnstile (skipped in dev if CF_TURNSTILE_SECRET not set)
+    if (!cfTurnstileToken || !(await verifyTurnstile(cfTurnstileToken))) {
+      return res.status(400).json({ error: 'Bot verification failed. Please try again.' });
     }
+
+    if (!shopify && !gorgias) {
+      return res.status(400).json({ error: 'At least one credential set (shopify or gorgias) is required' });
+    }
+
+    if (shopify) {
+      const { domain, apiKey, apiSecretKey } = shopify;
+      if (!domain || !apiKey || !apiSecretKey) {
+        return res.status(400).json({ error: 'shopify requires domain, apiKey, and apiSecretKey' });
+      }
+    }
+
+    if (gorgias) {
+      const { domain, email, apiKey } = gorgias;
+      if (!domain || !email || !apiKey) {
+        return res.status(400).json({ error: 'gorgias requires domain, email, and apiKey' });
+      }
+    }
+
+    const tokenHash = createHash('sha256').update(req.params.token).digest('hex');
+
+    const client = await db.connect();
+      try {
+        await client.query('BEGIN');
+
+        // Consume token inside transaction — rolls back if credential storage fails
+        const consumeResult = await client.query(
+          `UPDATE credential_intake_tokens
+           SET used_at = NOW()
+           WHERE token_hash = $1 AND expires_at > NOW() AND used_at IS NULL
+           RETURNING org_id, operator_id`,
+          [tokenHash],
+        );
+
+        if (consumeResult.rows.length === 0) {
+          await client.query('ROLLBACK');
+          return res.status(409).json({
+            error: 'This link has expired or has already been used.',
+            hint: 'Contact your operator for a new link.',
+          });
+        }
+
+        const { org_id: orgId } = consumeResult.rows[0];
+        const scope = { type: 'org' as const, orgId };
+        const received: Record<string, { domain: string }> = {};
+
+        if (shopify) {
+          await credentialManager.storeCredentials(scope, 'shopify', {
+            storeDomain: shopify.domain,
+            clientId: shopify.apiKey,
+            clientSecret: shopify.apiSecretKey,
+          });
+          received.shopify = { domain: maskDomain(shopify.domain) };
+        }
+
+        if (gorgias) {
+          await credentialManager.storeCredentials(scope, 'gorgias', {
+            subdomain: gorgias.domain,
+            email: gorgias.email,
+            apiKey: gorgias.apiKey,
+          });
+          received.gorgias = { domain: maskDomain(gorgias.domain) };
+        }
+
+        await client.query(
+          `UPDATE customer_profiles SET onboarded_at = NOW(), updated_at = NOW() WHERE org_id = $1`,
+          [orgId],
+        );
+
+        await client.query('COMMIT');
+        res.json({ success: true, received });
+      } catch (error: any) {
+        await client.query('ROLLBACK');
+        console.error('Onboard POST error:', error);
+        res.status(500).json({ error: 'Internal server error' });
+      } finally {
+        client.release();
+      }
   });
 
   return router;

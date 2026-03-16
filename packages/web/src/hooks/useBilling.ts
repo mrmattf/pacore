@@ -5,8 +5,7 @@ export type PlanTier = 'free' | 'starter' | 'growth' | 'business' | 'enterprise'
 
 export interface Subscription {
   id: string;
-  userId: string | null;
-  orgId: string | null;
+  orgId: string;
   plan: PlanTier;
   status: string;
   currentPeriodStart: string | null;
@@ -25,7 +24,6 @@ export interface LimitSummaryItem {
 export interface UsageSummary {
   skillExecutionsPerMonth: LimitSummaryItem;
   activeSkills: LimitSummaryItem;
-  orgs: LimitSummaryItem;
   orgMembers: LimitSummaryItem;
 }
 
@@ -58,8 +56,8 @@ async function apiFetch(path: string, token: string, init?: RequestInit) {
   return res.json();
 }
 
-/** Hook for billing data. Pass orgId to get org billing instead of personal billing. */
-export function useBilling(orgId?: string) {
+/** Hook for org billing data. */
+export function useBilling(orgId: string) {
   const [billing, setBilling] = useState<BillingInfo | null>(null);
   const [plans, setPlans] = useState<PlanDefinition[]>([]);
   const [loading, setLoading] = useState(false);
@@ -67,15 +65,12 @@ export function useBilling(orgId?: string) {
   const token = useAuthStore((s) => s.token);
 
   const refresh = useCallback(async () => {
-    if (!token) return;
+    if (!token || !orgId) return;
     setLoading(true);
     setError(null);
     try {
-      const billingPath = orgId
-        ? `/v1/organizations/${orgId}/billing`
-        : '/v1/me/billing';
       const [billingData, plansData] = await Promise.all([
-        apiFetch(billingPath, token),
+        apiFetch(`/v1/organizations/${orgId}/billing`, token),
         apiFetch('/v1/plans', token),
       ]);
       setBilling(billingData);
@@ -93,10 +88,7 @@ export function useBilling(orgId?: string) {
 
   const updatePlan = async (plan: PlanTier): Promise<void> => {
     if (!token) throw new Error('Not authenticated');
-    const path = orgId
-      ? `/v1/organizations/${orgId}/billing/plan`
-      : '/v1/me/billing/plan';
-    await apiFetch(path, token, {
+    await apiFetch(`/v1/organizations/${orgId}/billing/plan`, token, {
       method: 'PUT',
       body: JSON.stringify({ plan }),
     });

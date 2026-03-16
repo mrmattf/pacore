@@ -1,6 +1,6 @@
 import { PlanTier } from '@pacore/core';
 
-export type LimitKey = 'skillExecutionsPerMonth' | 'activeSkills' | 'orgs' | 'orgMembers';
+export type LimitKey = 'skillExecutionsPerMonth' | 'activeSkills' | 'orgMembers';
 
 /** Limits for each plan tier. -1 = unlimited.
  *  "skillExecutionsPerMonth" counts only non-skipped, non-sandbox executions
@@ -9,31 +9,26 @@ export const PLAN_LIMITS: Record<PlanTier, Record<LimitKey, number>> = {
   free: {
     skillExecutionsPerMonth: -1, // unlimited — sandbox mode, no real actions
     activeSkills: 1,
-    orgs: 0,
     orgMembers: 0,
   },
   starter: {
     skillExecutionsPerMonth: 50,
     activeSkills: 3,
-    orgs: 0,
     orgMembers: 0,
   },
   growth: {
     skillExecutionsPerMonth: 250,
     activeSkills: 10,
-    orgs: 1,
     orgMembers: 10,
   },
   business: {
     skillExecutionsPerMonth: 1_000,
     activeSkills: -1,
-    orgs: 3,
     orgMembers: -1,
   },
   enterprise: {
     skillExecutionsPerMonth: -1,
     activeSkills: -1,
-    orgs: -1,
     orgMembers: -1,
   },
 };
@@ -55,7 +50,6 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
     features: [
       'Sandbox mode — preview actions without real execution',
       '1 active skill',
-      'Personal workspace only',
     ],
   },
   {
@@ -63,14 +57,14 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
     name: 'Starter',
     priceMonthly: 79,
     sandboxMode: false,
-    features: ['50 skill executions/mo', '3 active skills', 'Personal workspace only'],
+    features: ['50 skill executions/mo', '3 active skills'],
   },
   {
     tier: 'growth',
     name: 'Growth',
     priceMonthly: 199,
     sandboxMode: false,
-    features: ['250 skill executions/mo', '10 active skills', '1 organization', 'Up to 10 org members'],
+    features: ['250 skill executions/mo', '10 active skills', 'Up to 10 team members'],
   },
   {
     tier: 'business',
@@ -80,8 +74,7 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
     features: [
       '1,000 skill executions/mo',
       'Unlimited active skills',
-      '3 organizations',
-      'Unlimited org members',
+      'Unlimited team members',
     ],
   },
   {
@@ -92,8 +85,7 @@ export const PLAN_DEFINITIONS: PlanDefinition[] = [
     features: [
       'Unlimited skill executions',
       'Unlimited active skills',
-      'Unlimited organizations',
-      'Unlimited org members',
+      'Unlimited team members',
       'Dedicated support',
       'SLA guarantee',
     ],

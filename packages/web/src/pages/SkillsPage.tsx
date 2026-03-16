@@ -25,7 +25,7 @@ interface TemplateMeta { name: string; skillTypeId: string; }
 
 export function SkillsPage() {
   const navigate = useNavigate();
-  const { context, setContext } = useContextStore();
+  const { context } = useContextStore();
 
   const [skillTypes, setSkillTypes] = useState<SkillTypeCard[]>([]);
   const [mySkills, setMySkills] = useState<UserSkill[]>([]);
@@ -50,9 +50,9 @@ export function SkillsPage() {
       ]);
 
       // Stale org context — user was removed from the org
-      if (myRes.status === 403 && context.type === 'org') {
-        setContext({ type: 'personal' });
-        return; // useEffect will re-run load() with personal context
+      if (myRes.status === 403) {
+        window.location.href = '/login';
+        return;
       }
 
       const types: SkillTypeCard[] = typesRes.ok ? await typesRes.json() : [];
@@ -73,23 +73,19 @@ export function SkillsPage() {
       }));
       setTemplateMap(map);
 
-      // Fetch operator contact if in org context (for concierge badge + handoff banner)
-      if (context.type === 'org') {
-        try {
-          const contactRes = await apiFetch(`/v1/organizations/${context.orgId}/operator-contact`);
-          if (contactRes.ok) {
-            const contact = await contactRes.json();
-            setOperatorContact(contact);
-            // Check if handoff banner should show (self_managed + handoff notes + not dismissed)
-            const dismissKey = `handoff-dismissed-${context.orgId}`;
-            setHandoffDismissed(!!localStorage.getItem(dismissKey));
-          } else {
-            setOperatorContact(null);
-          }
-        } catch {
+      // Fetch operator contact (for concierge badge + handoff banner)
+      try {
+        const contactRes = await apiFetch(`/v1/organizations/${context.orgId}/operator-contact`);
+        if (contactRes.ok) {
+          const contact = await contactRes.json();
+          setOperatorContact(contact);
+          // Check if handoff banner should show (self_managed + handoff notes + not dismissed)
+          const dismissKey = `handoff-dismissed-${context.orgId}`;
+          setHandoffDismissed(!!localStorage.getItem(dismissKey));
+        } else {
           setOperatorContact(null);
         }
-      } else {
+      } catch {
         setOperatorContact(null);
       }
     } finally {
@@ -155,7 +151,7 @@ export function SkillsPage() {
     return templateMap[templateId]?.name ?? templateId ?? 'Skill';
   }
 
-  const isOrgAdmin = context.type === 'org' && context.role === 'admin';
+  const isOrgAdmin = context.role === 'admin';
 
 
   return (
@@ -166,11 +162,7 @@ export function SkillsPage() {
           <div className="flex items-center gap-4">
             <div>
               <h1 className="text-2xl font-bold">Skills</h1>
-              <p className="text-sm text-gray-600 mt-1">
-                {context.type === 'org'
-                  ? `${context.orgName} · skills`
-                  : 'Activate skills that automate your Shopify operations'}
-              </p>
+              <p className="text-sm text-gray-600 mt-1">{context.orgName} · skills</p>
             </div>
           </div>
           <div className="flex items-center gap-3">
@@ -227,7 +219,7 @@ export function SkillsPage() {
           {myConfiguredSkills.length > 0 && (
             <section>
               <h2 className="text-sm font-semibold text-gray-500 uppercase tracking-wide mb-3">
-                {context.type === 'org' ? `${context.orgName} Skills` : 'My Skills'}
+                {context.orgName} Skills
               </h2>
               <div className="space-y-2">
                 {myConfiguredSkills.map(skill => {
@@ -238,7 +230,7 @@ export function SkillsPage() {
                   const canConfigure = Boolean(typeId && templateId);
                   const isPaused = skill.status === 'paused';
                   const isPending = skill.status === 'pending';
-                  const canEdit = context.type === 'personal' || isOrgAdmin;
+                  const canEdit = isOrgAdmin;
                   return (
                     <div
                       key={skill.id}
@@ -376,7 +368,7 @@ export function SkillsPage() {
       </main>
 
       {/* Org management panel */}
-      {orgPanelOpen && context.type === 'org' && (
+      {orgPanelOpen && (
         <OrgPanel
           orgId={context.orgId}
           onClose={() => setOrgPanelOpen(false)}

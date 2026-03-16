@@ -232,9 +232,9 @@ export class WorkflowExecutor {
 
     // Retrieve credentials for this MCP server
     let credentials: any = undefined;
-    if (this.credentialManager) {
+    if (this.credentialManager && server.orgId) {
       try {
-        const creds = await this.credentialManager.getUserCredentials(userId, config.serverId);
+        const creds = await this.credentialManager.getCredentials({ type: 'org', orgId: server.orgId }, config.serverId);
         if (creds) {
           credentials = creds;
         }

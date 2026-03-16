@@ -10,17 +10,18 @@ export interface UserSkill {
   createdAt: string;
 }
 
-export function useUserSkills() {
+export function useUserSkills(orgId: string) {
   const [userSkills, setUserSkills] = useState<UserSkill[]>([]);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiFetch('/v1/me/skills')
+    if (!orgId) { setLoading(false); return; }
+    apiFetch(`/v1/organizations/${orgId}/skills`)
       .then(r => r.json())
       .then(setUserSkills)
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, []);
+  }, [orgId]);
 
   return { userSkills, loading };
 }

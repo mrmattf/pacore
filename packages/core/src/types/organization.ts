@@ -3,9 +3,7 @@ export type PlanTier = 'free' | 'starter' | 'growth' | 'business' | 'enterprise'
 /** @deprecated Use PlanTier */
 export type OrgPlan = PlanTier;
 
-export type BillingScope =
-  | { type: 'user'; userId: string }
-  | { type: 'org'; orgId: string };
+export type BillingScope = { type: 'org'; orgId: string };
 
 export interface Organization {
   id: string;
