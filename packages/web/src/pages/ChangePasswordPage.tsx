@@ -10,7 +10,7 @@ export function ChangePasswordPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const navigate = useNavigate();
-  const { mustChangePassword, clearMustChangePassword } = useAuthStore();
+  const { mustChangePassword, clearMustChangePassword, isOperator } = useAuthStore();
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -36,7 +36,7 @@ export function ChangePasswordPage() {
         return;
       }
       clearMustChangePassword();
-      navigate('/skills');
+      navigate(isOperator ? '/operator' : '/skills');
     } finally {
       setLoading(false);
     }

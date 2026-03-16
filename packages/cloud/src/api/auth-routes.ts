@@ -89,7 +89,7 @@ export function createAuthRoutes(config: AuthConfig): Router {
       }
 
       const result = await config.db.query(
-        'SELECT id, email, password_hash, name, must_change_password FROM users WHERE email = $1',
+        'SELECT id, email, password_hash, name, must_change_password, is_operator FROM users WHERE email = $1',
         [email],
       );
       if (result.rows.length === 0) {
@@ -103,7 +103,7 @@ export function createAuthRoutes(config: AuthConfig): Router {
       }
 
       const accessToken = issueAccessToken(
-        { id: user.id, email: user.email, type: 'user' },
+        { id: user.id, email: user.email, type: 'user', isOperator: user.is_operator === true },
         config.jwtPrivateKey,
       );
       const refreshToken = generateRefreshToken();
@@ -111,7 +111,7 @@ export function createAuthRoutes(config: AuthConfig): Router {
 
       res.json({
         success: true,
-        user: { id: user.id, email: user.email, name: user.name },
+        user: { id: user.id, email: user.email, name: user.name, isOperator: user.is_operator === true },
         token: accessToken,
         refreshToken,
         mustChangePassword: user.must_change_password === true,
@@ -134,7 +134,7 @@ export function createAuthRoutes(config: AuthConfig): Router {
 
       const tokenHash = hashToken(refreshToken);
       const result = await config.db.query(
-        `SELECT rt.user_id, rt.expires_at, rt.idle_expires_at, u.email
+        `SELECT rt.user_id, rt.expires_at, rt.idle_expires_at, u.email, u.is_operator
          FROM refresh_tokens rt JOIN users u ON u.id = rt.user_id
          WHERE rt.token_hash = $1`,
         [tokenHash],
@@ -164,7 +164,7 @@ export function createAuthRoutes(config: AuthConfig): Router {
       );
 
       const accessToken = issueAccessToken(
-        { id: row.user_id, email: row.email, type: 'user' },
+        { id: row.user_id, email: row.email, type: 'user', isOperator: row.is_operator === true },
         config.jwtPrivateKey,
       );
 
@@ -241,12 +241,13 @@ export function createAuthRoutes(config: AuthConfig): Router {
       if (!userId) return res.status(401).json({ error: 'Unauthorized' });
 
       const result = await config.db.query(
-        'SELECT id, email, name, created_at FROM users WHERE id = $1',
+        'SELECT id, email, name, is_operator, created_at FROM users WHERE id = $1',
         [userId],
       );
       if (result.rows.length === 0) return res.status(404).json({ error: 'User not found' });
 
-      res.json({ user: result.rows[0] });
+      const row = result.rows[0];
+      res.json({ user: { ...row, isOperator: row.is_operator === true } });
     } catch (error: any) {
       console.error('Get user error:', error);
       res.status(500).json({ error: 'Internal server error' });

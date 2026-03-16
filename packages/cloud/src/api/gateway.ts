@@ -11,6 +11,8 @@ import { createAuthRoutes } from './auth-routes';
 import { createOAuthRoutes } from './oauth-routes';
 import { createMcpCredentialRoutes } from './mcp-credential-routes';
 import { createAdminRoutes } from './admin-routes';
+import { createOperatorRoutes, createOrgOperatorContactRoute } from './operator-routes';
+import { createOnboardingRoutes } from './onboarding-routes';
 import { MCPRegistry, CredentialManager, CredentialScope } from '../mcp';
 import { MCPClient } from '../mcp';
 import { WorkflowManager, WorkflowExecutor, WorkflowBuilder } from '../workflow';
@@ -117,12 +119,13 @@ export class APIGateway {
     res: Response,
     next: NextFunction,
   ): Promise<void> {
-    // Skip auth for: health, auth routes, webhook triggers, OAuth endpoints, static assets
+    // Skip auth for: health, auth routes, webhook triggers, OAuth endpoints, onboarding intake, static assets
     if (
       req.path === '/health' ||
       req.path.startsWith('/v1/auth/') ||
       req.path.startsWith('/v1/admin/') ||
       req.path.startsWith('/v1/triggers/webhook/') ||
+      req.path.startsWith('/v1/onboard/') ||
       req.path.startsWith('/oauth/') ||
       req.path.startsWith('/.well-known/') ||
       (!req.path.startsWith('/v1') && !req.path.startsWith('/internal'))
@@ -217,6 +220,20 @@ export class APIGateway {
 
     // Admin routes — protected by X-Admin-Secret header, bypass JWT auth
     this.app.use('/v1/admin', createAdminRoutes(this.config.db));
+
+    // Onboarding intake routes — public (no auth), mounted before JWT auth middleware applies
+    this.app.use('/v1/onboard', createOnboardingRoutes(this.config.db, this.config.credentialManager));
+
+    // Operator routes — JWT-authenticated, operator role required
+    if (this.config.orgManager && this.config.skillRegistry) {
+      this.app.use('/v1/operator', createOperatorRoutes(
+        this.config.db,
+        this.config.credentialManager,
+        this.config.orgManager,
+        this.config.skillRegistry,
+      ));
+      this.app.use('/v1/organizations', createOrgOperatorContactRoute(this.config.db));
+    }
 
     // -------------------------------------------------------------------------
     // MCP Gateway — multi-tenant aggregated tool endpoint for AI clients

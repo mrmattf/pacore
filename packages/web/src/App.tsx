@@ -9,11 +9,21 @@ import { TemplatePickerPage } from './pages/TemplatePickerPage';
 import { SkillConfigPage } from './pages/SkillConfigPage';
 import { BillingPage } from './pages/BillingPage';
 import { ChangePasswordPage } from './pages/ChangePasswordPage';
+import { CredentialIntakePage } from './pages/CredentialIntakePage';
+import { OperatorDashboard } from './pages/OperatorDashboard';
+import { OperatorCustomerDetail } from './pages/OperatorCustomerDetail';
 import { useAuthStore } from './store/authStore';
 
 function PrivateRoute({ children }: { children: React.ReactNode }) {
   const token = useAuthStore((state) => state.token);
   return token ? <>{children}</> : <Navigate to="/login" />;
+}
+
+function OperatorRoute({ children }: { children: React.ReactNode }) {
+  const { token, isOperator } = useAuthStore((state) => ({ token: state.token, isOperator: state.isOperator }));
+  if (!token) return <Navigate to="/login" />;
+  if (!isOperator) return <Navigate to="/skills" />;
+  return <>{children}</>;
 }
 
 export function App() {
@@ -86,6 +96,27 @@ export function App() {
             </PrivateRoute>
           }
         />
+        {/* Public onboarding intake — no auth required */}
+        <Route path="/onboard/:token" element={<CredentialIntakePage />} />
+
+        {/* Operator routes — requires isOperator */}
+        <Route
+          path="/operator"
+          element={
+            <OperatorRoute>
+              <OperatorDashboard />
+            </OperatorRoute>
+          }
+        />
+        <Route
+          path="/operator/customers/:orgId"
+          element={
+            <OperatorRoute>
+              <OperatorCustomerDetail />
+            </OperatorRoute>
+          }
+        />
+
         <Route path="/" element={<Navigate to="/skills" />} />
       </Routes>
     </BrowserRouter>

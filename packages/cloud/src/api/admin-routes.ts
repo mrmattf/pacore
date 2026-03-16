@@ -71,6 +71,56 @@ export function createAdminRoutes(db: Pool): Router {
   });
 
   // ---------------------------------------------------------------------------
+  // POST /v1/admin/invite-operator — create a user with is_operator = true
+  // Body: { email, name? }
+  // Returns: { email, tempPassword } — shown once, operator must change on first login
+  // ---------------------------------------------------------------------------
+  router.post('/invite-operator', async (req: Request, res: Response) => {
+    try {
+      const { email, name } = req.body;
+      if (!email) return res.status(400).json({ error: 'email is required' });
+
+      const existing = await db.query('SELECT id FROM users WHERE email = $1', [email]);
+      const tempPassword = randomBytes(12).toString('base64url').slice(0, 16);
+      const passwordHash = await bcrypt.hash(tempPassword, 10);
+
+      if (existing.rows.length > 0) {
+        const { force } = req.body;
+        if (!force) {
+          return res.status(409).json({ error: 'User already exists. Pass "force": true to reset their temp password.' });
+        }
+        await db.query(
+          'UPDATE users SET password_hash = $1, must_change_password = true, is_operator = true, updated_at = NOW() WHERE email = $2',
+          [passwordHash, email],
+        );
+        return res.json({
+          success: true,
+          email,
+          tempPassword,
+          message: 'Password reset. Share tempPassword securely — operator must change it on next login.',
+        });
+      }
+
+      const userId = nanoid();
+      await db.query(
+        `INSERT INTO users (id, email, password_hash, name, is_operator, must_change_password, created_at, updated_at)
+         VALUES ($1, $2, $3, $4, true, true, NOW(), NOW())`,
+        [userId, email, passwordHash, name || null],
+      );
+
+      res.status(201).json({
+        success: true,
+        email,
+        tempPassword,
+        message: 'Operator created. Share tempPassword securely — they must change it on first login.',
+      });
+    } catch (error: any) {
+      console.error('Invite operator error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
   // GET /v1/admin/users — list all users
   // ---------------------------------------------------------------------------
   router.get('/users', async (_req: Request, res: Response) => {

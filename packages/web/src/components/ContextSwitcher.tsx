@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react';
-import { ChevronDown, User, Building2, Plus, Loader2, Settings } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { ChevronDown, User, Building2, Plus, Loader2, Settings, LayoutDashboard } from 'lucide-react';
 import { useContextStore, OrgRole } from '../store/contextStore';
 import { useOrgs, fetchOrgWithMembers, createOrg } from '../hooks/useOrgs';
 import { useAuthStore } from '../store/authStore';
@@ -11,7 +12,7 @@ interface ContextSwitcherProps {
 export function ContextSwitcher({ onManageOrg }: ContextSwitcherProps) {
   const { context, setContext } = useContextStore();
   const { orgs, loading: orgsLoading, error: orgsError, refresh: refreshOrgs } = useOrgs();
-  const user = useAuthStore((s) => s.user);
+  const { user, isOperator } = useAuthStore((s) => ({ user: s.user, isOperator: s.isOperator }));
 
   const [open, setOpen] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -97,6 +98,22 @@ export function ContextSwitcher({ onManageOrg }: ContextSwitcherProps) {
 
       {open && (
         <div className="absolute left-0 top-full mt-1 w-64 bg-white border border-gray-200 rounded-lg shadow-lg z-50">
+          {/* Operator Dashboard link */}
+          {isOperator && (
+            <>
+              <div className="p-1">
+                <Link
+                  to="/operator"
+                  onClick={() => setOpen(false)}
+                  className="flex items-center gap-2.5 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 rounded-md transition-colors"
+                >
+                  <LayoutDashboard size={14} className="text-purple-500 flex-shrink-0" />
+                  <span>Operator Dashboard</span>
+                </Link>
+              </div>
+              <div className="border-t border-gray-100 mx-1" />
+            </>
+          )}
           {/* Personal */}
           <div className="p-1">
             <button

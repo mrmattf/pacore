@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Zap, ChevronRight, RefreshCw, Settings, CheckCircle, Clock, Trash2, Pause, Play, Package, Truck, BarChart2, ShieldAlert, type LucideIcon } from 'lucide-react';
+import { Zap, ChevronRight, RefreshCw, Settings, CheckCircle, Clock, Trash2, Pause, Play, Package, Truck, BarChart2, ShieldAlert, X, type LucideIcon } from 'lucide-react';
 
 const SKILL_ICONS: Record<string, LucideIcon> = {
   Package, Truck, BarChart2, ShieldAlert, Zap,
@@ -36,6 +36,10 @@ export function SkillsPage() {
   const [activeCategory, setActiveCategory] = useState<string>('All');
   const [orgPanelOpen, setOrgPanelOpen] = useState(false);
 
+  // Concierge mode: operator contact + handoff banner
+  const [operatorContact, setOperatorContact] = useState<{ operatorName: string; operatorEmail: string; managementMode: string; handoffNotes: string | null } | null>(null);
+  const [handoffDismissed, setHandoffDismissed] = useState(false);
+
   async function load() {
     setLoading(true);
     try {
@@ -68,6 +72,26 @@ export function SkillsPage() {
         } catch { /* non-fatal */ }
       }));
       setTemplateMap(map);
+
+      // Fetch operator contact if in org context (for concierge badge + handoff banner)
+      if (context.type === 'org') {
+        try {
+          const contactRes = await apiFetch(`/v1/organizations/${context.orgId}/operator-contact`);
+          if (contactRes.ok) {
+            const contact = await contactRes.json();
+            setOperatorContact(contact);
+            // Check if handoff banner should show (self_managed + handoff notes + not dismissed)
+            const dismissKey = `handoff-dismissed-${context.orgId}`;
+            setHandoffDismissed(!!localStorage.getItem(dismissKey));
+          } else {
+            setOperatorContact(null);
+          }
+        } catch {
+          setOperatorContact(null);
+        }
+      } else {
+        setOperatorContact(null);
+      }
     } finally {
       setLoading(false);
     }
@@ -162,6 +186,39 @@ export function SkillsPage() {
           </div>
         </div>
       </header>
+
+      {/* Handoff banner — shown once after transition to self-managed */}
+      {operatorContact?.managementMode === 'self_managed' && operatorContact.handoffNotes && !handoffDismissed && (
+        <div className="bg-amber-50 border-b border-amber-200 px-6 py-3 flex items-start justify-between gap-4">
+          <div className="text-sm text-amber-800">
+            <span className="font-semibold">Your account is now self-managed.</span>{' '}
+            {operatorContact.handoffNotes}
+          </div>
+          <button
+            onClick={() => {
+              if (context.type === 'org') {
+                localStorage.setItem(`handoff-dismissed-${context.orgId}`, '1');
+              }
+              setHandoffDismissed(true);
+            }}
+            className="shrink-0 text-amber-500 hover:text-amber-700"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
+      {/* Concierge mode badge */}
+      {operatorContact?.managementMode === 'concierge' && (
+        <div className="bg-blue-50 border-b border-blue-100 px-6 py-2 flex items-center gap-2 text-sm text-blue-700">
+          <span className="font-medium">Managed by Clarissi</span>
+          <span className="text-blue-400">·</span>
+          <span>Skills are configured and managed by {operatorContact.operatorName}.</span>
+          <a href={`mailto:${operatorContact.operatorEmail}`} className="text-blue-600 hover:underline ml-1">
+            {operatorContact.operatorEmail}
+          </a>
+        </div>
+      )}
 
       <main className="flex-1 overflow-auto p-6">
         <div className="max-w-3xl mx-auto space-y-8">

@@ -19,7 +19,13 @@ export function LoginPage() {
     try {
       const { token, refreshToken, user, mustChangePassword } = await login(email, password);
       setAuth(token, user, refreshToken, mustChangePassword);
-      navigate(mustChangePassword ? '/change-password' : '/skills');
+      if (mustChangePassword) {
+        navigate('/change-password');
+      } else if (user?.isOperator) {
+        navigate('/operator');
+      } else {
+        navigate('/skills');
+      }
     } catch (err) {
       setError('Invalid credentials');
     } finally {

@@ -8,6 +8,8 @@ export interface MCPCredentials {
   apiKey?: string;
   username?: string;
   password?: string;
+  email?: string;
+  subdomain?: string;
   customHeaders?: Record<string, string>;
   // OAuth token fields (used by platform integrations like Shopify)
   accessToken?: string;
