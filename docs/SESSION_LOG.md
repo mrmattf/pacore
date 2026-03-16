@@ -5,34 +5,11 @@ Brief tracking of significant changes. Keep entries to 1-2 sentences each. Delet
 ---
 
 ## 2026-03 (recent sessions)
+- Debug mode for operator skill testing: Added Bug icon toggle in SkillsPage operator view to enable `testMode` via `PUT /configure`; debug mode shows amber badge and sandbox execution labels; normal mode shows last 3 executions with step details and inline HTML previews.
 - Operator UI and data flow polish: Fixed onboarding credential storage to create `integration_connections` rows alongside `mcp_credentials` (now visible to ConnectionPicker); added skill activation flow to OperatorCustomerDetail SkillsTab; added shared `AppNav` component with Clarissi wordmark and UserMenu; fixed ConnectionPicker dependency array (`orgId`, `token`).
 - Operator Platform complete: DB migration 013 added `is_operator`, `operator_customers`, `customer_profiles` (with `management_mode`), and `credential_intake_tokens` tables; backend operators-routes, operator-guards, onboarding-routes with atomic token consumption + Cloudflare Turnstile; frontend OperatorDashboard, OperatorCustomerDetail, CredentialIntakePage, useOperator hook; JWT `isOperator` flag and `/me` response; ADR-018 documents identity model, credential intake flow, and management mode lifecycle.
 - Frontend org context switching: Added `contextStore.ts` (Zustand + localStorage), `useOrgs` hook for member API calls, `ContextSwitcher` dropdown in SkillsPage header (Personal / orgs / "+ New Organization"), and `OrgPanel` slide-over for admin member management; all skill API calls now context-aware via `skillsBasePath()` helper across SkillsPage, SkillConfigPage, TemplatePickerPage, BillingPage.
 - Yota Demo Readiness: Added `listAllOrgExecutions` and `listAllUserExecutions` to SkillRegistry, implemented three new `pacore__` MCP tools (`list_skill_templates`, `list_connections`, `get_execution_log`) for Assessment workflow infrastructure, wired SkillTemplateRegistry into MCPGateway, and created reusable customer onboarding and assessment report templates.
-- Operator Skill Discovery Phase 1 complete: Enhanced `gorgias__list_recent_tickets` with `days_back` parameter, created operator system prompt template (`docs/assessment-prompt-template.md`), and documented two-pass Assessment architecture in ADR-017 (gap clustering + activation gap detection).
-- `packages/shopify-backorder` marked deprecated/archived — Yota migrated from standalone Railway app to the Clarissi `backorder-notification` platform skill; updated root CLAUDE.md, README, solutions index, product strategy, and shopify-backorder CLAUDE.md to reflect archived status.
-
-- Low-stock skill bug fixes: (1) `getVariantByInventoryItem` rewrote using GraphQL — `/variants.json?inventory_item_ids=` filter is undocumented and ignored by Shopify, always returning the first variant; (2) `isSkippedResult` updated to handle `LowStockChainResult` which has no top-level `actions` array (uses `skipped` flag instead), fixing false "Skipped" UI status after successful notifications; (3) `low-stock-templates.ts` fixed to wrap `buildAffectedItemsHtml` in `SafeHtml` so the HTML table isn't double-escaped and rendered as raw HTML in Gorgias emails.
-
-
-- Auth bug: SkillsPage and TemplatePickerPage were using raw `fetch()` with token captured at render time; replaced all calls with `apiFetch()` so JWT expiry is handled transparently via refresh.
-- Platform reliability: added exponential-backoff retry in `AdapterRegistry.invokeCapability()`, SHA-256 idempotency-key deduplication in `SkillDispatcher` (`skill_executions.idempotency_key`), and `executeEscalation()` shared utility routing `escalate` policy actions to a configurable support slot.
-- Gorgias adapter fixed: added `sender`, `from_agent: true`, `source.from` fields; corrected `ticketUrl` construction using stored subdomain.
-- Re:amaze adapter fixed: `conversation[user]` field (not `customer`), base URL changed to `.reamaze.com`.
-- Template engine overhauled: plain-text base templates with per-adapter renderers (nl2br for Gorgias/Zendesk, plain text for Re:amaze); intro/body/closing/subject are all editable per skill config; `templateVariables` shown as clickable chips in the Customize tab; fixed subject override bug (`applyTemplateFieldOverrides`).
-- Added three new skill types: `low-stock-impact`, `high-risk-order-response`, `delivery-exception-alert` — each with Gorgias, Zendesk, and Re:amaze template variants plus optional escalation slot on all templates.
-
-## 2026-02-28
-- Built multi-tenant PA Core MCP Gateway (`/v1/mcp`): aggregates tools from user's active-skill servers, namespaces as `{server}__{tool}`, injects per-tenant credentials, exposes `list_skills`/`activate_skill`/`deactivate_skill` meta-tools.
-- Added tenant keying to shopify-backorder (multi-store config via `X-Org-Id`/`X-User-Id` headers) as a standalone feature; shopify-backorder has zero PA Core dependencies.
-- Architecture decision: shopify-backorder is a customer deliverable with no deployment relationship to PA Core — PA Core will build native Shopify/Gorgias integrations clean-room (ADR-006).
-- Designed and implemented native PA Core Backorder Detection skill: two-layer SkillTemplate architecture (skill developer pre-compiles ECA policy + enrichment spec; end users configure credentials only), IntegrationConnection named credential sets, and three templates (Shopify→Gorgias/Zendesk/Freshdesk).
-- Established four platform-level security requirements (non-optional): Shopify HMAC webhook verification, read-only tool restriction in NL compiler, HTML escaping in template rendering, and enrichment iterateOver iteration cap (50).
-
-## 2025-01-28
-- Created WorkflowsPage for viewing/editing saved workflows. Fixed API array response handling.
-- Added 2-minute timeout and status message for workflow build endpoint.
-- Created documentation system: CLAUDE.md, .cursorrules, ADRs for AI continuity.
 
 ---
 

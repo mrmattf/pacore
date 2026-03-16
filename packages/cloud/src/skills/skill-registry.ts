@@ -279,11 +279,19 @@ export class SkillRegistry {
     );
   }
 
-  async listExecutions(userSkillId: string, limit = 50): Promise<SkillExecution[]> {
-    const result = await this.db.query(
-      'SELECT * FROM skill_executions WHERE user_skill_id = $1 ORDER BY started_at DESC LIMIT $2',
-      [userSkillId, limit]
-    );
+  async listExecutions(userSkillId: string, limit = 50, orgId?: string): Promise<SkillExecution[]> {
+    const result = orgId
+      ? await this.db.query(
+          `SELECT se.* FROM skill_executions se
+           JOIN user_skills us ON us.id = se.user_skill_id
+           WHERE se.user_skill_id = $1 AND us.org_id = $2
+           ORDER BY se.started_at DESC LIMIT $3`,
+          [userSkillId, orgId, limit]
+        )
+      : await this.db.query(
+          'SELECT * FROM skill_executions WHERE user_skill_id = $1 ORDER BY started_at DESC LIMIT $2',
+          [userSkillId, limit]
+        );
     return result.rows.map(this.rowToExecution);
   }
 

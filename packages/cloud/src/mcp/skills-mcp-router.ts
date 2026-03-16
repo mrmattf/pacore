@@ -427,7 +427,7 @@ async function dispatchTool(
 
     case 'pacore_get_execution_log': {
       const { userSkillId, limit = 20 } = args as { userSkillId: string; limit?: number };
-      const executions = await deps.skillRegistry.listExecutions(userSkillId, limit as number);
+      const executions = await deps.skillRegistry.listExecutions(userSkillId, limit as number, orgId);
       return executions.map(e => ({
         id:           e.id,
         status:       e.status,

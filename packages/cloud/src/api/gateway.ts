@@ -1659,8 +1659,8 @@ export class APIGateway {
       try {
         const { orgId, userSkillId } = req.params;
         await this.config.orgManager.assertMember(orgId, req.user!.id);
-        const limit = parseInt(req.query.limit as string) || 50;
-        const executions = await this.config.skillRegistry.listExecutions(userSkillId, limit);
+        const limit = Math.min(parseInt(req.query.limit as string) || 50, 100);
+        const executions = await this.config.skillRegistry.listExecutions(userSkillId, limit, orgId);
         res.json(executions);
       } catch (error: any) {
         res.status(500).json({ error: error.message });
