@@ -37,10 +37,10 @@ export function createOperatorRoutes(
         `SELECT
            o.id, o.name, o.slug,
            cp.management_mode, cp.onboarded_at,
-           (SELECT MAX(se.executed_at) FROM skill_executions se WHERE se.org_id = o.id) AS last_execution_at,
+           (SELECT MAX(se.started_at) FROM skill_executions se WHERE se.org_id = o.id) AS last_execution_at,
            (SELECT COUNT(*) FROM skill_executions se
             WHERE se.org_id = o.id
-              AND se.executed_at >= date_trunc('month', NOW()))::int AS executions_this_month,
+              AND se.started_at >= date_trunc('month', NOW()))::int AS executions_this_month,
            (SELECT COUNT(*) FROM credential_intake_tokens cit
             WHERE cit.org_id = o.id AND cit.used_at IS NOT NULL AND cp.onboarded_at IS NULL)::int AS pending_credentials
          FROM operator_customers oc
@@ -122,8 +122,8 @@ export function createOperatorRoutes(
 
       const execResult = await db.query(
         `SELECT COUNT(*)::int AS total,
-                COUNT(*) FILTER (WHERE executed_at >= date_trunc('month', NOW()))::int AS this_month,
-                MAX(executed_at) AS last_at
+                COUNT(*) FILTER (WHERE started_at >= date_trunc('month', NOW()))::int AS this_month,
+                MAX(started_at) AS last_at
          FROM skill_executions WHERE org_id = $1`,
         [orgId],
       );
