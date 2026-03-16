@@ -61,7 +61,7 @@ export function ConnectionPicker({
       .then(r => r.ok ? r.json() : null)
       .then(data => { if (data) setIntegrationMeta(data as IntegrationMeta); })
       .catch(() => {});
-  }, [integrationKey]);
+  }, [integrationKey, orgId, token]);
 
   async function loadConnections() {
     try {

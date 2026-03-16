@@ -1,8 +1,10 @@
 import { useState, useEffect } from 'react';
-import { useParams, Link } from 'react-router-dom';
-import { ArrowLeft, Loader2, AlertCircle, Check } from 'lucide-react';
+import { useParams, Link, useNavigate } from 'react-router-dom';
+import { ArrowLeft, Loader2, AlertCircle, Check, Plus } from 'lucide-react';
 import { apiFetch } from '../services/auth';
+import { useContextStore } from '../store/contextStore';
 import { updateMode, storeAssessment, fetchAssessment, AssessmentReport } from '../hooks/useOperator';
+import { AppNav } from '../components/AppNav';
 
 const ASSESSMENT_SECTIONS = ['assessment', 'ticket_categories', 'activation_gaps', 'summary'] as const;
 const SECTION_LABELS: Record<string, string> = {
@@ -277,16 +279,22 @@ export function OperatorCustomerDetail() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <Loader2 size={20} className="animate-spin text-gray-400" />
+      <div className="min-h-screen bg-gray-50">
+        <AppNav />
+        <div className="flex items-center justify-center py-24">
+          <Loader2 size={20} className="animate-spin text-gray-400" />
+        </div>
       </div>
     );
   }
 
   if (error || !data) {
     return (
-      <div className="min-h-screen bg-gray-50 p-8">
-        <p className="text-red-600">{error ?? 'Customer not found'}</p>
+      <div className="min-h-screen bg-gray-50">
+        <AppNav />
+        <div className="p-8">
+          <p className="text-red-600">{error ?? 'Customer not found'}</p>
+        </div>
       </div>
     );
   }
@@ -300,6 +308,7 @@ export function OperatorCustomerDetail() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <AppNav />
       <div className="max-w-5xl mx-auto px-4 py-8">
         {/* Back + header */}
         <Link to="/operator" className="inline-flex items-center gap-1.5 text-sm text-gray-500 hover:text-gray-700 mb-6">
@@ -394,7 +403,7 @@ export function OperatorCustomerDetail() {
         )}
 
         {activeTab === 'skills' && (
-          <SkillsTab orgId={org.id} mode={profile.management_mode} />
+          <SkillsTab orgId={org.id} orgName={org.name} mode={profile.management_mode} />
         )}
 
         {activeTab === 'assessment' && orgId && (
@@ -405,40 +414,107 @@ export function OperatorCustomerDetail() {
   );
 }
 
-function SkillsTab({ orgId, mode }: { orgId: string; mode: string }) {
+function SkillsTab({ orgId, orgName, mode }: { orgId: string; orgName: string; mode: string }) {
+  const navigate = useNavigate();
+  const { setContext } = useContextStore();
   const [skills, setSkills] = useState<any[]>([]);
+  const [skillTypes, setSkillTypes] = useState<Array<{ id: string; name: string; description: string }>>([]);
   const [loading, setLoading] = useState(true);
+  const [activating, setActivating] = useState<string | null>(null);
+  const [activateError, setActivateError] = useState<string | null>(null);
 
   useEffect(() => {
-    apiFetch(`/v1/operator/customers/${orgId}/skills`)
-      .then(r => r.json())
-      .then(d => setSkills(d.skills ?? []))
+    Promise.all([
+      apiFetch(`/v1/operator/customers/${orgId}/skills`).then(r => r.json()).then(d => d.skills ?? []),
+      apiFetch('/v1/skill-types').then(r => r.ok ? r.json() : []),
+    ])
+      .then(([s, t]) => { setSkills(s); setSkillTypes(t); })
       .catch(() => {})
       .finally(() => setLoading(false));
   }, [orgId]);
 
+  async function handleSetUp(skillId: string) {
+    setActivating(skillId);
+    setActivateError(null);
+    try {
+      const res = await apiFetch(`/v1/operator/customers/${orgId}/skills/${skillId}/activate`, { method: 'POST' });
+      if (!res.ok) {
+        const data = await res.json();
+        setActivateError(data.error ?? 'Activation failed');
+        return;
+      }
+      setContext({ type: 'org', orgId, orgName, role: 'admin' });
+      navigate(`/skills/${skillId}/templates`);
+    } catch {
+      setActivateError('Activation failed');
+    } finally {
+      setActivating(null);
+    }
+  }
+
   if (loading) return <div className="flex items-center gap-2 text-gray-400 py-8"><Loader2 size={16} className="animate-spin" /> Loading…</div>;
 
+  const activatedSkillIds = new Set(skills.map((s: any) => s.skillId));
+  const availableToSetUp = skillTypes.filter(t => !activatedSkillIds.has(t.id));
+
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {mode === 'self_managed' && (
         <div className="flex items-center gap-2 text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
           <AlertCircle size={14} />
           This customer is self-managed. Skill write actions are disabled.
         </div>
       )}
-      {skills.length === 0 ? (
-        <p className="text-sm text-gray-400 py-4">No skills activated for this customer.</p>
-      ) : (
+
+      {/* Active skills */}
+      {skills.length > 0 && (
         <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
           {skills.map((s: any) => (
             <div key={s.id} className="flex items-center justify-between px-4 py-3">
               <div>
-                <div className="text-sm font-medium text-gray-900">{s.skillId}</div>
-                <div className="text-xs text-gray-400">{s.status}</div>
+                <div className="text-sm font-medium text-gray-900">
+                  {skillTypes.find(t => t.id === s.skillId)?.name ?? s.skillId}
+                </div>
+                <div className="text-xs text-gray-400 capitalize">{s.status}</div>
               </div>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Set up available skills (concierge only) */}
+      {mode !== 'self_managed' && availableToSetUp.length > 0 && (
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-gray-500 uppercase tracking-wide">Available to set up</p>
+          <div className="bg-white rounded-lg border border-gray-200 divide-y divide-gray-100">
+            {availableToSetUp.map(type => (
+              <div key={type.id} className="flex items-center justify-between px-4 py-3">
+                <div>
+                  <div className="text-sm font-medium text-gray-900">{type.name}</div>
+                  <div className="text-xs text-gray-400">{type.description}</div>
+                </div>
+                <button
+                  onClick={() => handleSetUp(type.id)}
+                  disabled={activating === type.id}
+                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {activating === type.id ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />}
+                  Set Up
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+
+      {skills.length === 0 && availableToSetUp.length === 0 && (
+        <p className="text-sm text-gray-400 py-4">No skills available.</p>
+      )}
+
+      {activateError && (
+        <div className="flex items-center gap-2 text-sm text-red-700 bg-red-50 border border-red-200 rounded-lg px-3 py-2">
+          <AlertCircle size={14} />
+          {activateError}
         </div>
       )}
     </div>

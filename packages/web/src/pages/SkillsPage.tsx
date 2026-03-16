@@ -10,6 +10,7 @@ import { UserSkill } from '../hooks/useSkills';
 import { useContextStore, skillsBasePath } from '../store/contextStore';
 import { ContextSwitcher } from '../components/ContextSwitcher';
 import { OrgPanel } from '../components/OrgPanel';
+import { AppNav } from '../components/AppNav';
 
 interface SkillTypeCard {
   id: string;
@@ -156,28 +157,17 @@ export function SkillsPage() {
 
   return (
     <div className="flex flex-col h-screen bg-gray-50">
-      {/* Header */}
-      <header className="bg-white border-b px-6 py-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-4">
-            <div>
-              <h1 className="text-2xl font-bold">Skills</h1>
-              <p className="text-sm text-gray-600 mt-1">{context.orgName} · skills</p>
-            </div>
-          </div>
-          <div className="flex items-center gap-3">
-            <ContextSwitcher onManageOrg={() => setOrgPanelOpen(true)} />
-            <button
-              onClick={load}
-              disabled={loading}
-              className="px-4 py-2 bg-gray-100 hover:bg-gray-200 rounded flex items-center gap-2 disabled:opacity-50 text-sm"
-            >
-              <RefreshCw size={15} className={loading ? 'animate-spin' : ''} />
-              Refresh
-            </button>
-          </div>
-        </div>
-      </header>
+      <AppNav>
+        <ContextSwitcher onManageOrg={() => setOrgPanelOpen(true)} />
+        <button
+          onClick={load}
+          disabled={loading}
+          className="px-3 py-1.5 bg-gray-100 hover:bg-gray-200 rounded flex items-center gap-1.5 disabled:opacity-50 text-sm"
+        >
+          <RefreshCw size={14} className={loading ? 'animate-spin' : ''} />
+          Refresh
+        </button>
+      </AppNav>
 
       {/* Handoff banner — shown once after transition to self-managed */}
       {operatorContact?.managementMode === 'self_managed' && operatorContact.handoffNotes && !handoffDismissed && (

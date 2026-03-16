@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Plus, Copy, Check, Loader2, Clock, AlertCircle } from 'lucide-react';
 import { useOperatorCustomers, createCustomer, generateIntakeToken, OperatorCustomer } from '../hooks/useOperator';
+import { AppNav } from '../components/AppNav';
 
 function formatTimeAgo(dateStr: string | null): string {
   if (!dateStr) return '—';
@@ -208,28 +209,28 @@ export function OperatorDashboard() {
 
   return (
     <div className="min-h-screen bg-gray-50">
+      <AppNav>
+        <button
+          onClick={() => setShowAddModal(true)}
+          className="flex items-center gap-1.5 bg-blue-600 text-white px-3 py-1.5 rounded-lg hover:bg-blue-700 text-sm font-medium"
+        >
+          <Plus size={14} />
+          Add Customer
+        </button>
+      </AppNav>
       <div className="max-w-6xl mx-auto px-4 py-8">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div>
-            <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
-              Operator Dashboard
-              {pendingCount > 0 && (
-                <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-700 text-xs font-semibold px-2.5 py-1 rounded-full">
-                  <Clock size={11} />
-                  {pendingCount} pending
-                </span>
-              )}
-            </h1>
-            <p className="text-sm text-gray-500 mt-1">Manage your Clarissi customers</p>
-          </div>
-          <button
-            onClick={() => setShowAddModal(true)}
-            className="flex items-center gap-2 bg-blue-600 text-white px-4 py-2 rounded-lg hover:bg-blue-700 text-sm font-medium"
-          >
-            <Plus size={15} />
-            Add Customer
-          </button>
+        <div className="mb-8">
+          <h1 className="text-2xl font-bold text-gray-900 flex items-center gap-3">
+            Operator Dashboard
+            {pendingCount > 0 && (
+              <span className="inline-flex items-center gap-1 bg-amber-100 text-amber-700 text-xs font-semibold px-2.5 py-1 rounded-full">
+                <Clock size={11} />
+                {pendingCount} pending
+              </span>
+            )}
+          </h1>
+          <p className="text-sm text-gray-500 mt-1">Manage your Clarissi customers</p>
         </div>
 
         {/* Customer table */}

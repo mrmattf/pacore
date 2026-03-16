@@ -1,5 +1,5 @@
 import { Request, Response, Router } from 'express';
-import { createHash } from 'crypto';
+import { createHash, randomUUID } from 'crypto';
 import { Pool } from 'pg';
 import { CredentialManager } from '../mcp/credential-manager';
 
@@ -173,7 +173,13 @@ export function createOnboardingRoutes(db: Pool, credentialManager: CredentialMa
         const received: Record<string, { domain: string }> = {};
 
         if (shopify) {
-          await credentialManager.storeCredentials(scope, 'shopify', {
+          const connectionId = randomUUID();
+          await client.query(
+            `INSERT INTO integration_connections (id, org_id, integration_key, display_name, status, last_tested_at)
+             VALUES ($1, $2, 'shopify', $3, 'active', NOW())`,
+            [connectionId, orgId, `${shopify.domain} (Shopify)`],
+          );
+          await credentialManager.storeCredentials(scope, connectionId, {
             storeDomain: shopify.domain,
             clientId: shopify.apiKey,
             clientSecret: shopify.apiSecretKey,
@@ -182,7 +188,13 @@ export function createOnboardingRoutes(db: Pool, credentialManager: CredentialMa
         }
 
         if (gorgias) {
-          await credentialManager.storeCredentials(scope, 'gorgias', {
+          const connectionId = randomUUID();
+          await client.query(
+            `INSERT INTO integration_connections (id, org_id, integration_key, display_name, status, last_tested_at)
+             VALUES ($1, $2, 'gorgias', $3, 'active', NOW())`,
+            [connectionId, orgId, `${gorgias.domain} (Gorgias)`],
+          );
+          await credentialManager.storeCredentials(scope, connectionId, {
             subdomain: gorgias.domain,
             email: gorgias.email,
             apiKey: gorgias.apiKey,
