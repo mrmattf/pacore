@@ -286,17 +286,23 @@ export class MCPGateway {
     userId: string,
     req: Request
   ): Promise<{ skillScope: SkillScope; credScope: CredentialScope }> {
-    const orgId = req.headers['x-org-id'] as string | undefined;
+    let orgId = req.headers['x-org-id'] as string | undefined;
 
     if (!orgId) {
-      throw new Error('Missing X-Org-Id header — org scope is required');
+      // No header provided (e.g. Claude Desktop) — auto-resolve the user's single org
+      const orgs = await this.config.orgManager.listUserOrgs(userId);
+      if (orgs.length === 0) {
+        throw new Error('User has no organization — cannot resolve scope');
+      }
+      orgId = orgs[0].id;
+    } else {
+      // Header provided — verify membership
+      const role = await this.config.orgManager.getMemberRole(orgId, userId);
+      if (!role) {
+        throw new Error('Not a member of the requested organization');
+      }
     }
 
-    // Verify the user is actually a member of the requested org
-    const role = await this.config.orgManager.getMemberRole(orgId, userId);
-    if (!role) {
-      throw new Error('Not a member of the requested organization');
-    }
     return {
       skillScope: { type: 'org', orgId },
       credScope: { type: 'org', orgId },
