@@ -20,12 +20,17 @@ function IntakeTokenModal({ orgId, orgName, onClose }: { orgId: string; orgName:
   const [result, setResult] = useState<{ url: string; emailTemplate: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [copied, setCopied] = useState<'url' | 'email' | null>(null);
+  const [shopifyClientId, setShopifyClientId] = useState('');
+  const [shopifyClientSecret, setShopifyClientSecret] = useState('');
 
   async function generate() {
     setLoading(true);
     setError(null);
     try {
-      const data = await generateIntakeToken(orgId);
+      const data = await generateIntakeToken(orgId, {
+        shopifyClientId: shopifyClientId.trim() || undefined,
+        shopifyClientSecret: shopifyClientSecret.trim() || undefined,
+      });
       setResult({ url: data.url, emailTemplate: data.emailTemplate });
     } catch (e: any) {
       setError(e.message);
@@ -56,6 +61,36 @@ function IntakeTokenModal({ orgId, orgName, onClose }: { orgId: string; orgName:
                 Generate a one-time secure link for your customer to submit their Shopify and Gorgias credentials.
                 The link expires in 7 days.
               </p>
+
+              <div className="border border-gray-200 rounded-lg p-4 space-y-3 bg-gray-50">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                  Shopify App (optional)
+                </p>
+                <p className="text-xs text-gray-500">
+                  For custom apps (one per store). Leave blank to use the platform app.
+                </p>
+                <div>
+                  <label className="block text-xs text-gray-600 mb-1">Client ID</label>
+                  <input
+                    type="text"
+                    value={shopifyClientId}
+                    onChange={e => setShopifyClientId(e.target.value)}
+                    placeholder="e.g. a1b2c3d4e5f6..."
+                    className="w-full text-sm border border-gray-300 rounded px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs text-gray-600 mb-1">Client Secret</label>
+                  <input
+                    type="password"
+                    value={shopifyClientSecret}
+                    onChange={e => setShopifyClientSecret(e.target.value)}
+                    placeholder="Shopify custom app client secret"
+                    className="w-full text-sm border border-gray-300 rounded px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+              </div>
+
               {error && (
                 <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
                   <AlertCircle size={14} />

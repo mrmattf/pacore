@@ -75,11 +75,22 @@ export async function createCustomer(orgName: string, mode: 'concierge' | 'self_
   return res.json();
 }
 
-export async function generateIntakeToken(orgId: string): Promise<{ id: string; url: string; expiresAt: string; emailTemplate: string }> {
-  const res = await apiFetch(`/v1/operator/customers/${orgId}/intake-tokens`, { method: 'POST' });
+export async function generateIntakeToken(
+  orgId: string,
+  options?: { shopifyClientId?: string; shopifyClientSecret?: string }
+): Promise<{ id: string; url: string; expiresAt: string; emailTemplate: string }> {
+  const body: Record<string, string> = {};
+  if (options?.shopifyClientId) body.shopifyClientId = options.shopifyClientId;
+  if (options?.shopifyClientSecret) body.shopifyClientSecret = options.shopifyClientSecret;
+
+  const res = await apiFetch(`/v1/operator/customers/${orgId}/intake-tokens`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
   if (!res.ok) {
-    const body = await res.json().catch(() => ({}));
-    throw new Error(body.error ?? 'Failed to generate intake token');
+    const data = await res.json().catch(() => ({}));
+    throw new Error(data.error ?? 'Failed to generate intake token');
   }
   return res.json();
 }

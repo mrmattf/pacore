@@ -123,7 +123,8 @@ export function createOnboardingRoutes(db: Pool, credentialManager: CredentialMa
 
       const tokenHash = createHash('sha256').update(rawToken).digest('hex');
       const result = await db.query(
-        `SELECT org_id, expires_at, used_at FROM credential_intake_tokens WHERE token_hash = $1`,
+        `SELECT org_id, expires_at, used_at, shopify_client_id, shopify_client_secret
+         FROM credential_intake_tokens WHERE token_hash = $1`,
         [tokenHash]
       );
 
@@ -132,13 +133,19 @@ export function createOnboardingRoutes(db: Pool, credentialManager: CredentialMa
       if (new Date(row.expires_at) < new Date()) return res.status(410).json({ error: 'This link has expired.' });
       if (row.used_at) return res.status(410).json({ error: 'This link has already been used.' });
 
-      const state = jwt.sign(
-        { orgId: row.org_id, shop, intakeToken: rawToken, aud: 'shopify-oauth' },
-        jwtPrivateKey,
-        { algorithm: 'ES256', expiresIn: '10m' }
-      );
+      // Per-store custom app credentials (may be null — falls back to platform app)
+      const shopifyClientId: string | undefined = row.shopify_client_id ?? undefined;
+      const shopifyClientSecret: string | undefined = row.shopify_client_secret ?? undefined;
 
-      const authUrl = buildShopifyAuthUrl(shop, state);
+      const stateClaims: Record<string, unknown> = {
+        orgId: row.org_id, shop, intakeToken: rawToken, aud: 'shopify-oauth',
+      };
+      if (shopifyClientId) stateClaims.shopifyClientId = shopifyClientId;
+      if (shopifyClientSecret) stateClaims.shopifyClientSecret = shopifyClientSecret;
+
+      const state = jwt.sign(stateClaims, jwtPrivateKey, { algorithm: 'ES256', expiresIn: '10m' });
+
+      const authUrl = buildShopifyAuthUrl(shop, state, shopifyClientId);
       res.json({ authUrl });
     } catch (error: any) {
       console.error('Onboard shopify/start error:', error);

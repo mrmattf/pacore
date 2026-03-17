@@ -6,16 +6,17 @@ const SHOPIFY_SCOPES = 'read_orders,read_all_orders,read_inventory,read_products
 
 /**
  * Builds the Shopify OAuth authorization URL.
- * @param shop  The merchant's myshopify.com domain (e.g. "my-store.myshopify.com")
- * @param state Signed state JWT to pass through and verify in the callback
+ * @param shop      The merchant's myshopify.com domain (e.g. "my-store.myshopify.com")
+ * @param state     Signed state JWT to pass through and verify in the callback
+ * @param clientId  Optional per-connection app client ID; falls back to SHOPIFY_APP_CLIENT_ID
  */
-export function buildShopifyAuthUrl(shop: string, state: string): string {
-  const clientId = process.env.SHOPIFY_APP_CLIENT_ID;
-  if (!clientId) throw new Error('SHOPIFY_APP_CLIENT_ID env var is not set');
+export function buildShopifyAuthUrl(shop: string, state: string, clientId?: string): string {
+  const resolvedClientId = clientId ?? process.env.SHOPIFY_APP_CLIENT_ID;
+  if (!resolvedClientId) throw new Error('SHOPIFY_APP_CLIENT_ID env var is not set');
 
   const redirectUri = getRedirectUri();
   const params = new URLSearchParams({
-    client_id: clientId,
+    client_id: resolvedClientId,
     scope: SHOPIFY_SCOPES,
     redirect_uri: redirectUri,
     state,
@@ -26,18 +27,25 @@ export function buildShopifyAuthUrl(shop: string, state: string): string {
 /**
  * Exchanges an authorization code for a Shopify access token.
  * Called in the callback route after verifying the state JWT.
+ * @param clientId     Optional per-connection app client ID; falls back to env var
+ * @param clientSecret Optional per-connection app client secret; falls back to env var
  */
-export async function exchangeCodeForToken(shop: string, code: string): Promise<string> {
-  const clientId = process.env.SHOPIFY_APP_CLIENT_ID;
-  const clientSecret = process.env.SHOPIFY_APP_CLIENT_SECRET;
-  if (!clientId || !clientSecret) {
+export async function exchangeCodeForToken(
+  shop: string,
+  code: string,
+  clientId?: string,
+  clientSecret?: string
+): Promise<string> {
+  const resolvedClientId = clientId ?? process.env.SHOPIFY_APP_CLIENT_ID;
+  const resolvedClientSecret = clientSecret ?? process.env.SHOPIFY_APP_CLIENT_SECRET;
+  if (!resolvedClientId || !resolvedClientSecret) {
     throw new Error('SHOPIFY_APP_CLIENT_ID and SHOPIFY_APP_CLIENT_SECRET env vars are required');
   }
 
   const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code }),
+    body: JSON.stringify({ client_id: resolvedClientId, client_secret: resolvedClientSecret, code }),
   });
 
   if (!response.ok) {
@@ -52,6 +60,8 @@ export async function exchangeCodeForToken(shop: string, code: string): Promise<
 /**
  * Upserts an integration_connections row and stores the OAuth credentials.
  * Handles reconnect (store already connected) by overwriting the credential entry.
+ * @param clientId     Optional custom app client ID — stored with credentials for HMAC verification
+ * @param clientSecret Optional custom app client secret — stored with credentials for HMAC verification
  * @returns The connection ID (UUID)
  */
 export async function storeShopifyConnection(
@@ -59,7 +69,9 @@ export async function storeShopifyConnection(
   shop: string,
   accessToken: string,
   db: Pool,
-  credentialManager: CredentialManager
+  credentialManager: CredentialManager,
+  clientId?: string,
+  clientSecret?: string
 ): Promise<string> {
   const scope = { type: 'org' as const, orgId };
 
@@ -86,10 +98,11 @@ export async function storeShopifyConnection(
     );
   }
 
-  await credentialManager.storeCredentials(scope, connectionId, {
-    storeDomain: shop,
-    accessToken,
-  });
+  const creds: Record<string, string> = { storeDomain: shop, accessToken };
+  if (clientId) creds.clientId = clientId;
+  if (clientSecret) creds.clientSecret = clientSecret;
+
+  await credentialManager.storeCredentials(scope, connectionId, creds);
 
   return connectionId;
 }

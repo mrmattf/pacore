@@ -205,15 +205,23 @@ export function createOperatorRoutes(
       const { orgId } = req.params;
       if (!await assertOperatorOwnsOrg(operatorId, orgId, db, res)) return;
 
+      // Optional: per-store Shopify custom app credentials.
+      // When provided, the customer's OAuth flow will use this app instead of the
+      // platform-wide public app (env vars). Leave blank for the public unlisted app.
+      const { shopifyClientId, shopifyClientSecret } = req.body as {
+        shopifyClientId?: string;
+        shopifyClientSecret?: string;
+      };
+
       const rawToken = randomBytes(32).toString('hex');
       const tokenHash = createHash('sha256').update(rawToken).digest('hex');
       const tokenId = nanoid();
       const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000); // 7 days
 
       const insertResult = await db.query(
-        `INSERT INTO credential_intake_tokens (id, token_hash, operator_id, org_id, expires_at)
-         VALUES ($1, $2, $3, $4, $5)`,
-        [tokenId, tokenHash, operatorId, orgId, expiresAt],
+        `INSERT INTO credential_intake_tokens (id, token_hash, operator_id, org_id, expires_at, shopify_client_id, shopify_client_secret)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [tokenId, tokenHash, operatorId, orgId, expiresAt, shopifyClientId ?? null, shopifyClientSecret ?? null],
       );
       // Get org name for the email template
       const orgResult = await db.query('SELECT name FROM organizations WHERE id = $1', [orgId]);

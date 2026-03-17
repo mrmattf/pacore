@@ -1972,7 +1972,14 @@ export class APIGateway {
           return res.status(400).send('Missing code, shop, or state parameter');
         }
 
-        let payload: { orgId: string; shop: string; intakeToken?: string; aud: string };
+        let payload: {
+          orgId: string;
+          shop: string;
+          intakeToken?: string;
+          aud: string;
+          shopifyClientId?: string;
+          shopifyClientSecret?: string;
+        };
         try {
           payload = jwt.verify(state, this.config.jwtPublicKey, { algorithms: ['ES256'] }) as typeof payload;
         } catch {
@@ -1987,8 +1994,14 @@ export class APIGateway {
           return res.status(400).send('Shop mismatch — authorization was not for this store');
         }
 
-        const accessToken = await exchangeCodeForToken(callbackShop, code);
-        await storeShopifyConnection(payload.orgId, callbackShop, accessToken, this.config.db, this.config.credentialManager);
+        const accessToken = await exchangeCodeForToken(
+          callbackShop, code, payload.shopifyClientId, payload.shopifyClientSecret
+        );
+        await storeShopifyConnection(
+          payload.orgId, callbackShop, accessToken,
+          this.config.db, this.config.credentialManager,
+          payload.shopifyClientId, payload.shopifyClientSecret
+        );
 
         if (payload.intakeToken) {
           return res.redirect(`${frontendUrl}/onboard/${payload.intakeToken}?shopify=connected`);
@@ -2208,12 +2221,18 @@ export class APIGateway {
         const { externalWebhookId } = await adapter.registerWebhook(topic, webhookUrl, creds as Record<string, unknown>);
         await skillRegistry.setTriggerExternalWebhookId(trigger.id, externalWebhookId);
 
-        // Auto-configure HMAC verification using the adapter's signing secret
+        // Auto-configure HMAC verification.
+        // Prefer the per-connection clientSecret (custom apps) over the platform env var.
         let hmacSecret: string | undefined;
-        try {
-          hmacSecret = adapter.getWebhookHmacSecret();
-        } catch {
-          // Secret not available — skip HMAC configuration
+        const perConnectionSecret = (creds as Record<string, unknown>).clientSecret as string | undefined;
+        if (perConnectionSecret) {
+          hmacSecret = perConnectionSecret;
+        } else {
+          try {
+            hmacSecret = adapter.getWebhookHmacSecret();
+          } catch {
+            // Secret not available — skip HMAC configuration
+          }
         }
         if (hmacSecret) {
           const verification: import('@pacore/core').WebhookVerification = {
