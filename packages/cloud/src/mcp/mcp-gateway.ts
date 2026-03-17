@@ -223,12 +223,21 @@ export class MCPGateway {
             const toolName = params?.name as string;
             const toolArgs = (params?.arguments ?? {}) as Record<string, unknown>;
             if (!toolName) throw new Error('tools/call requires params.name');
-            // pacore__list_accessible_orgs and pacore__switch_org work without an org scope
-            const isOrgSelectionTool = toolName === 'pacore__list_accessible_orgs' || toolName === 'pacore__switch_org';
+            // pacore__switch_org works without an org scope (it sets the scope)
+            // pacore__list_accessible_orgs tries to resolve scope (to reflect current_org_id after switch)
+            //   but falls back to empty scope for the bootstrap case (no org selected yet)
             let toolData: unknown;
-            if (isOrgSelectionTool) {
+            if (toolName === 'pacore__switch_org') {
               const noOrgScope: CredentialScope = { type: 'org', orgId: '' };
               toolData = await this.dispatchToolCall(userId, toolName, toolArgs, noOrgScope, sessionId);
+            } else if (toolName === 'pacore__list_accessible_orgs') {
+              let listOrgsScope: CredentialScope;
+              try {
+                ({ credScope: listOrgsScope } = await this.resolveScope(userId, req, sessionId));
+              } catch {
+                listOrgsScope = { type: 'org', orgId: '' };
+              }
+              toolData = await this.dispatchToolCall(userId, toolName, toolArgs, listOrgsScope, sessionId);
             } else {
               let credScope: CredentialScope;
               try {
