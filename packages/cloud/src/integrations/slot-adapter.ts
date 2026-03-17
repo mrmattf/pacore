@@ -85,7 +85,6 @@ export interface WebhookSourceAdapter {
   /**
    * Registers a webhook with the external platform.
    * Returns the external webhook ID (for later deregistration) and optionally a signing secret.
-   * For Shopify, no secret is returned — HMAC uses the app's clientSecret.
    */
   registerWebhook(
     topic: string,
@@ -101,9 +100,17 @@ export interface WebhookSourceAdapter {
     externalWebhookId: string,
     creds: Record<string, unknown>
   ): Promise<void>;
+
+  /**
+   * Returns the HMAC secret used to verify incoming webhook payloads.
+   * Each provider resolves this however is appropriate — app-level env var,
+   * per-connection secret, etc. Gateway calls this method; it never hard-codes
+   * provider-specific env var names.
+   */
+  getWebhookHmacSecret(): string;
 }
 
 /** Type guard — returns true if the adapter also implements WebhookSourceAdapter. */
 export function isWebhookSourceAdapter(a: SlotAdapter): a is SlotAdapter & WebhookSourceAdapter {
-  return 'registerWebhook' in a && 'deregisterWebhook' in a && 'webhookTopics' in a;
+  return 'registerWebhook' in a && 'deregisterWebhook' in a && 'webhookTopics' in a && 'getWebhookHmacSecret' in a;
 }

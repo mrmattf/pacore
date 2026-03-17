@@ -11,35 +11,3 @@ export interface IntegrationConnection {
   lastTestedAt: Date | null;
   createdAt: Date;
 }
-
-// Credentials shape stored in CredentialManager per integrationKey.
-// Only the fields relevant to that integration are populated.
-
-export interface ShopifyConnectionCredentials {
-  storeDomain: string;    // "my-store.myshopify.com"
-  clientId: string;
-  clientSecret: string;
-}
-
-export interface GorgiasConnectionCredentials {
-  subdomain: string;      // "mystore" → https://mystore.gorgias.com
-  email: string;
-  apiKey: string;
-}
-
-export interface ZendeskConnectionCredentials {
-  subdomain: string;      // "mystore" → https://mystore.zendesk.com
-  email: string;
-  apiToken: string;
-}
-
-export interface FreshdeskConnectionCredentials {
-  subdomain: string;      // "mystore" → https://mystore.freshdesk.com
-  apiKey: string;
-}
-
-export type AnyConnectionCredentials =
-  | ShopifyConnectionCredentials
-  | GorgiasConnectionCredentials
-  | ZendeskConnectionCredentials
-  | FreshdeskConnectionCredentials;

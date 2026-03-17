@@ -13,6 +13,7 @@ import { createMcpCredentialRoutes } from './mcp-credential-routes';
 import { createAdminRoutes } from './admin-routes';
 import { createOperatorRoutes, createOrgOperatorContactRoute } from './operator-routes';
 import { createOnboardingRoutes } from './onboarding-routes';
+import { buildShopifyAuthUrl, exchangeCodeForToken, storeShopifyConnection } from '../integrations/shopify/shopify-oauth';
 import { MCPRegistry, CredentialManager, CredentialScope } from '../mcp';
 import { MCPClient } from '../mcp';
 import { WorkflowManager, WorkflowExecutor, WorkflowBuilder } from '../workflow';
@@ -126,6 +127,7 @@ export class APIGateway {
       req.path.startsWith('/v1/admin/') ||
       req.path.startsWith('/v1/triggers/webhook/') ||
       req.path.startsWith('/v1/onboard/') ||
+      req.path === '/v1/integrations/shopify/callback' ||
       req.path.startsWith('/oauth/') ||
       req.path.startsWith('/.well-known/') ||
       (!req.path.startsWith('/v1') && !req.path.startsWith('/internal'))
@@ -221,7 +223,7 @@ export class APIGateway {
     this.app.use('/v1/admin', createAdminRoutes(this.config.db, this.config.orgManager));
 
     // Onboarding intake routes — public (no auth), mounted before JWT auth middleware applies
-    this.app.use('/v1/onboard', createOnboardingRoutes(this.config.db, this.config.credentialManager));
+    this.app.use('/v1/onboard', createOnboardingRoutes(this.config.db, this.config.credentialManager, this.config.jwtPrivateKey));
 
     // Operator routes — JWT-authenticated, operator role required
     if (this.config.orgManager && this.config.skillRegistry) {
@@ -1929,6 +1931,71 @@ export class APIGateway {
     });
 
     // -------------------------------------------------------------------------
+    // Shopify OAuth — authenticated self-service connect flow
+    // -------------------------------------------------------------------------
+
+    // POST /v1/integrations/shopify/start — generate Shopify auth URL (JWT auth required)
+    this.app.post('/v1/integrations/shopify/start', async (req: AuthenticatedRequest, res: Response) => {
+      try {
+        const { shop } = req.body as { shop?: string };
+        if (!shop || !/^[a-z0-9-]+\.myshopify\.com$/.test(shop)) {
+          return res.status(400).json({ error: 'shop must be a valid myshopify.com domain (e.g. my-store.myshopify.com)' });
+        }
+
+        const orgId = req.user?.orgId ?? req.user?.id;
+        if (!orgId) return res.status(401).json({ error: 'Unauthorized' });
+
+        const state = jwt.sign(
+          { orgId, shop, aud: 'shopify-oauth' },
+          this.config.jwtPrivateKey,
+          { algorithm: 'ES256', expiresIn: '10m' }
+        );
+
+        const authUrl = buildShopifyAuthUrl(shop, state);
+        res.json({ authUrl });
+      } catch (error: any) {
+        res.status(500).json({ error: error.message });
+      }
+    });
+
+    // GET /v1/integrations/shopify/callback — public, called by Shopify after authorization
+    this.app.get('/v1/integrations/shopify/callback', async (req: Request, res: Response) => {
+      const frontendUrl = process.env.FRONTEND_URL?.replace(/\/$/, '') ?? '';
+      try {
+        const { code, shop: callbackShop, state } = req.query as Record<string, string>;
+        if (!code || !callbackShop || !state) {
+          return res.status(400).send('Missing code, shop, or state parameter');
+        }
+
+        let payload: { orgId: string; shop: string; intakeToken?: string; aud: string };
+        try {
+          payload = jwt.verify(state, this.config.jwtPublicKey, { algorithms: ['ES256'] }) as typeof payload;
+        } catch {
+          return res.status(400).send('Invalid or expired state parameter — please start the connection again');
+        }
+
+        if (payload.aud !== 'shopify-oauth') {
+          return res.status(400).send('Invalid state audience');
+        }
+
+        if (callbackShop !== payload.shop) {
+          return res.status(400).send('Shop mismatch — authorization was not for this store');
+        }
+
+        const accessToken = await exchangeCodeForToken(callbackShop, code);
+        await storeShopifyConnection(payload.orgId, callbackShop, accessToken, this.config.db, this.config.credentialManager);
+
+        if (payload.intakeToken) {
+          return res.redirect(`${frontendUrl}/onboard/${payload.intakeToken}?shopify=connected`);
+        }
+        return res.redirect(`${frontendUrl}/settings?shopify=connected`);
+      } catch (error: any) {
+        console.error('[shopify-callback] Error:', error.message);
+        return res.redirect(`${frontendUrl}/settings?shopify=error&message=${encodeURIComponent(error.message)}`);
+      }
+    });
+
+    // -------------------------------------------------------------------------
     // Static web frontend (SPA) — served only when the public/ dir exists
     // -------------------------------------------------------------------------
     const publicDir = path.join(process.cwd(), 'public');
@@ -2072,23 +2139,13 @@ export class APIGateway {
       if (!creds) return null;
 
       const storeDomain  = creds.storeDomain  as string;
-      const clientId     = creds.clientId     as string;
-      const clientSecret = creds.clientSecret as string;
-      if (!storeDomain || !clientSecret) return null;
-
-      // Get a fresh access token
-      const tokenRes = await fetch(`https://${storeDomain}/admin/oauth/access_token`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, grant_type: 'client_credentials' }),
-      });
-      if (!tokenRes.ok) return null;
-      const { access_token } = await tokenRes.json() as { access_token: string };
+      const accessToken  = creds.accessToken  as string;
+      if (!storeDomain || !accessToken) return null;
 
       // Fetch the single most recent order (any status)
       const ordersRes = await fetch(
         `https://${storeDomain}/admin/api/2026-01/orders.json?limit=1&status=any&fields=id`,
-        { headers: { 'X-Shopify-Access-Token': access_token } }
+        { headers: { 'X-Shopify-Access-Token': accessToken } }
       );
       if (!ordersRes.ok) return null;
 
@@ -2146,13 +2203,18 @@ export class APIGateway {
         const { externalWebhookId } = await adapter.registerWebhook(topic, webhookUrl, creds as Record<string, unknown>);
         await skillRegistry.setTriggerExternalWebhookId(trigger.id, externalWebhookId);
 
-        // Auto-configure HMAC verification using clientSecret (Shopify: secret is the app's clientSecret)
-        const clientSecret = (creds as Record<string, unknown>).clientSecret as string | undefined;
-        if (clientSecret) {
+        // Auto-configure HMAC verification using the adapter's signing secret
+        let hmacSecret: string | undefined;
+        try {
+          hmacSecret = adapter.getWebhookHmacSecret();
+        } catch {
+          // Secret not available — skip HMAC configuration
+        }
+        if (hmacSecret) {
           const verification: import('@pacore/core').WebhookVerification = {
             type: 'hmac_sha256',
             header: 'x-shopify-hmac-sha256',
-            secret: clientSecret,
+            secret: hmacSecret,
           };
           await skillRegistry.updateTriggerVerification(trigger.id, verification);
         }

@@ -1,5 +1,3 @@
-import { ShopifyTokenManager } from './shopify-token-manager';
-
 const API_VERSION = '2026-01';
 
 export interface ShopifyLineItem {
@@ -59,7 +57,7 @@ export interface ScheduledInventoryChange {
 
 /**
  * Shopify Admin REST API client.
- * Uses ShopifyTokenManager to resolve a valid access token per request.
+ * Accepts a pre-validated OAuth access token.
  * Supports multiple users/orgs — one instance per scope/store combination.
  */
 export class ShopifyApiClient {
@@ -67,7 +65,7 @@ export class ShopifyApiClient {
 
   constructor(
     storeDomain: string,
-    private tokenManager: ShopifyTokenManager
+    private accessToken: string
   ) {
     this.baseUrl = `https://${storeDomain}/admin/api/${API_VERSION}`;
   }
@@ -184,6 +182,30 @@ export class ShopifyApiClient {
       created_at_min: since,
     });
     const data = await this.get<{ orders: ShopifyOrder[] }>(`/orders.json?${params}`);
+    return data.orders;
+  }
+
+  /**
+   * Lists recent orders with configurable time window, limit, and status filter.
+   * days_back > 60 requires read_all_orders scope (included in the Clarissi app).
+   */
+  async listRecentOrders(params: {
+    days_back?: number;
+    limit?: number;
+    status?: 'any' | 'open' | 'closed' | 'cancelled';
+  }): Promise<ShopifyOrder[]> {
+    const days = Math.min(params.days_back ?? 30, 365);
+    const limit = Math.min(params.limit ?? 50, 250);
+    const status = params.status ?? 'any';
+
+    const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const queryParams = new URLSearchParams({
+      status,
+      limit: String(limit),
+      fields: 'id,order_number,created_at,financial_status,fulfillment_status,email,customer,line_items,total_price,tags',
+      created_at_min: since,
+    });
+    const data = await this.get<{ orders: ShopifyOrder[] }>(`/orders.json?${queryParams}`);
     return data.orders;
   }
 
@@ -353,11 +375,10 @@ export class ShopifyApiClient {
   }
 
   private async get<T>(path: string): Promise<T> {
-    const token = await this.tokenManager.getToken();
     const response = await fetch(`${this.baseUrl}${path}`, {
       headers: {
         'Content-Type': 'application/json',
-        'X-Shopify-Access-Token': token,
+        'X-Shopify-Access-Token': this.accessToken,
       },
     });
 
@@ -370,12 +391,11 @@ export class ShopifyApiClient {
   }
 
   private async graphql<T>(query: string, variables: Record<string, unknown>): Promise<T> {
-    const token = await this.tokenManager.getToken();
     const response = await fetch(`${this.baseUrl}/graphql.json`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'X-Shopify-Access-Token': token,
+        'X-Shopify-Access-Token': this.accessToken,
       },
       body: JSON.stringify({ query, variables }),
     });

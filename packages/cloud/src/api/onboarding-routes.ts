@@ -1,7 +1,9 @@
 import { Request, Response, Router } from 'express';
 import { createHash, randomUUID } from 'crypto';
+import jwt from 'jsonwebtoken';
 import { Pool } from 'pg';
 import { CredentialManager } from '../mcp/credential-manager';
+import { buildShopifyAuthUrl } from '../integrations/shopify/shopify-oauth';
 
 /**
  * Verifies a Cloudflare Turnstile token against the secret.
@@ -42,7 +44,7 @@ function maskDomain(domain: string): string {
  * Public onboarding routes — no JWT auth required.
  * Mounted BEFORE the auth middleware in gateway.ts.
  */
-export function createOnboardingRoutes(db: Pool, credentialManager: CredentialManager): Router {
+export function createOnboardingRoutes(db: Pool, credentialManager: CredentialManager, jwtPrivateKey: string): Router {
   const router = Router();
 
   // ---------------------------------------------------------------------------
@@ -108,15 +110,52 @@ export function createOnboardingRoutes(db: Pool, credentialManager: CredentialMa
   });
 
   // ---------------------------------------------------------------------------
-  // POST /v1/onboard/:token — submit credentials (one-time, atomic)
+  // POST /v1/onboard/:token/shopify/start — initiate Shopify OAuth from within intake session
+  // ---------------------------------------------------------------------------
+  router.post('/:token/shopify/start', async (req: Request, res: Response) => {
+    try {
+      const rawToken = req.params.token;
+      const { shop } = req.body as { shop?: string };
+
+      if (!shop || !/^[a-z0-9-]+\.myshopify\.com$/.test(shop)) {
+        return res.status(400).json({ error: 'shop must be a valid myshopify.com domain (e.g. my-store.myshopify.com)' });
+      }
+
+      const tokenHash = createHash('sha256').update(rawToken).digest('hex');
+      const result = await db.query(
+        `SELECT org_id, expires_at, used_at FROM credential_intake_tokens WHERE token_hash = $1`,
+        [tokenHash]
+      );
+
+      const row = result.rows[0];
+      if (!row) return res.status(410).json({ error: 'This link has expired or has already been used.' });
+      if (new Date(row.expires_at) < new Date()) return res.status(410).json({ error: 'This link has expired.' });
+      if (row.used_at) return res.status(410).json({ error: 'This link has already been used.' });
+
+      const state = jwt.sign(
+        { orgId: row.org_id, shop, intakeToken: rawToken, aud: 'shopify-oauth' },
+        jwtPrivateKey,
+        { algorithm: 'ES256', expiresIn: '10m' }
+      );
+
+      const authUrl = buildShopifyAuthUrl(shop, state);
+      res.json({ authUrl });
+    } catch (error: any) {
+      console.error('Onboard shopify/start error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+
+  // ---------------------------------------------------------------------------
+  // POST /v1/onboard/:token — submit Gorgias credentials (one-time, atomic)
+  // Shopify is connected separately via OAuth before this call.
   // Body: {
-  //   shopify?: { domain, apiKey, apiSecretKey },
-  //   gorgias?: { domain, email, apiKey },
+  //   gorgias: { domain, email, apiKey },
   //   cfTurnstileToken: string
   // }
   // ---------------------------------------------------------------------------
   router.post('/:token', async (req: Request, res: Response) => {
-    const { shopify, gorgias, cfTurnstileToken } = req.body;
+    const { gorgias, cfTurnstileToken } = req.body;
 
     // Verify Turnstile (skipped in dev if CF_TURNSTILE_SECRET not set)
     if (!cfTurnstileToken) {
@@ -127,15 +166,8 @@ export function createOnboardingRoutes(db: Pool, credentialManager: CredentialMa
       return res.status(400).json({ error: 'Bot verification failed. Please try again.' });
     }
 
-    if (!shopify && !gorgias) {
-      return res.status(400).json({ error: 'At least one credential set (shopify or gorgias) is required' });
-    }
-
-    if (shopify) {
-      const { domain, apiKey, apiSecretKey } = shopify;
-      if (!domain || !apiKey || !apiSecretKey) {
-        return res.status(400).json({ error: 'shopify requires domain, apiKey, and apiSecretKey' });
-      }
+    if (!gorgias) {
+      return res.status(400).json({ error: 'Gorgias credentials are required' });
     }
 
     if (gorgias) {
@@ -145,90 +177,78 @@ export function createOnboardingRoutes(db: Pool, credentialManager: CredentialMa
       }
     }
 
-    const tokenHash = createHash('sha256').update(req.params.token).digest('hex');
+    const rawToken = req.params.token;
+    const tokenHash = createHash('sha256').update(rawToken).digest('hex');
 
     const client = await db.connect();
-    // Declared outside try so the catch block can clean up any mcp_credentials rows
-    // that were committed outside the transaction if COMMIT fails.
     let storedOrgId = '';
     const storedConnectionIds: string[] = [];
-      try {
-        await client.query('BEGIN');
+    try {
+      await client.query('BEGIN');
 
-        // Consume token inside transaction — rolls back if credential storage fails
-        const consumeResult = await client.query(
-          `UPDATE credential_intake_tokens
-           SET used_at = NOW()
-           WHERE token_hash = $1 AND expires_at > NOW() AND used_at IS NULL
-           RETURNING org_id, operator_id`,
-          [tokenHash],
-        );
+      // Consume token inside transaction — rolls back if credential storage fails
+      const consumeResult = await client.query(
+        `UPDATE credential_intake_tokens
+         SET used_at = NOW()
+         WHERE token_hash = $1 AND expires_at > NOW() AND used_at IS NULL
+         RETURNING org_id, operator_id`,
+        [tokenHash],
+      );
 
-        if (consumeResult.rows.length === 0) {
-          await client.query('ROLLBACK');
-          return res.status(409).json({
-            error: 'This link has expired or has already been used.',
-            hint: 'Contact your operator for a new link.',
-          });
-        }
-
-        const { org_id: orgId } = consumeResult.rows[0];
-        storedOrgId = orgId;
-        const scope = { type: 'org' as const, orgId };
-        const received: Record<string, { domain: string }> = {};
-
-        if (shopify) {
-          const connectionId = randomUUID();
-          await client.query(
-            `INSERT INTO integration_connections (id, org_id, integration_key, display_name, status, last_tested_at)
-             VALUES ($1, $2, 'shopify', $3, 'active', NOW())`,
-            [connectionId, orgId, `${shopify.domain} (Shopify)`],
-          );
-          await credentialManager.storeCredentials(scope, connectionId, {
-            storeDomain: shopify.domain,
-            clientId: shopify.apiKey,
-            clientSecret: shopify.apiSecretKey,
-          });
-          storedConnectionIds.push(connectionId);
-          received.shopify = { domain: maskDomain(shopify.domain) };
-        }
-
-        if (gorgias) {
-          const connectionId = randomUUID();
-          await client.query(
-            `INSERT INTO integration_connections (id, org_id, integration_key, display_name, status, last_tested_at)
-             VALUES ($1, $2, 'gorgias', $3, 'active', NOW())`,
-            [connectionId, orgId, `${gorgias.domain} (Gorgias)`],
-          );
-          await credentialManager.storeCredentials(scope, connectionId, {
-            subdomain: gorgias.domain,
-            email: gorgias.email,
-            apiKey: gorgias.apiKey,
-          });
-          storedConnectionIds.push(connectionId);
-          received.gorgias = { domain: maskDomain(gorgias.domain) };
-        }
-
-        await client.query(
-          `UPDATE customer_profiles SET onboarded_at = NOW(), updated_at = NOW() WHERE org_id = $1`,
-          [orgId],
-        );
-
-        await client.query('COMMIT');
-        res.json({ success: true, received });
-      } catch (error: any) {
+      if (consumeResult.rows.length === 0) {
         await client.query('ROLLBACK');
-        // Clean up any mcp_credentials rows that were committed outside the transaction.
-        // storeCredentials uses the pool directly, so a rollback here won't undo those writes.
-        if (storedOrgId && storedConnectionIds.length > 0) {
-          const scope = { type: 'org' as const, orgId: storedOrgId };
-          await Promise.all(storedConnectionIds.map(id => credentialManager.deleteCredentials(scope, id).catch(() => {})));
-        }
-        console.error('Onboard POST error:', error);
-        res.status(500).json({ error: 'Internal server error' });
-      } finally {
-        client.release();
+        return res.status(409).json({
+          error: 'This link has expired or has already been used.',
+          hint: 'Contact your operator for a new link.',
+        });
       }
+
+      const { org_id: orgId } = consumeResult.rows[0];
+      storedOrgId = orgId;
+      const scope = { type: 'org' as const, orgId };
+      const received: Record<string, { domain: string }> = {};
+
+      // Check if Shopify was already connected via OAuth (outside this transaction)
+      const shopifyConn = await client.query(
+        `SELECT id, display_name FROM integration_connections WHERE org_id = $1 AND integration_key = 'shopify' LIMIT 1`,
+        [orgId]
+      );
+      if (shopifyConn.rows.length > 0) {
+        received.shopify = { domain: maskDomain(shopifyConn.rows[0].display_name.replace(' (Shopify)', '')) };
+      }
+
+      const connectionId = randomUUID();
+      await client.query(
+        `INSERT INTO integration_connections (id, org_id, integration_key, display_name, status, last_tested_at)
+         VALUES ($1, $2, 'gorgias', $3, 'active', NOW())`,
+        [connectionId, orgId, `${gorgias.domain} (Gorgias)`],
+      );
+      await credentialManager.storeCredentials(scope, connectionId, {
+        subdomain: gorgias.domain,
+        email: gorgias.email,
+        apiKey: gorgias.apiKey,
+      });
+      storedConnectionIds.push(connectionId);
+      received.gorgias = { domain: maskDomain(gorgias.domain) };
+
+      await client.query(
+        `UPDATE customer_profiles SET onboarded_at = NOW(), updated_at = NOW() WHERE org_id = $1`,
+        [orgId],
+      );
+
+      await client.query('COMMIT');
+      res.json({ success: true, received });
+    } catch (error: any) {
+      await client.query('ROLLBACK');
+      if (storedOrgId && storedConnectionIds.length > 0) {
+        const scope = { type: 'org' as const, orgId: storedOrgId };
+        await Promise.all(storedConnectionIds.map(id => credentialManager.deleteCredentials(scope, id).catch(() => {})));
+      }
+      console.error('Onboard POST error:', error);
+      res.status(500).json({ error: 'Internal server error' });
+    } finally {
+      client.release();
+    }
   });
 
   return router;

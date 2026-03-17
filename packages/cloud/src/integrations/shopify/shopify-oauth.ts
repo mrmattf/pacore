@@ -1,0 +1,101 @@
+import { randomUUID } from 'crypto';
+import { Pool } from 'pg';
+import { CredentialManager } from '../../mcp/credential-manager';
+
+const SHOPIFY_SCOPES = 'read_orders,read_all_orders,read_inventory,read_products,read_customers';
+
+/**
+ * Builds the Shopify OAuth authorization URL.
+ * @param shop  The merchant's myshopify.com domain (e.g. "my-store.myshopify.com")
+ * @param state Signed state JWT to pass through and verify in the callback
+ */
+export function buildShopifyAuthUrl(shop: string, state: string): string {
+  const clientId = process.env.SHOPIFY_APP_CLIENT_ID;
+  if (!clientId) throw new Error('SHOPIFY_APP_CLIENT_ID env var is not set');
+
+  const redirectUri = getRedirectUri();
+  const params = new URLSearchParams({
+    client_id: clientId,
+    scope: SHOPIFY_SCOPES,
+    redirect_uri: redirectUri,
+    state,
+  });
+  return `https://${shop}/admin/oauth/authorize?${params}`;
+}
+
+/**
+ * Exchanges an authorization code for a Shopify access token.
+ * Called in the callback route after verifying the state JWT.
+ */
+export async function exchangeCodeForToken(shop: string, code: string): Promise<string> {
+  const clientId = process.env.SHOPIFY_APP_CLIENT_ID;
+  const clientSecret = process.env.SHOPIFY_APP_CLIENT_SECRET;
+  if (!clientId || !clientSecret) {
+    throw new Error('SHOPIFY_APP_CLIENT_ID and SHOPIFY_APP_CLIENT_SECRET env vars are required');
+  }
+
+  const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ client_id: clientId, client_secret: clientSecret, code }),
+  });
+
+  if (!response.ok) {
+    const body = await response.text();
+    throw new Error(`Shopify token exchange failed (${response.status}): ${body}`);
+  }
+
+  const data = await response.json() as { access_token: string };
+  return data.access_token;
+}
+
+/**
+ * Upserts an integration_connections row and stores the OAuth credentials.
+ * Handles reconnect (store already connected) by overwriting the credential entry.
+ * @returns The connection ID (UUID)
+ */
+export async function storeShopifyConnection(
+  orgId: string,
+  shop: string,
+  accessToken: string,
+  db: Pool,
+  credentialManager: CredentialManager
+): Promise<string> {
+  const scope = { type: 'org' as const, orgId };
+
+  // Upsert: if a shopify connection for this org+domain exists, reuse its ID
+  const existing = await db.query(
+    `SELECT id FROM integration_connections
+     WHERE org_id = $1 AND integration_key = 'shopify' AND display_name = $2`,
+    [orgId, `${shop} (Shopify)`]
+  );
+
+  let connectionId: string;
+  if (existing.rows.length > 0) {
+    connectionId = existing.rows[0].id;
+    await db.query(
+      `UPDATE integration_connections SET status = 'active', last_tested_at = NOW() WHERE id = $1`,
+      [connectionId]
+    );
+  } else {
+    connectionId = randomUUID();
+    await db.query(
+      `INSERT INTO integration_connections (id, org_id, integration_key, display_name, status, last_tested_at)
+       VALUES ($1, $2, 'shopify', $3, 'active', NOW())`,
+      [connectionId, orgId, `${shop} (Shopify)`]
+    );
+  }
+
+  await credentialManager.storeCredentials(scope, connectionId, {
+    storeDomain: shop,
+    accessToken,
+  });
+
+  return connectionId;
+}
+
+function getRedirectUri(): string {
+  const base = process.env.API_BASE_URL?.replace(/\/$/, '') ?? '';
+  if (!base) throw new Error('API_BASE_URL env var is not set');
+  return `${base}/v1/integrations/shopify/callback`;
+}

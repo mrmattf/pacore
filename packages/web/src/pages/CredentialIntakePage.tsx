@@ -46,8 +46,9 @@ export function CredentialIntakePage() {
 
   // Form state
   const [shopifyDomain, setShopifyDomain] = useState('');
-  const [shopifyApiKey, setShopifyApiKey] = useState('');
-  const [shopifyApiSecretKey, setShopifyApiSecretKey] = useState('');
+  const [shopifyConnected, setShopifyConnected] = useState(false);
+  const [shopifyConnecting, setShopifyConnecting] = useState(false);
+  const [shopifyError, setShopifyError] = useState<string | null>(null);
   const [gorgiasDomain, setGorgiasDomain] = useState('');
   const [gorgiasEmail, setGorgiasEmail] = useState('');
   const [gorgiasApiKey, setGorgiasApiKey] = useState('');
@@ -72,18 +73,20 @@ export function CredentialIntakePage() {
         if (p.shopifyDomain) setShopifyDomain(p.shopifyDomain);
         if (p.gorgiasDomain) setGorgiasDomain(p.gorgiasDomain);
         if (p.gorgiasEmail) setGorgiasEmail(p.gorgiasEmail);
-        // API keys are never persisted — user must re-enter them
       } catch {}
+    }
+    // Check if returning from Shopify OAuth callback
+    const params = new URLSearchParams(window.location.search);
+    if (params.get('shopify') === 'connected') {
+      setShopifyConnected(true);
+      // Remove query param without reload
+      window.history.replaceState({}, '', window.location.pathname);
     }
   }, [storageKey]);
 
   function savePartial() {
     if (!storageKey) return;
-    // Save only non-credential fields — API keys and secrets are never persisted to localStorage
-    localStorage.setItem(storageKey, JSON.stringify({
-      shopifyDomain,
-      gorgiasDomain, gorgiasEmail,
-    }));
+    localStorage.setItem(storageKey, JSON.stringify({ shopifyDomain, gorgiasDomain, gorgiasEmail }));
   }
 
   useEffect(() => {
@@ -127,6 +130,31 @@ export function CredentialIntakePage() {
     document.head.appendChild(script);
   }, [pageState]);
 
+  async function handleConnectShopify() {
+    const shop = shopifyDomain.trim();
+    if (!shop) return;
+    setShopifyConnecting(true);
+    setShopifyError(null);
+    try {
+      const res = await fetch(`${API_BASE}/v1/onboard/${token}/shopify/start`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shop }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setShopifyError(data.error || 'Could not start Shopify connection.');
+        return;
+      }
+      savePartial();
+      window.location.href = data.authUrl;
+    } catch {
+      setShopifyError('Network error. Please check your connection and try again.');
+    } finally {
+      setShopifyConnecting(false);
+    }
+  }
+
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     savePartial();
@@ -142,11 +170,6 @@ export function CredentialIntakePage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          shopify: {
-            domain: shopifyDomain.trim(),
-            apiKey: shopifyApiKey.trim(),
-            apiSecretKey: shopifyApiSecretKey.trim(),
-          },
           gorgias: {
             domain: gorgiasDomain.trim(),
             email: gorgiasEmail.trim(),
@@ -264,53 +287,46 @@ export function CredentialIntakePage() {
           <section className="bg-white rounded-lg border border-gray-200 p-6 space-y-4">
             <h2 className="font-semibold text-gray-900">Shopify</h2>
 
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">Store domain</label>
-              <input
-                type="text"
-                value={shopifyDomain}
-                onChange={(e) => { setShopifyDomain(e.target.value); savePartial(); }}
-                placeholder="yourstore.myshopify.com"
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-400"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">API key</label>
-              <input
-                type="text"
-                value={shopifyApiKey}
-                onChange={(e) => { setShopifyApiKey(e.target.value); savePartial(); }}
-                placeholder="Labeled 'API key' on the credentials tab"
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-400"
-                required
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium text-gray-700 mb-1">API secret key</label>
-              <input
-                type="password"
-                value={shopifyApiSecretKey}
-                onChange={(e) => setShopifyApiSecretKey(e.target.value)}
-                placeholder="Click 'Reveal' then copy before switching tabs"
-                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-400"
-                required
-              />
-              <p className="text-xs text-gray-400 mt-1">Not saved in your browser — copy it fresh from Shopify each session.</p>
-            </div>
+            {shopifyConnected ? (
+              <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-4 py-3">
+                <Check size={14} className="shrink-0" />
+                <span><strong>{shopifyDomain || 'Your store'}</strong> — connected to Shopify</span>
+              </div>
+            ) : (
+              <>
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">Store domain</label>
+                  <input
+                    type="text"
+                    value={shopifyDomain}
+                    onChange={(e) => { setShopifyDomain(e.target.value); savePartial(); }}
+                    placeholder="yourstore.myshopify.com"
+                    className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-400"
+                    required={!shopifyConnected}
+                  />
+                </div>
 
-            <Accordion title="Where do I find these? (step-by-step)">
-              <ol className="list-decimal list-inside space-y-2 text-gray-600">
-                <li>Log in to your Shopify Admin (<code className="text-xs bg-gray-100 rounded px-1">yourstore.myshopify.com/admin</code>)</li>
-                <li>Click <strong>Apps</strong> in the left sidebar → <strong>Develop apps</strong> (top right)</li>
-                <li>If prompted, click <strong>Allow custom app development</strong> to confirm</li>
-                <li>Click <strong>Create an app</strong> → name it <em>Clarissi Automation</em> → <strong>Create app</strong></li>
-                <li>Click <strong>Configure Admin API scopes</strong></li>
-                <li>Search for and enable: <strong>read_orders</strong>, <strong>read_inventory</strong>, <strong>read_products</strong>, <strong>read_customers</strong></li>
-                <li>Click <strong>Save</strong> → then <strong>Install app</strong> → confirm</li>
-                <li>Go to the <strong>API credentials</strong> tab. Copy <em>API key</em> and click <strong>Reveal</strong> to copy <em>API secret key</em> — copy the secret before switching tabs or it will hide again.</li>
-              </ol>
-            </Accordion>
+                {shopifyError && (
+                  <div className="flex items-center gap-2 text-sm text-red-600 bg-red-50 border border-red-200 rounded-lg px-4 py-3">
+                    <AlertCircle size={14} className="shrink-0" />
+                    {shopifyError}
+                  </div>
+                )}
+
+                <button
+                  type="button"
+                  onClick={handleConnectShopify}
+                  disabled={shopifyConnecting || !shopifyDomain.trim()}
+                  className="w-full flex items-center justify-center gap-2 bg-gray-900 text-white py-2.5 rounded-lg hover:bg-gray-800 disabled:opacity-50 disabled:cursor-not-allowed text-sm font-medium"
+                >
+                  {shopifyConnecting && <Loader2 size={14} className="animate-spin" />}
+                  {shopifyConnecting ? 'Redirecting…' : 'Connect Shopify →'}
+                </button>
+                <p className="text-xs text-gray-400">
+                  You'll be redirected to Shopify to authorize access. Takes about 30 seconds.
+                </p>
+              </>
+            )}
           </section>
 
           {/* Gorgias section */}
@@ -384,7 +400,7 @@ export function CredentialIntakePage() {
           </button>
 
           <p className="text-xs text-center text-gray-400">
-            Credentials are encrypted with AES-256-GCM and stored per account. You can revoke access at any time by deleting the custom app in Shopify or rotating your Gorgias API key.
+            Credentials are encrypted with AES-256-GCM and stored per account. You can revoke Shopify access at any time from your Shopify Admin → Apps. Rotate your Gorgias API key to revoke Gorgias access.
           </p>
         </form>
       </div>

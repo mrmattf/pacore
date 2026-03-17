@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useLocation } from 'react-router-dom';
 import { ArrowLeft, CheckCircle, Copy, Check, Zap } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
 import { ConnectionPicker } from '../components/ConnectionPicker';
@@ -46,6 +46,7 @@ export function SkillConfigPage() {
     userSkillId: string;
   }>();
   const navigate = useNavigate();
+  const location = useLocation();
   const token = useAuthStore(s => s.token)!;
   const { context } = useContextStore();
 
@@ -57,16 +58,24 @@ export function SkillConfigPage() {
   const [copied, setCopied] = useState(false);
   const [saving, setSaving] = useState(false);
   const [activating, setActivating] = useState(false);
+  const [shopifyConnectedBanner, setShopifyConnectedBanner] = useState(false);
   const [testResult, setTestResult] = useState<any>(null);
   const [testLoading, setTestLoading] = useState(false);
   const [testError, setTestError] = useState<string | null>(null);
   const [testMode, setTestMode] = useState(false);
+
+  const shopifyJustConnected = new URLSearchParams(location.search).get('shopify') === 'connected';
 
   useEffect(() => {
     if (!typeId || !templateId || !token) return;
     loadTemplate();
     loadExistingConfig();
     loadWebhook();
+
+    if (shopifyJustConnected) {
+      setShopifyConnectedBanner(true);
+      window.history.replaceState({}, '', location.pathname);
+    }
   }, [typeId, templateId, userSkillId, token]);
 
   async function loadTemplate() {
@@ -74,7 +83,12 @@ export function SkillConfigPage() {
     if (res.ok) {
       const templates: SkillTemplate[] = await res.json();
       const found = templates.find(t => t.id === templateId);
-      if (found) setTemplate(found);
+      if (found) {
+        setTemplate(found);
+        if (shopifyJustConnected) {
+          await autoSelectShopifyConnection(found);
+        }
+      }
     }
   }
 
@@ -103,6 +117,23 @@ export function SkillConfigPage() {
         setWebhookUrl(`${origin}/v1/triggers/webhook/${triggers[0].endpointToken}`);
       }
     }
+  }
+
+  async function autoSelectShopifyConnection(tmpl: SkillTemplate) {
+    if (!context.orgId) return;
+    try {
+      const res = await apiFetch(`/v1/organizations/${context.orgId}/connections`);
+      if (res.ok) {
+        const all = await res.json();
+        const shopifyConn = all.find((c: { integrationKey: string; id: string }) => c.integrationKey === 'shopify');
+        if (shopifyConn) {
+          const shopifySlot = tmpl.slots.find(s => s.integrationKey === 'shopify');
+          if (shopifySlot) {
+            setSlotConnections(prev => ({ ...prev, [shopifySlot.key]: shopifyConn.id }));
+          }
+        }
+      }
+    } catch { /* non-fatal */ }
   }
 
   async function saveConfig() {
@@ -259,6 +290,12 @@ export function SkillConfigPage() {
           {/* Panel 1: Connections */}
           {activePanel === 'connections' && template && (
             <div className="space-y-6">
+              {shopifyConnectedBanner && (
+                <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-4 py-3">
+                  <CheckCircle size={14} className="shrink-0 text-green-500" />
+                  Shopify connected — select it below to use it for this skill.
+                </div>
+              )}
               {template.slots.map(slot => (
                 <div key={slot.key} className="bg-white border rounded-lg p-5">
                   <ConnectionPicker

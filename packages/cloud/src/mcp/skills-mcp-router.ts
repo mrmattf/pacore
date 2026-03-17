@@ -390,12 +390,17 @@ async function dispatchTool(
               const { externalWebhookId } = await adapter.registerWebhook(topic, webhookUrl, creds as Record<string, unknown>);
               await deps.skillRegistry.setTriggerExternalWebhookId(trigger.id, externalWebhookId);
 
-              const clientSecret = (creds as Record<string, unknown>).clientSecret as string | undefined;
-              if (clientSecret) {
+              let hmacSecret: string | undefined;
+              try {
+                hmacSecret = adapter.getWebhookHmacSecret();
+              } catch {
+                // Secret not available — skip HMAC configuration
+              }
+              if (hmacSecret) {
                 await deps.skillRegistry.updateTriggerVerification(trigger.id, {
                   type: 'hmac_sha256',
                   header: 'x-shopify-hmac-sha256',
-                  secret: clientSecret,
+                  secret: hmacSecret,
                 });
               }
 
@@ -404,8 +409,8 @@ async function dispatchTool(
                 endpointToken: trigger.endpointToken,
                 webhookUrl,
                 externalWebhookId,
-                hmacConfigured: !!clientSecret,
-                message: `Webhook registered with ${slot.integrationKey} and HMAC verification ${clientSecret ? 'auto-configured' : 'requires manual setup'}`,
+                hmacConfigured: !!hmacSecret,
+                message: `Webhook registered with ${slot.integrationKey} and HMAC verification ${hmacSecret ? 'auto-configured' : 'requires manual setup'}`,
               };
             }
           }

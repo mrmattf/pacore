@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { CheckCircle, Plus, ChevronDown, ChevronUp, Trash2 } from 'lucide-react';
+import { CheckCircle, Plus, ChevronDown, ChevronUp, Trash2, Loader2, AlertCircle } from 'lucide-react';
 
 export interface Connection {
   id: string;
@@ -53,14 +53,23 @@ export function ConnectionPicker({
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const saveInFlight = useRef(false);
 
+  // Shopify OAuth state
+  const [shopifyShop, setShopifyShop] = useState('');
+  const [shopifyConnecting, setShopifyConnecting] = useState(false);
+  const [shopifyOauthError, setShopifyOauthError] = useState<string | null>(null);
+
+  const isShopify = integrationKey === 'shopify';
+
   useEffect(() => {
     loadConnections();
-    fetch(`/v1/integrations/${integrationKey}/fields`, {
-      headers: { Authorization: `Bearer ${token}` },
-    })
-      .then(r => r.ok ? r.json() : null)
-      .then(data => { if (data) setIntegrationMeta(data as IntegrationMeta); })
-      .catch(() => {});
+    if (!isShopify) {
+      fetch(`/v1/integrations/${integrationKey}/fields`, {
+        headers: { Authorization: `Bearer ${token}` },
+      })
+        .then(r => r.ok ? r.json() : null)
+        .then(data => { if (data) setIntegrationMeta(data as IntegrationMeta); })
+        .catch(() => {});
+    }
   }, [integrationKey, orgId, token]);
 
   async function loadConnections() {
@@ -128,6 +137,30 @@ export function ConnectionPicker({
     }
   }
 
+  async function handleShopifyOAuth() {
+    const shop = shopifyShop.trim();
+    if (!shop) return;
+    setShopifyConnecting(true);
+    setShopifyOauthError(null);
+    try {
+      const res = await fetch('/v1/integrations/shopify/start', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ shop }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setShopifyOauthError(data.error || 'Could not start Shopify connection.');
+        return;
+      }
+      window.location.href = data.authUrl;
+    } catch {
+      setShopifyOauthError('Network error. Please check your connection and try again.');
+    } finally {
+      setShopifyConnecting(false);
+    }
+  }
+
   return (
     <div className="space-y-3">
       <label className="block text-sm font-medium text-gray-700">{slotLabel}</label>
@@ -183,13 +216,45 @@ export function ConnectionPicker({
       )}
 
       {/* Add new connection */}
-      {!showNewForm ? (
+      {isShopify ? (
+        /* Shopify: OAuth connect flow */
+        <div className="border rounded-lg p-4 bg-white space-y-3">
+          <span className="text-sm font-medium">Connect a Shopify store</span>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Store URL</label>
+            <input
+              type="text"
+              value={shopifyShop}
+              onChange={e => setShopifyShop(e.target.value)}
+              placeholder="mystore.myshopify.com"
+              className="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+            />
+          </div>
+          {shopifyOauthError && (
+            <div className="flex items-center gap-1 text-xs text-red-600 bg-red-50 rounded p-2">
+              <AlertCircle size={12} />
+              {shopifyOauthError}
+            </div>
+          )}
+          <button
+            onClick={handleShopifyOAuth}
+            disabled={shopifyConnecting || !shopifyShop.trim()}
+            className="flex items-center gap-2 px-4 py-1.5 text-sm bg-gray-900 text-white rounded hover:bg-gray-800 disabled:opacity-50"
+          >
+            {shopifyConnecting && <Loader2 size={12} className="animate-spin" />}
+            {shopifyConnecting ? 'Redirecting…' : 'Connect Shopify →'}
+          </button>
+          <p className="text-xs text-gray-400">
+            You'll be redirected to Shopify to authorize. Takes about 30 seconds.
+          </p>
+        </div>
+      ) : !showNewForm ? (
         <button
           onClick={() => setShowNewForm(true)}
           className="flex items-center gap-2 text-sm text-blue-600 hover:text-blue-800"
         >
           <Plus size={14} />
-          Connect a new {integrationKey} {integrationKey === 'shopify' ? 'store' : 'account'}
+          Connect a new {integrationKey} account
         </button>
       ) : (
         <div className="border rounded-lg p-4 bg-white space-y-3">
