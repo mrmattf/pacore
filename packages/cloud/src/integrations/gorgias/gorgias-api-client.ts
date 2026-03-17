@@ -97,12 +97,10 @@ export class GorgiasApiClient {
     createdAt: string;
     updatedAt: string;
   }>> {
-    const params = new URLSearchParams({ limit: String(limit) });
+    // Fetch extra when filtering by date so client-side filtering still yields ~limit results
+    const fetchLimit = daysBack ? Math.min(limit * 3, 300) : limit;
+    const params = new URLSearchParams({ limit: String(fetchLimit), order_by: 'created_datetime:desc' });
     if (status) params.set('status', status);
-    if (daysBack) {
-      const since = new Date(Date.now() - daysBack * 24 * 60 * 60 * 1000).toISOString();
-      params.set('created_datetime__gte', since);
-    }
 
     const response = await fetch(`${this.baseUrl}/tickets?${params}`, {
       headers: { 'Authorization': this.authHeader },
@@ -125,15 +123,20 @@ export class GorgiasApiClient {
       }>;
     };
 
-    return (data.data ?? []).map(t => ({
-      id: t.id,
-      subject: t.subject,
-      status: t.status,
-      channel: t.channel,
-      tags: (t.tags ?? []).map(tag => tag.name),
-      createdAt: t.created_datetime,
-      updatedAt: t.updated_datetime,
-    }));
+    const sinceMs = daysBack ? Date.now() - daysBack * 24 * 60 * 60 * 1000 : 0;
+
+    return (data.data ?? [])
+      .filter(t => !daysBack || new Date(t.created_datetime).getTime() >= sinceMs)
+      .slice(0, limit)
+      .map(t => ({
+        id: t.id,
+        subject: t.subject,
+        status: t.status,
+        channel: t.channel,
+        tags: (t.tags ?? []).map(tag => tag.name),
+        createdAt: t.created_datetime,
+        updatedAt: t.updated_datetime,
+      }));
   }
 
   /** Test credentials by fetching account info. Throws if auth fails. */
