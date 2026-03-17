@@ -123,13 +123,8 @@ export class MCPGateway {
         return;
       }
 
-      // Validate ?org=<slug> BEFORE committing headers — can't send HTTP errors after flushHeaders()
-      const rawOrgSlug = req.query.org as string | undefined;
-      if (rawOrgSlug !== undefined && !/^[a-z0-9_-]{1,60}$/.test(rawOrgSlug)) {
-        res.status(400).json({ error: 'Invalid org slug format' });
-        return;
-      }
-      const orgSlugFromUrl = rawOrgSlug;
+      // Capture optional ?org=<slug> for per-customer scoping (Claude Desktop config-time)
+      const orgSlugFromUrl = req.query.org as string | undefined;
 
       const sessionId = randomBytes(16).toString('hex');
 
@@ -276,69 +271,80 @@ export class MCPGateway {
       }
     });
 
+    // POST /sse — Streamable HTTP clients (e.g. claude.ai) POST to whatever URL they were given.
+    // When the user configures their MCP URL as /v1/mcp/sse?org=<slug>, claude.ai will POST here.
+    // Delegate to the same JSON-RPC-over-HTTP logic as POST /.
+    this.router.post('/sse', async (req: AuthenticatedRequest, res: Response) => {
+      return this.handleHttpJsonRpc(req, res);
+    });
+
     // POST: JSON-RPC 2.0 over HTTP
     this.router.post('/', async (req: AuthenticatedRequest, res: Response) => {
-      const userId = req.user!.id;
-      const body = req.body;
+      return this.handleHttpJsonRpc(req, res);
+    });
+  }
 
-      if (!body || body.jsonrpc !== '2.0') {
-        res.status(400).json({ error: 'Expected JSON-RPC 2.0 request' });
-        return;
-      }
+  private async handleHttpJsonRpc(req: AuthenticatedRequest, res: Response): Promise<void> {
+    const userId = req.user!.id;
+    const body = req.body;
 
-      const { id, method, params } = body;
+    if (!body || body.jsonrpc !== '2.0') {
+      res.status(400).json({ error: 'Expected JSON-RPC 2.0 request' });
+      return;
+    }
 
-      try {
-        let result: unknown;
-        const { credScope } = await this.resolveScope(userId, req);
+    const { id, method, params } = body;
 
-        switch (method) {
-          case 'initialize':
-            result = {
-              protocolVersion: '2024-11-05',
-              capabilities: { tools: {} },
-              serverInfo: { name: 'PA Core MCP Gateway', version: '1.0.0' },
-            };
-            break;
+    try {
+      let result: unknown;
+      const { credScope } = await this.resolveScope(userId, req);
 
-          case 'notifications/initialized':
-            result = {};
-            break;
+      switch (method) {
+        case 'initialize':
+          result = {
+            protocolVersion: '2024-11-05',
+            capabilities: { tools: {} },
+            serverInfo: { name: 'PA Core MCP Gateway', version: '1.0.0' },
+          };
+          break;
 
-          case 'tools/list':
-            result = { tools: await this.buildToolList(credScope, userId) };
-            break;
+        case 'notifications/initialized':
+          result = {};
+          break;
 
-          case 'tools/call': {
-            const toolName = params?.name as string;
-            const toolArgs = (params?.arguments ?? {}) as Record<string, unknown>;
-            if (!toolName) {
-              throw new Error('tools/call requires params.name');
-            }
-            const toolData = await this.dispatchToolCall(userId, toolName, toolArgs, credScope);
-            result = { content: [{ type: 'text', text: JSON.stringify(toolData) }] };
-            break;
+        case 'tools/list':
+          result = { tools: await this.buildToolList(credScope, userId) };
+          break;
+
+        case 'tools/call': {
+          const toolName = params?.name as string;
+          const toolArgs = (params?.arguments ?? {}) as Record<string, unknown>;
+          if (!toolName) {
+            throw new Error('tools/call requires params.name');
           }
-
-          default:
-            res.json({
-              jsonrpc: '2.0',
-              id,
-              error: { code: -32601, message: `Method not found: ${method}` },
-            });
-            return;
+          const toolData = await this.dispatchToolCall(userId, toolName, toolArgs, credScope);
+          result = { content: [{ type: 'text', text: JSON.stringify(toolData) }] };
+          break;
         }
 
-        res.json({ jsonrpc: '2.0', id, result });
-      } catch (error: any) {
-        console.error('[MCPGateway] Error handling method', method, ':', error.message);
-        res.json({
-          jsonrpc: '2.0',
-          id,
-          error: { code: -32603, message: error.message },
-        });
+        default:
+          res.json({
+            jsonrpc: '2.0',
+            id,
+            error: { code: -32601, message: `Method not found: ${method}` },
+          });
+          return;
       }
-    });
+
+      res.json({ jsonrpc: '2.0', id, result });
+    } catch (error: any) {
+      console.error('[MCPGateway] Error handling method', method, ':', error.message);
+      res.json({
+        jsonrpc: '2.0',
+        id,
+        error: { code: -32603, message: error.message },
+      });
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -368,7 +374,18 @@ export class MCPGateway {
       orgId = org.id;
     }
 
-    // Priority 3: X-Org-Id header (non-Claude-Desktop clients)
+    // Priority 3: ?org=<slug> in the request URL (stateless Streamable HTTP clients)
+    if (!orgId) {
+      const slugFromQuery = req.query?.org as string | undefined;
+      if (slugFromQuery) {
+        const org = await this.config.orgManager.getOrgBySlug(slugFromQuery);
+        const ok = org ? await this.config.orgManager.canAccessOrg(userId, org.id) : false;
+        if (!org || !ok) throw new Error(`Organization not found or you do not have access`);
+        orgId = org.id;
+      }
+    }
+
+    // Priority 4: X-Org-Id header (non-Claude-Desktop clients)
     if (!orgId) {
       const headerId = req.headers['x-org-id'] as string | undefined;
       if (headerId) {
@@ -378,7 +395,7 @@ export class MCPGateway {
       }
     }
 
-    // Priority 4: auto-resolve (single org) or helpful error (multiple orgs)
+    // Priority 5: auto-resolve (single org) or helpful error (multiple orgs)
     if (!orgId) {
       const accessible = await this.config.orgManager.listAccessibleOrgs(userId);
       if (accessible.length === 0) {
