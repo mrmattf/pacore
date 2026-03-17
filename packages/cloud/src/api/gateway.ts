@@ -268,9 +268,14 @@ export class APIGateway {
     // Webhook trigger (unauthenticated — token in path is the identity)
     // -------------------------------------------------------------------------
     this.app.post('/v1/triggers/webhook/:token', async (req: Request, res: Response) => {
-      const { token } = req.params;
-      const result = await this.config.webhookTriggerHandler.handle(token, req);
-      res.status(result.status).send(result.body);
+      try {
+        const { token } = req.params;
+        const result = await this.config.webhookTriggerHandler.handle(token, req);
+        res.status(result.status).send(result.body);
+      } catch (err: any) {
+        console.error('[WebhookTrigger] Unhandled error in webhook handler:', err);
+        res.status(500).send('Internal server error');
+      }
     });
 
     // -------------------------------------------------------------------------

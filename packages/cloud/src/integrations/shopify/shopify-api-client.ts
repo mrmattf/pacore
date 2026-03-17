@@ -308,8 +308,19 @@ export class ShopifyApiClient {
    * @param topic   REST-style topic string e.g. "orders/create" — converted to GraphQL enum internally
    * @param address Full webhook callback URL (https://pacore.app/v1/triggers/webhook/{token})
    */
+  /**
+   * Idempotent webhook registration: deletes any existing subscriptions for the same
+   * topic that point to the same host (our base URL), then creates a fresh one.
+   * This prevents stale webhooks from accumulating across pause/resume cycles when
+   * the external_webhook_id wasn't persisted from a previous registration.
+   */
   async registerWebhook(topic: string, address: string): Promise<{ webhookGid: string }> {
     const graphqlTopic = topicToGraphqlEnum(topic);
+
+    // Derive our base URL from the new address so we only touch our own webhooks.
+    const addressBase = new URL(address).origin;
+    await this.deleteWebhooksForTopicAndHost(graphqlTopic, addressBase);
+
     const mutation = `
       mutation webhookSubscriptionCreate($topic: WebhookSubscriptionTopic!, $webhookSubscription: WebhookSubscriptionInput!) {
         webhookSubscriptionCreate(topic: $topic, webhookSubscription: $webhookSubscription) {
@@ -343,6 +354,45 @@ export class ShopifyApiClient {
     }
 
     return { webhookGid: webhookSubscription.id };
+  }
+
+  /**
+   * Lists all webhook subscriptions for a topic, deletes any whose callbackUrl
+   * starts with the given host. Used to clean up stale registrations before
+   * creating a fresh one.
+   */
+  private async deleteWebhooksForTopicAndHost(graphqlTopic: string, host: string): Promise<void> {
+    const query = `
+      query listWebhooks($topic: WebhookSubscriptionTopic!) {
+        webhookSubscriptions(first: 100, topics: [$topic]) {
+          nodes {
+            id
+            callbackUrl
+          }
+        }
+      }
+    `;
+
+    let nodes: Array<{ id: string; callbackUrl: string }>;
+    try {
+      const result = await this.graphql<{
+        webhookSubscriptions: { nodes: Array<{ id: string; callbackUrl: string }> };
+      }>(query, { topic: graphqlTopic });
+      nodes = result.webhookSubscriptions.nodes;
+    } catch (err: any) {
+      console.warn(`[Shopify] Could not list webhooks for cleanup (topic=${graphqlTopic}): ${err.message}`);
+      return;
+    }
+
+    const stale = nodes.filter(n => n.callbackUrl.startsWith(host));
+    for (const { id, callbackUrl } of stale) {
+      try {
+        await this.deleteWebhook(id);
+        console.log(`[Shopify] Deleted stale webhook ${id} (${callbackUrl})`);
+      } catch (err: any) {
+        console.warn(`[Shopify] Failed to delete stale webhook ${id}: ${err.message}`);
+      }
+    }
   }
 
   /**

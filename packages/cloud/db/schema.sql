@@ -114,6 +114,7 @@ CREATE TABLE IF NOT EXISTS skill_triggers (
   endpoint_token      VARCHAR(255) UNIQUE NOT NULL,
   verification_config JSONB        NOT NULL DEFAULT '{"type":"none"}',
   status              VARCHAR(50)  NOT NULL DEFAULT 'active',
+  external_webhook_id TEXT,
   created_at          TIMESTAMP DEFAULT NOW()
 );
 
