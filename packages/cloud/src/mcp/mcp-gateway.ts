@@ -213,9 +213,9 @@ export class MCPGateway {
               const { credScope } = await this.resolveScope(userId, req, sessionId);
               result = { tools: await this.buildToolList(credScope, userId) };
             } catch {
-              // No org resolved (multi-org user with no ?org= set) — return bootstrap tools only
-              // so the client can call pacore__list_accessible_orgs and pacore__switch_org.
-              result = { tools: this.buildPacoreTools() };
+              // No org resolved (multi-org user with no ?org= set) — return only the two
+              // org-selection tools so the client can pick an org before doing anything else.
+              result = { tools: this.buildOrgSelectionTools() };
             }
             break;
           }
@@ -223,14 +223,31 @@ export class MCPGateway {
             const toolName = params?.name as string;
             const toolArgs = (params?.arguments ?? {}) as Record<string, unknown>;
             if (!toolName) throw new Error('tools/call requires params.name');
-            // pacore__list_accessible_orgs and pacore__switch_org don't need a resolved org scope
-            const isPacoreBootstrapTool = toolName === 'pacore__list_accessible_orgs' || toolName === 'pacore__switch_org';
+            // pacore__list_accessible_orgs and pacore__switch_org work without an org scope
+            const isOrgSelectionTool = toolName === 'pacore__list_accessible_orgs' || toolName === 'pacore__switch_org';
             let toolData: unknown;
-            if (isPacoreBootstrapTool) {
-              const dummyScope: CredentialScope = { type: 'org', orgId: '' };
-              toolData = await this.dispatchToolCall(userId, toolName, toolArgs, dummyScope, sessionId);
+            if (isOrgSelectionTool) {
+              const noOrgScope: CredentialScope = { type: 'org', orgId: '' };
+              toolData = await this.dispatchToolCall(userId, toolName, toolArgs, noOrgScope, sessionId);
             } else {
-              const { credScope } = await this.resolveScope(userId, req, sessionId);
+              let credScope: CredentialScope;
+              try {
+                ({ credScope } = await this.resolveScope(userId, req, sessionId));
+              } catch {
+                // No org selected yet — surface as a tool result so the LLM can self-correct
+                result = {
+                  content: [{
+                    type: 'text',
+                    text: JSON.stringify({
+                      error: 'no_org_selected',
+                      message: 'You have access to multiple organizations. Call pacore__list_accessible_orgs to see them, then call pacore__switch_org with the desired slug before using other tools.',
+                    }),
+                  }],
+                };
+                sendResult(result);
+                res.json({ ok: true });
+                return;
+              }
               toolData = await this.dispatchToolCall(userId, toolName, toolArgs, credScope, sessionId);
             }
             result = { content: [{ type: 'text', text: JSON.stringify(toolData) }] };
@@ -727,6 +744,13 @@ export class MCPGateway {
       },
     ];
   }
+  /** The two tools that work without an org context — used as the bootstrap tool list. */
+  private buildOrgSelectionTools(): MCPTool[] {
+    return this.buildPacoreTools().filter(t =>
+      t.name === 'pacore__list_accessible_orgs' || t.name === 'pacore__switch_org'
+    );
+  }
+
   private buildPacoreTools(): MCPTool[] {
     return [
       {
