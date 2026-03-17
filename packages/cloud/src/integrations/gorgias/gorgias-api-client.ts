@@ -98,7 +98,7 @@ export class GorgiasApiClient {
     updatedAt: string;
   }>> {
     // Fetch extra when filtering by date so client-side filtering still yields ~limit results
-    const fetchLimit = daysBack ? Math.min(limit * 3, 300) : limit;
+    const fetchLimit = Math.min(daysBack ? limit * 3 : limit, 100);
     const params = new URLSearchParams({ limit: String(fetchLimit), order_by: 'created_datetime:desc' });
     if (status) params.set('status', status);
 
