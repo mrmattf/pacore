@@ -165,16 +165,21 @@ export class OrgManager {
   }
 
   async listAccessibleOrgs(userId: string): Promise<AccessibleOrg[]> {
+    // DISTINCT ON (id) deduplicates orgs that appear in both member and operator_customer rows.
+    // ORDER BY id, access_type ASC ensures 'member' wins over 'operator_customer' (m < o).
     const result = await this.db.query<{
       id: string; name: string; slug: string; owner_id: string;
       plan: string; created_at: Date; access_type: string; role: string | null;
     }>(
-      `SELECT o.*, 'member' AS access_type, om.role
-       FROM organizations o JOIN org_members om ON om.org_id = o.id WHERE om.user_id = $1
-       UNION ALL
-       SELECT o.*, 'operator_customer' AS access_type, NULL AS role
-       FROM organizations o JOIN operator_customers oc ON oc.org_id = o.id WHERE oc.operator_id = $1
-       ORDER BY name ASC`,
+      `SELECT DISTINCT ON (id) id, name, slug, owner_id, plan, created_at, access_type, role
+       FROM (
+         SELECT o.*, 'member' AS access_type, om.role
+         FROM organizations o JOIN org_members om ON om.org_id = o.id WHERE om.user_id = $1
+         UNION ALL
+         SELECT o.*, 'operator_customer' AS access_type, NULL AS role
+         FROM organizations o JOIN operator_customers oc ON oc.org_id = o.id WHERE oc.operator_id = $1
+       ) combined
+       ORDER BY id, access_type ASC, name ASC`,
       [userId]
     );
     return result.rows.map(r => ({

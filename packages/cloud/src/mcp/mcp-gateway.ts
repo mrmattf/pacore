@@ -196,7 +196,6 @@ export class MCPGateway {
 
       try {
         let result: unknown;
-        const { credScope } = await this.resolveScope(userId, req, sessionId);
 
         switch (method) {
           case 'initialize':
@@ -209,14 +208,31 @@ export class MCPGateway {
           case 'notifications/initialized':
             result = {};
             break;
-          case 'tools/list':
-            result = { tools: await this.buildToolList(credScope, userId) };
+          case 'tools/list': {
+            try {
+              const { credScope } = await this.resolveScope(userId, req, sessionId);
+              result = { tools: await this.buildToolList(credScope, userId) };
+            } catch {
+              // No org resolved (multi-org user with no ?org= set) — return bootstrap tools only
+              // so the client can call pacore__list_accessible_orgs and pacore__switch_org.
+              result = { tools: this.buildPacoreTools() };
+            }
             break;
+          }
           case 'tools/call': {
             const toolName = params?.name as string;
             const toolArgs = (params?.arguments ?? {}) as Record<string, unknown>;
             if (!toolName) throw new Error('tools/call requires params.name');
-            const toolData = await this.dispatchToolCall(userId, toolName, toolArgs, credScope, sessionId);
+            // pacore__list_accessible_orgs and pacore__switch_org don't need a resolved org scope
+            const isPacoreBootstrapTool = toolName === 'pacore__list_accessible_orgs' || toolName === 'pacore__switch_org';
+            let toolData: unknown;
+            if (isPacoreBootstrapTool) {
+              const dummyScope: CredentialScope = { type: 'org', orgId: '' };
+              toolData = await this.dispatchToolCall(userId, toolName, toolArgs, dummyScope, sessionId);
+            } else {
+              const { credScope } = await this.resolveScope(userId, req, sessionId);
+              toolData = await this.dispatchToolCall(userId, toolName, toolArgs, credScope, sessionId);
+            }
             result = { content: [{ type: 'text', text: JSON.stringify(toolData) }] };
             break;
           }
