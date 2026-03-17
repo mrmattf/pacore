@@ -59,8 +59,8 @@ export class WebhookTriggerHandler {
     // Check execution quota and determine sandbox mode
     let sandboxMode = false;
     if (this.billingManager && this.db) {
-      const scopeRow = await this.db.query<{ user_id: string | null; org_id: string | null }>(
-        'SELECT user_id, org_id FROM user_skills WHERE id = $1',
+      const scopeRow = await this.db.query<{ org_id: string | null }>(
+        'SELECT org_id FROM user_skills WHERE id = $1',
         [trigger.userSkillId]
       );
       if (scopeRow.rows.length > 0) {
