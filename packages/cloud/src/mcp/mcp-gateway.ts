@@ -6,7 +6,7 @@ import { MCPClient } from './mcp-client';
 import { CredentialManager, CredentialScope } from './credential-manager';
 import { SkillRegistry, SkillScope } from '../skills/skill-registry';
 import { SkillTemplateRegistry } from '../skills/skill-template-registry';
-import { OrgManager } from '../organizations/org-manager';
+import { OrgManager, AccessibleOrg } from '../organizations/org-manager';
 import { AdapterRegistry } from '../integrations/adapter-registry';
 
 export interface UserConnection {
@@ -55,11 +55,20 @@ interface AuthenticatedRequest extends Request {
  *
  * Mounts at: /v1/mcp
  */
+interface SSESession {
+  res: Response;
+  userId: string;
+  /** Org slug captured from ?org= query param at GET /sse connection time. */
+  orgSlugFromUrl?: string;
+  /** Org ID override set dynamically by pacore__switch_org. */
+  orgIdOverride?: string;
+}
+
 export class MCPGateway {
   private router = Router();
-  /** In-memory SSE sessions: sessionId → active SSE Response.
+  /** In-memory SSE sessions: sessionId → session state.
    *  ⚠ Single-instance only. Use Redis Pub/Sub when scaling horizontally. */
-  private sseSessions = new Map<string, Response>();
+  private sseSessions = new Map<string, SSESession>();
 
   constructor(private config: MCPGatewayConfig) {
     this.setupRoutes();
@@ -129,7 +138,15 @@ export class MCPGateway {
       // Tell the client where to POST JSON-RPC messages (absolute URL required)
       res.write(`event: endpoint\ndata: ${base}/v1/mcp/message?sessionId=${sessionId}\n\n`);
 
-      this.sseSessions.set(sessionId, res);
+      // Capture optional ?org=<slug> for per-customer scoping (Claude Desktop config-time)
+      const rawOrgSlug = req.query.org as string | undefined;
+      if (rawOrgSlug !== undefined && !/^[a-z0-9-]{1,60}$/.test(rawOrgSlug)) {
+        res.end();
+        res.status(400).json({ error: 'Invalid org slug format' });
+        return;
+      }
+      const orgSlugFromUrl = rawOrgSlug;
+      this.sseSessions.set(sessionId, { res, userId, orgSlugFromUrl });
 
       // 30s keepalive to prevent proxy timeouts
       const keepalive = setInterval(() => {
@@ -145,8 +162,8 @@ export class MCPGateway {
     // POST /message?sessionId=<id> — receive JSON-RPC 2.0, respond via SSE stream
     this.router.post('/message', async (req: AuthenticatedRequest, res: Response) => {
       const sessionId = req.query.sessionId as string;
-      const sseRes = this.sseSessions.get(sessionId);
-      if (!sseRes) {
+      const session = this.sseSessions.get(sessionId);
+      if (!session) {
         res.status(400).json({ error: 'Unknown or expired sessionId' });
         return;
       }
@@ -154,6 +171,11 @@ export class MCPGateway {
       const userId = req.user?.id;
       if (!userId) {
         res.status(401).json({ error: 'Unauthorized' });
+        return;
+      }
+
+      if (session.userId !== userId) {
+        res.status(403).json({ error: 'Session does not belong to this user' });
         return;
       }
 
@@ -166,15 +188,15 @@ export class MCPGateway {
       const { id, method, params } = body;
 
       const sendResult = (result: unknown) => {
-        sseRes.write(`event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id, result })}\n\n`);
+        session.res.write(`event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id, result })}\n\n`);
       };
       const sendError = (code: number, message: string) => {
-        sseRes.write(`event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } })}\n\n`);
+        session.res.write(`event: message\ndata: ${JSON.stringify({ jsonrpc: '2.0', id, error: { code, message } })}\n\n`);
       };
 
       try {
         let result: unknown;
-        const { credScope } = await this.resolveScope(userId, req);
+        const { credScope } = await this.resolveScope(userId, req, sessionId);
 
         switch (method) {
           case 'initialize':
@@ -194,7 +216,7 @@ export class MCPGateway {
             const toolName = params?.name as string;
             const toolArgs = (params?.arguments ?? {}) as Record<string, unknown>;
             if (!toolName) throw new Error('tools/call requires params.name');
-            const toolData = await this.dispatchToolCall(userId, toolName, toolArgs, credScope);
+            const toolData = await this.dispatchToolCall(userId, toolName, toolArgs, credScope, sessionId);
             result = { content: [{ type: 'text', text: JSON.stringify(toolData) }] };
             break;
           }
@@ -284,22 +306,51 @@ export class MCPGateway {
 
   private async resolveScope(
     userId: string,
-    req: Request
+    req: Request,
+    sessionId?: string
   ): Promise<{ skillScope: SkillScope; credScope: CredentialScope }> {
-    let orgId = req.headers['x-org-id'] as string | undefined;
+    let orgId: string | undefined;
+    const session = sessionId ? this.sseSessions.get(sessionId) : undefined;
 
+    // Priority 1: session override set by pacore__switch_org
+    if (session?.orgIdOverride) {
+      const ok = await this.config.orgManager.canAccessOrg(userId, session.orgIdOverride);
+      if (!ok) throw new Error('Org override is no longer accessible — call pacore__switch_org again');
+      orgId = session.orgIdOverride;
+    }
+
+    // Priority 2: ?org=<slug> captured at SSE connection time
+    if (!orgId && session?.orgSlugFromUrl) {
+      const org = await this.config.orgManager.getOrgBySlug(session.orgSlugFromUrl);
+      const ok = org ? await this.config.orgManager.canAccessOrg(userId, org.id) : false;
+      if (!org || !ok) throw new Error(`Organization not found or you do not have access`);
+      orgId = org.id;
+    }
+
+    // Priority 3: X-Org-Id header (non-Claude-Desktop clients)
     if (!orgId) {
-      // No header provided (e.g. Claude Desktop) — auto-resolve the user's single org
-      const orgs = await this.config.orgManager.listUserOrgs(userId);
-      if (orgs.length === 0) {
-        throw new Error('User has no organization — cannot resolve scope');
+      const headerId = req.headers['x-org-id'] as string | undefined;
+      if (headerId) {
+        const ok = await this.config.orgManager.canAccessOrg(userId, headerId);
+        if (!ok) throw new Error('Not authorized for the requested organization');
+        orgId = headerId;
       }
-      orgId = orgs[0].id;
-    } else {
-      // Header provided — verify membership
-      const role = await this.config.orgManager.getMemberRole(orgId, userId);
-      if (!role) {
-        throw new Error('Not a member of the requested organization');
+    }
+
+    // Priority 4: auto-resolve (single org) or helpful error (multiple orgs)
+    if (!orgId) {
+      const accessible = await this.config.orgManager.listAccessibleOrgs(userId);
+      if (accessible.length === 0) {
+        throw new Error('No organizations accessible — contact your administrator');
+      }
+      if (accessible.length === 1) {
+        orgId = accessible[0].id;
+      } else {
+        throw new Error(
+          `You have access to ${accessible.length} organizations. ` +
+          `Set ?org=<slug> in your Claude Desktop SSE URL, or call pacore__list_accessible_orgs ` +
+          `then pacore__switch_org to select one.`
+        );
       }
     }
 
@@ -393,7 +444,8 @@ export class MCPGateway {
     userId: string,
     toolName: string,
     args: Record<string, unknown>,
-    credScope: CredentialScope
+    credScope: CredentialScope,
+    sessionId?: string
   ): Promise<unknown> {
     // Meta-tools
     switch (toolName) {
@@ -402,7 +454,7 @@ export class MCPGateway {
       case 'activate_skill':
         return this.metaActivateSkill(userId, args.skill_id as string, credScope);
       case 'deactivate_skill':
-        return this.metaDeactivateSkill(args.user_skill_id as string);
+        return this.metaDeactivateSkill(args.user_skill_id as string, credScope);
     }
 
     // Namespaced tool: integrationKey__capability or serverSlug__toolName
@@ -416,7 +468,7 @@ export class MCPGateway {
 
     // Platform introspection tools (pacore__*)
     if (prefix === 'pacore') {
-      return this.dispatchPacoreToolCall(actualName, args, userId, credScope);
+      return this.dispatchPacoreToolCall(actualName, args, userId, credScope, sessionId);
     }
 
     // Try built-in adapter first (e.g., shopify__get_order, gorgias__list_recent_tickets)
@@ -491,9 +543,9 @@ export class MCPGateway {
     return { success: true, userSkill };
   }
 
-  private async metaDeactivateSkill(userSkillId: string): Promise<unknown> {
+  private async metaDeactivateSkill(userSkillId: string, credScope: CredentialScope): Promise<unknown> {
     if (!userSkillId) throw new Error('deactivate_skill requires user_skill_id');
-    await this.config.skillRegistry.deleteUserSkill(userSkillId);
+    await this.config.skillRegistry.deleteUserSkill(userSkillId, credScope.orgId);
     return { success: true };
   }
 
@@ -503,9 +555,10 @@ export class MCPGateway {
 
   private async dispatchPacoreToolCall(
     toolName: string,
-    _args: Record<string, unknown>,
+    args: Record<string, unknown>,
     userId: string,
-    credScope: CredentialScope
+    credScope: CredentialScope,
+    sessionId?: string
   ): Promise<unknown> {
     switch (toolName) {
       case 'list_skill_templates':
@@ -514,6 +567,10 @@ export class MCPGateway {
         return this.pacoreListConnections(credScope);
       case 'get_execution_log':
         return this.pacoreGetExecutionLog(userId, credScope);
+      case 'list_accessible_orgs':
+        return this.pacoreListAccessibleOrgs(userId, credScope);
+      case 'switch_org':
+        return this.pacoreSwitchOrg(args, userId, sessionId);
       default:
         throw new Error(`Unknown pacore tool: "${toolName}"`);
     }
@@ -559,6 +616,51 @@ export class MCPGateway {
       timestamp: e.startedAt,
       status: e.skipped ? 'skipped' : e.status,
     }));
+  }
+
+  private async pacoreListAccessibleOrgs(
+    userId: string,
+    credScope: CredentialScope
+  ): Promise<unknown> {
+    const orgs = await this.config.orgManager.listAccessibleOrgs(userId);
+    return {
+      current_org_id: credScope.orgId,
+      orgs: orgs.map((o: AccessibleOrg) => ({
+        slug: o.slug,
+        name: o.name,
+        access_type: o.accessType,
+        role: o.role ?? null,
+      })),
+    };
+  }
+
+  private async pacoreSwitchOrg(
+    args: Record<string, unknown>,
+    userId: string,
+    sessionId?: string
+  ): Promise<unknown> {
+    const slug = args.org as string;
+    if (!slug) throw new Error('pacore__switch_org requires an "org" argument (slug)');
+
+    const org = await this.config.orgManager.getOrgBySlug(slug);
+    const ok = org ? await this.config.orgManager.canAccessOrg(userId, org.id) : false;
+    if (!org || !ok) throw new Error('Organization not found or you do not have access');
+
+    if (sessionId) {
+      const session = this.sseSessions.get(sessionId);
+      if (session) {
+        session.orgIdOverride = org.id;
+      }
+    }
+
+    return {
+      success: true,
+      org_id: org.id,
+      org_name: org.name,
+      org_slug: org.slug,
+      message: `Switched to ${org.name}. All subsequent tool calls are now scoped to this organization.`,
+      ...(sessionId ? {} : { note: 'Session persistence requires an SSE connection. This switch applies to the current request only.' }),
+    };
   }
 
   // ---------------------------------------------------------------------------
@@ -634,6 +736,33 @@ export class MCPGateway {
           'Use this during a Skills Assessment to check whether any skills are already active and ' +
           'firing, and to detect ticket category spikes without corresponding skill executions.',
         inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      {
+        name: 'pacore__list_accessible_orgs',
+        description:
+          'List all organizations you can access — including orgs you are a member of and ' +
+          'customer orgs you manage as an operator. ' +
+          'Returns slug, name, and access type for each. ' +
+          'Call this to find the correct slug before calling pacore__switch_org.',
+        inputSchema: { type: 'object', properties: {}, required: [] },
+      },
+      {
+        name: 'pacore__switch_org',
+        description:
+          'Switch the current MCP session to a different organization by slug. ' +
+          'After switching, all subsequent tool calls operate in the context of the new org. ' +
+          'Call pacore__list_accessible_orgs first to find the slug. ' +
+          'Operators: use this to run a Skills Assessment for a specific customer.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            org: {
+              type: 'string',
+              description: 'The org slug to switch to (e.g. "yota-coffee"). Get slugs from pacore__list_accessible_orgs.',
+            },
+          },
+          required: ['org'],
+        },
       },
     ];
   }

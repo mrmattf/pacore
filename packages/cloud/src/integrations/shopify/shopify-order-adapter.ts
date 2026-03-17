@@ -24,7 +24,15 @@ class DirectTokenProvider {
 
     if (!response.ok) {
       const body = await response.text();
-      throw new Error(`Shopify token request failed (${response.status}): ${body}`);
+      // Shopify returns HTML error pages for OAuth failures — extract the human-readable message
+      const oauthMatch = body.match(/Oauth error ([^<\n]+)/i);
+      if (oauthMatch) {
+        throw new Error(`Shopify authentication failed: ${oauthMatch[1].trim()}`);
+      }
+      if (response.status === 404) {
+        throw new Error(`Shopify store not found — check that the Store Domain is correct (e.g. my-store.myshopify.com)`);
+      }
+      throw new Error(`Shopify authentication failed (${response.status}) — check your Client ID and Client Secret`);
     }
 
     const data = await response.json() as { access_token: string };

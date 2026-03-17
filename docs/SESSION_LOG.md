@@ -5,11 +5,11 @@ Brief tracking of significant changes. Keep entries to 1-2 sentences each. Delet
 ---
 
 ## 2026-03 (recent sessions)
+- Org-scoped MCP sessions: Added `pacore__list_accessible_orgs` and `pacore__switch_org` MCP tools with 4-priority resolution chain (session override → URL slug → X-Org-Id header → auto-resolve); fixed cross-tenant skill deletion bug in `deleteUserSkill`; updated assessment prompt with Step 0 org selection.
 - Debug mode for operator skill testing: Added Bug icon toggle in SkillsPage operator view to enable `testMode` via `PUT /configure`; debug mode shows amber badge and sandbox execution labels; normal mode shows last 3 executions with step details and inline HTML previews.
 - Operator UI and data flow polish: Fixed onboarding credential storage to create `integration_connections` rows alongside `mcp_credentials` (now visible to ConnectionPicker); added skill activation flow to OperatorCustomerDetail SkillsTab; added shared `AppNav` component with Clarissi wordmark and UserMenu; fixed ConnectionPicker dependency array (`orgId`, `token`).
 - Operator Platform complete: DB migration 013 added `is_operator`, `operator_customers`, `customer_profiles` (with `management_mode`), and `credential_intake_tokens` tables; backend operators-routes, operator-guards, onboarding-routes with atomic token consumption + Cloudflare Turnstile; frontend OperatorDashboard, OperatorCustomerDetail, CredentialIntakePage, useOperator hook; JWT `isOperator` flag and `/me` response; ADR-018 documents identity model, credential intake flow, and management mode lifecycle.
 - Frontend org context switching: Added `contextStore.ts` (Zustand + localStorage), `useOrgs` hook for member API calls, `ContextSwitcher` dropdown in SkillsPage header (Personal / orgs / "+ New Organization"), and `OrgPanel` slide-over for admin member management; all skill API calls now context-aware via `skillsBasePath()` helper across SkillsPage, SkillConfigPage, TemplatePickerPage, BillingPage.
-- Yota Demo Readiness: Added `listAllOrgExecutions` and `listAllUserExecutions` to SkillRegistry, implemented three new `pacore__` MCP tools (`list_skill_templates`, `list_connections`, `get_execution_log`) for Assessment workflow infrastructure, wired SkillTemplateRegistry into MCPGateway, and created reusable customer onboarding and assessment report templates.
 
 ---
 

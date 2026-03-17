@@ -1733,7 +1733,7 @@ export class APIGateway {
       try {
         const { orgId, userSkillId } = req.params;
         await this.config.orgManager.assertAdmin(orgId, req.user!.id);
-        await this.config.skillRegistry.deleteUserSkill(userSkillId);
+        await this.config.skillRegistry.deleteUserSkill(userSkillId, orgId);
         res.json({ success: true });
       } catch (error: any) {
         res.status(500).json({ error: error.message });

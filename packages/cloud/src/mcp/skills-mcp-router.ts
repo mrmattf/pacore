@@ -470,7 +470,7 @@ async function dispatchTool(
         await deps.skillRegistry.deleteTrigger(trigger.id);
       }
 
-      await deps.skillRegistry.deleteUserSkill(userSkillId);
+      await deps.skillRegistry.deleteUserSkill(userSkillId, orgId);
       return { success: true, userSkillId };
     }
 

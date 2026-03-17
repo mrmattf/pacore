@@ -134,8 +134,14 @@ export class SkillRegistry {
     );
   }
 
-  async deleteUserSkill(userSkillId: string): Promise<void> {
-    await this.db.query('DELETE FROM user_skills WHERE id = $1', [userSkillId]);
+  async deleteUserSkill(userSkillId: string, orgId: string): Promise<void> {
+    const result = await this.db.query(
+      'DELETE FROM user_skills WHERE id = $1 AND org_id = $2',
+      [userSkillId, orgId]
+    );
+    if (result.rowCount === 0) {
+      throw new Error('Skill not found or does not belong to this organization');
+    }
   }
 
   // ---- Triggers ----

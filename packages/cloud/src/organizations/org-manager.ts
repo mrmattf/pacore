@@ -2,6 +2,11 @@ import { Pool } from 'pg';
 import { nanoid } from 'nanoid';
 import { Organization, OrgMember, OrgRole, OrgTeam, OrgWithMembers, PlanTier } from '@pacore/core';
 
+export interface AccessibleOrg extends Organization {
+  accessType: 'member' | 'operator_customer';
+  role: OrgRole | null;
+}
+
 export class OrgManager {
   constructor(private db: Pool) {}
 
@@ -149,6 +154,47 @@ export class OrgManager {
       [orgId]
     );
     return result.rows.map(this.mapTeam);
+  }
+
+  async getOrgBySlug(slug: string): Promise<Organization | null> {
+    const result = await this.db.query(
+      'SELECT * FROM organizations WHERE slug = $1',
+      [slug]
+    );
+    return result.rows[0] ? this.mapOrg(result.rows[0]) : null;
+  }
+
+  async listAccessibleOrgs(userId: string): Promise<AccessibleOrg[]> {
+    const result = await this.db.query<{
+      id: string; name: string; slug: string; owner_id: string;
+      plan: string; created_at: Date; access_type: string; role: string | null;
+    }>(
+      `SELECT o.*, 'member' AS access_type, om.role
+       FROM organizations o JOIN org_members om ON om.org_id = o.id WHERE om.user_id = $1
+       UNION ALL
+       SELECT o.*, 'operator_customer' AS access_type, NULL AS role
+       FROM organizations o JOIN operator_customers oc ON oc.org_id = o.id WHERE oc.operator_id = $1
+       ORDER BY name ASC`,
+      [userId]
+    );
+    return result.rows.map(r => ({
+      ...this.mapOrg(r),
+      accessType: r.access_type as 'member' | 'operator_customer',
+      role: r.role as OrgRole | null,
+    }));
+  }
+
+  async canAccessOrg(userId: string, orgId: string): Promise<boolean> {
+    const result = await this.db.query(
+      `SELECT 1 FROM org_members WHERE org_id = $1 AND user_id = $2
+       UNION ALL
+       SELECT 1 FROM operator_customers oc
+         JOIN users u ON u.id = oc.operator_id AND u.is_operator = true
+         WHERE oc.org_id = $1 AND oc.operator_id = $2
+       LIMIT 1`,
+      [orgId, userId]
+    );
+    return result.rows.length > 0;
   }
 
   // ---- Slug helpers ----

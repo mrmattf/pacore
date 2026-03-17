@@ -204,12 +204,17 @@ export async function runDeliveryExceptionChain(
   }
 
   const doneOrder = stepTimer(steps, 'Fetch Order');
-  const order = await shopifyAdapter.getOrder(shopifyOrderId, shopifyCredsMap) as {
-    id: number; orderNumber: number; email: string;
-    customer: { id: number; firstName: string | null; lastName: string | null } | null;
-    totalPrice: string;
-  };
-  doneOrder('ok', `Fetched order #${order.orderNumber} (id=${order.id})`, { orderId: order.id, orderNumber: order.orderNumber });
+  type OrderShape = { id: number; orderNumber: number; email: string; customer: { id: number; firstName: string | null; lastName: string | null } | null; totalPrice: string };
+  let order: OrderShape;
+
+  if (options.dryRun) {
+    // Use mock order data in dry-run — avoids hitting the real Shopify API with a fake order ID
+    order = { id: shopifyOrderId, orderNumber: 1001, email: 'customer@example.com', customer: { id: 1, firstName: 'Jane', lastName: 'Smith' }, totalPrice: '150.00' };
+    doneOrder('sandbox', `Dry run — using mock order data (id=${shopifyOrderId})`, { orderId: shopifyOrderId });
+  } else {
+    order = await shopifyAdapter.getOrder(shopifyOrderId, shopifyCredsMap) as OrderShape;
+    doneOrder('ok', `Fetched order #${order.orderNumber} (id=${order.id})`, { orderId: order.id, orderNumber: order.orderNumber });
+  }
 
   const customerName = order.customer
     ? [order.customer.firstName, order.customer.lastName].filter(Boolean).join(' ') || 'Valued Customer'
