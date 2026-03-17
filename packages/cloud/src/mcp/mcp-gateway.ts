@@ -123,6 +123,14 @@ export class MCPGateway {
         return;
       }
 
+      // Validate ?org=<slug> BEFORE committing headers — can't send HTTP errors after flushHeaders()
+      const rawOrgSlug = req.query.org as string | undefined;
+      if (rawOrgSlug !== undefined && !/^[a-z0-9_-]{1,60}$/.test(rawOrgSlug)) {
+        res.status(400).json({ error: 'Invalid org slug format' });
+        return;
+      }
+      const orgSlugFromUrl = rawOrgSlug;
+
       const sessionId = randomBytes(16).toString('hex');
 
       // Build absolute base URL — required by Claude Desktop and MCP clients
@@ -137,15 +145,6 @@ export class MCPGateway {
 
       // Tell the client where to POST JSON-RPC messages (absolute URL required)
       res.write(`event: endpoint\ndata: ${base}/v1/mcp/message?sessionId=${sessionId}\n\n`);
-
-      // Capture optional ?org=<slug> for per-customer scoping (Claude Desktop config-time)
-      const rawOrgSlug = req.query.org as string | undefined;
-      if (rawOrgSlug !== undefined && !/^[a-z0-9-]{1,60}$/.test(rawOrgSlug)) {
-        res.end();
-        res.status(400).json({ error: 'Invalid org slug format' });
-        return;
-      }
-      const orgSlugFromUrl = rawOrgSlug;
       this.sseSessions.set(sessionId, { res, userId, orgSlugFromUrl });
 
       // 30s keepalive to prevent proxy timeouts

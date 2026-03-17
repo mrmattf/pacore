@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { useParams, Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2, AlertCircle, Check, Plus } from 'lucide-react';
+import { ArrowLeft, Loader2, AlertCircle, Check, Plus, Copy } from 'lucide-react';
 import { apiFetch } from '../services/auth';
 import { useContextStore } from '../store/contextStore';
 import { updateMode, storeAssessment, fetchAssessment, AssessmentReport } from '../hooks/useOperator';
@@ -23,7 +23,39 @@ const RECOMMENDATION_OPTIONS = [
   { value: 'concierge_growth', label: 'Concierge Growth' },
 ];
 
-function AssessmentTab({ orgId }: { orgId: string }) {
+function ClaudeDesktopPanel({ orgSlug }: { orgSlug: string }) {
+  const [copied, setCopied] = useState(false);
+  const sseUrl = `${window.location.origin}/v1/mcp/sse?org=${orgSlug}`;
+  const config = JSON.stringify({ mcpServers: { Clarissi: { type: 'sse', url: sseUrl } } }, null, 2);
+
+  function handleCopy() {
+    navigator.clipboard.writeText(config);
+    setCopied(true);
+    setTimeout(() => setCopied(false), 2000);
+  }
+
+  return (
+    <div className="bg-white rounded-lg border border-gray-200 p-6">
+      <h3 className="font-semibold text-gray-900 mb-1">Run Assessment in Claude Desktop</h3>
+      <p className="text-sm text-gray-500 mb-4">
+        Add this to your Claude Desktop <code className="text-xs bg-gray-100 px-1 py-0.5 rounded">claude_desktop_config.json</code> to scope the session to this customer.
+      </p>
+      <div className="relative">
+        <pre className="text-xs text-gray-700 bg-gray-50 border border-gray-200 rounded-lg p-4 overflow-auto">{config}</pre>
+        <button
+          onClick={handleCopy}
+          className="absolute top-2 right-2 flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium bg-white border border-gray-200 rounded hover:bg-gray-50 text-gray-600"
+        >
+          {copied ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
+          {copied ? 'Copied' : 'Copy'}
+        </button>
+      </div>
+      <p className="text-xs text-gray-400 mt-3">Org slug: <span className="font-mono">{orgSlug}</span></p>
+    </div>
+  );
+}
+
+function AssessmentTab({ orgId, orgSlug }: { orgId: string; orgSlug: string }) {
   const [report, setReport] = useState<AssessmentReport | null>(null);
   const [loading, setLoading] = useState(true);
   const [jsonInput, setJsonInput] = useState('');
@@ -86,6 +118,9 @@ function AssessmentTab({ orgId }: { orgId: string }) {
 
   return (
     <div className="space-y-6">
+      {/* Claude Desktop connection */}
+      <ClaudeDesktopPanel orgSlug={orgSlug} />
+
       {/* Upload panel */}
       <div className="bg-white rounded-lg border border-gray-200 p-6">
         <h3 className="font-semibold text-gray-900 mb-4">Upload Assessment Report</h3>
@@ -407,7 +442,7 @@ export function OperatorCustomerDetail() {
         )}
 
         {activeTab === 'assessment' && orgId && (
-          <AssessmentTab orgId={orgId} />
+          <AssessmentTab orgId={orgId} orgSlug={org.slug} />
         )}
       </div>
     </div>
