@@ -100,7 +100,6 @@ export class GorgiasApiClient {
     // Fetch extra when filtering by date so client-side filtering still yields ~limit results
     const fetchLimit = Math.min(daysBack ? limit * 3 : limit, 100);
     const params = new URLSearchParams({ limit: String(fetchLimit), order_by: 'created_datetime:desc' });
-    if (status) params.set('status', status);
 
     const response = await fetch(`${this.baseUrl}/tickets?${params}`, {
       headers: { 'Authorization': this.authHeader },
@@ -127,6 +126,7 @@ export class GorgiasApiClient {
 
     return (data.data ?? [])
       .filter(t => !daysBack || new Date(t.created_datetime).getTime() >= sinceMs)
+      .filter(t => !status || t.status === status)
       .slice(0, limit)
       .map(t => ({
         id: t.id,
