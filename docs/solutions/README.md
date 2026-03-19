@@ -36,10 +36,15 @@ These packages were built for specific customers and are no longer active. They 
 
 ## Planned Skill Types
 
-| Skill Type | Description | Priority |
-|------------|-------------|----------|
-| Order Routing | Route orders to fulfillment centers based on inventory/location | Medium |
-| Support Triage | Classify and route inbound tickets | Medium |
+Sourced from Assessment gap analysis (ADR-015/017). P1/P2 candidates from first live Assessment (March 2026); see [ADR-019](../decisions/019-gorgias-webhook-source.md) for the infrastructure decision enabling Gorgias-triggered skills.
+
+| Skill Type | Description | Integrations | Priority |
+|------------|-------------|--------------|----------|
+| `abandoned-cart-reachout` | Automate outbound follow-up when a Shopify cart is abandoned without purchase | Shopify → Gorgias / Zendesk | P1 |
+| `order-cancel-urgent-edit` | Detect cancel/edit ticket; hold order if not yet shipped, send return instructions if shipped | Gorgias + Shopify → Gorgias | P1 |
+| `partner-product-status` | Auto-respond to partner product tickets with fulfillment channel redirect | Gorgias + Shopify → Gorgias | P2 |
+| `order-routing` | Route orders to fulfillment centers based on inventory/location | Shopify → internal | Medium |
+| `support-triage` | Classify and route inbound support tickets | Gorgias / Zendesk | Medium |
 
 ## Solution Architecture
 

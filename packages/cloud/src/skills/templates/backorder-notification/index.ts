@@ -135,6 +135,13 @@ const functionalFields: EditableField[] = [
     defaultValue: 0,
     hint: 'Items at or below this quantity are considered backordered',
   },
+  {
+    key: 'etaBufferWeeks',
+    label: 'ETA Buffer (weeks)',
+    type: 'number',
+    defaultValue: 0,
+    hint: 'Add a buffer to ETA dates shown in emails. E.g., if ETA is 2 weeks away and buffer is 2, customer sees "2 – 4 weeks". Set to 0 to show the exact date.',
+  },
   // Full Backorder template fields
   { key: 'templates.full_backorder.subject', label: 'Full Backorder — Subject', type: 'text',     rows: 1, defaultValue: sharedDefaultTemplates.full_backorder.subject, hint: 'Email subject your customer sees' },
   { key: 'templates.full_backorder.intro',   label: 'Full Backorder — Opening', type: 'textarea', rows: 4, defaultValue: sharedDefaultTemplates.full_backorder.intro },

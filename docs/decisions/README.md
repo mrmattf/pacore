@@ -28,6 +28,7 @@ An ADR documents a significant architectural decision made in the project, inclu
 | [016](016-three-tier-customer-journey.md) | Three-Tier Customer Journey — Self-Serve, Assessment, Concierge | Accepted | 2026-03 |
 | [017](017-operator-skill-discovery.md) | Operator Skill Discovery — Two-Pass Assessment, Gap Aggregation, Vertical-Agnostic Tool Design | Accepted | 2026-03 |
 | [018](018-operator-platform-identity-and-onboarding.md) | Operator Platform — Identity Model, Credential Intake, and Management Mode Lifecycle | Accepted | 2026-03 |
+| [019](019-gorgias-webhook-source.md) | Gorgias as WebhookSourceAdapter — Enabling Gorgias-Triggered Skills | Proposed | 2026-03 |
 
 ## Template
 

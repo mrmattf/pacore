@@ -12,6 +12,7 @@ import { renderTemplate, renderTemplatePlainText, renderSubject } from '../skill
 import { applyTemplateFieldOverrides } from '../skills/template-utils';
 import { SkillTemplateRegistry } from '../skills/skill-template-registry';
 import { executeEscalation } from '../skills/execute-escalation';
+import { stepTimer, resolveSlotCredential } from './chain-utils';
 
 export interface BackorderChainDeps {
   credentialManager: CredentialManager;
@@ -30,14 +31,6 @@ export interface BackorderChainResult {
   dryRun?: {
     wouldCreateTicket?: { subject: string; message: string; priority: string };
     wouldSkip?: boolean;
-  };
-}
-
-/** Helper: creates a step timer. Call the returned fn to push a completed step. */
-function stepTimer(steps: ExecutionStep[], name: string) {
-  const start = Date.now();
-  return (status: ExecutionStep['status'], summary: string, detail?: unknown) => {
-    steps.push({ name, status, summary, detail, duration_ms: Date.now() - start });
   };
 }
 
@@ -92,29 +85,16 @@ export async function runBackorderDetectionV2(
   }
 
   // ---- Resolve Shopify credentials ----
-  const shopifyConnectionId = userSkillConfig.slotConnections['shopify'];
-  if (!shopifyConnectionId) {
-    throw new Error('No Shopify connection configured for this skill');
-  }
-
-  const shopifyCreds = await credentialManager.getCredentials(
-    { type: 'org', orgId },
-    shopifyConnectionId
-  );
-  if (!shopifyCreds) {
-    throw new Error(`No credentials found for Shopify connection: ${shopifyConnectionId}`);
-  }
+  const shopifyCredsMap = await resolveSlotCredential('shopify', userSkillConfig.slotConnections, orgId, credentialManager);
 
   // ---- HMAC verification (platform security requirement) ----
   if (options.hmacHeader && options.rawBody) {
-    const clientSecret = shopifyCreds.clientSecret as string;
+    const clientSecret = shopifyCredsMap.clientSecret as string;
     if (!clientSecret) {
       throw new Error('Shopify clientSecret missing from credentials — cannot verify webhook');
     }
     verifyShopifyWebhookHmac(options.rawBody, options.hmacHeader, clientSecret);
   }
-
-  const shopifyCredsMap = shopifyCreds as unknown as Record<string, unknown>;
 
   // ---- Fetch order + inventory ----
   const doneOrder = stepTimer(steps, 'Fetch Order');
@@ -141,13 +121,19 @@ export async function runBackorderDetectionV2(
       return available <= threshold;
     })
     .map(li => {
-      const available = Math.max(0, inventoryMap.get(li.variantId) ?? 0);
+      const rawAvailable = inventoryMap.get(li.variantId) ?? 0;
+      // When Shopify fulfills a partial order, post-order inventory goes negative.
+      // The absolute value of that negative balance is the number of units that couldn't be filled.
+      const backorderedQty = rawAvailable < 0
+        ? Math.min(li.quantity, -rawAvailable)   // overcommitment case
+        : Math.max(0, li.quantity - rawAvailable); // threshold-triggered case (inv ≥ 0)
+      const availableQty = li.quantity - backorderedQty;
       return {
         title:          li.title,
         sku:            li.sku,
         orderedQty:     li.quantity,
-        availableQty:   available,
-        backorderedQty: Math.max(0, li.quantity - available),
+        availableQty,
+        backorderedQty,
         variantId:      li.variantId,
       };
     });
@@ -226,6 +212,19 @@ export async function runBackorderDetectionV2(
     mcpCaller
   ) as BackorderPolicyEvalContext;
 
+  // ---- Apply ETA buffer window (if configured) ----
+  // Converts ISO date ETAs to a week range, e.g. "2026-03-28" → "2 – 4 weeks"
+  const etaBufferWeeks = (userSkillConfig.fieldOverrides['etaBufferWeeks'] as number) ?? 0;
+  if (etaBufferWeeks > 0) {
+    ctx.backorderedItems = ctx.backorderedItems.map(item => {
+      if (!item.eta || item.eta === 'soon' || !/^\d{4}-\d{2}-\d{2}$/.test(item.eta)) return item;
+      const etaDate = new Date(item.eta + 'T00:00:00');
+      if (isNaN(etaDate.getTime())) return item;
+      const weeksOut = Math.max(1, Math.ceil((etaDate.getTime() - Date.now()) / (7 * 24 * 60 * 60 * 1000)));
+      return { ...item, eta: `${weeksOut} \u2013 ${weeksOut + etaBufferWeeks} weeks` };
+    });
+  }
+
   // ---- Evaluate policy ----
   const donePolicy = stepTimer(steps, 'Evaluate Policy');
   const actions = evaluatePolicy(template.compiledPolicy, ctx as any);
@@ -258,18 +257,7 @@ export async function runBackorderDetectionV2(
         throw new Error(`No slot '${invokeAction.targetSlot}' defined in template '${template.id}'`);
       }
 
-      const slotConnectionId = userSkillConfig.slotConnections[invokeAction.targetSlot];
-      if (!slotConnectionId) {
-        throw new Error(`No connection configured for slot '${invokeAction.targetSlot}'`);
-      }
-
-      const slotCreds = await credentialManager.getCredentials(
-        { type: 'org', orgId },
-        slotConnectionId
-      );
-      if (!slotCreds) {
-        throw new Error(`No credentials for ${slot.integrationKey} connection: ${slotConnectionId}`);
-      }
+      const slotCreds = await resolveSlotCredential(invokeAction.targetSlot, userSkillConfig.slotConnections, orgId, credentialManager);
 
       let invokeParams: Record<string, unknown> = {
         orderId:       String(ctx.orderId),

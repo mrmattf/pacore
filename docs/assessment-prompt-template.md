@@ -206,7 +206,7 @@ Create one Claude Desktop project per customer with `?org=<slug>` in the SSE URL
   "mcpServers": {
     "Clarissi - Yota Coffee": {
       "type": "sse",
-      "url": "https://api.clarissi.com/v1/mcp/sse?org=yota-coffee"
+      "url": "https://app.clarissi.com/v1/mcp/sse?org=yota-coffee"
     }
   }
 }
@@ -221,7 +221,7 @@ One Claude Desktop project for all customers. Use `pacore__list_accessible_orgs`
   "mcpServers": {
     "Clarissi": {
       "type": "sse",
-      "url": "https://api.clarissi.com/v1/mcp/sse"
+      "url": "https://app.clarissi.com/v1/mcp/sse"
     }
   }
 }

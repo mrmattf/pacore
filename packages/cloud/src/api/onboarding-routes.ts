@@ -118,6 +118,7 @@ export function createOnboardingRoutes(db: Pool, credentialManager: CredentialMa
       const { shop } = req.body as { shop?: string };
 
       if (!shop || !/^[a-z0-9-]+\.myshopify\.com$/.test(shop)) {
+        console.warn('[shopify-oauth] shopify/start: invalid shop format', { shop });
         return res.status(400).json({ error: 'shop must be a valid myshopify.com domain (e.g. my-store.myshopify.com)' });
       }
 
@@ -129,13 +130,25 @@ export function createOnboardingRoutes(db: Pool, credentialManager: CredentialMa
       );
 
       const row = result.rows[0];
-      if (!row) return res.status(410).json({ error: 'This link has expired or has already been used.' });
-      if (new Date(row.expires_at) < new Date()) return res.status(410).json({ error: 'This link has expired.' });
-      if (row.used_at) return res.status(410).json({ error: 'This link has already been used.' });
+      if (!row) {
+        console.warn('[shopify-oauth] shopify/start: intake token not found', { shop });
+        return res.status(410).json({ error: 'This link has expired or has already been used.' });
+      }
+      if (new Date(row.expires_at) < new Date()) {
+        console.warn('[shopify-oauth] shopify/start: intake token expired', { shop, orgId: row.org_id });
+        return res.status(410).json({ error: 'This link has expired.' });
+      }
+      if (row.used_at) {
+        console.warn('[shopify-oauth] shopify/start: intake token already used', { shop, orgId: row.org_id });
+        return res.status(410).json({ error: 'This link has already been used.' });
+      }
 
       // Per-store custom app credentials (may be null — falls back to platform app)
       const shopifyClientId: string | undefined = row.shopify_client_id ?? undefined;
       const shopifyClientSecret: string | undefined = row.shopify_client_secret ?? undefined;
+
+      const appMode = shopifyClientId ? 'custom' : 'platform';
+      console.log('[shopify-oauth] shopify/start: initiating OAuth', { shop, orgId: row.org_id, appMode });
 
       const stateClaims: Record<string, unknown> = {
         orgId: row.org_id, shop, intakeToken: rawToken, aud: 'shopify-oauth',
@@ -145,10 +158,18 @@ export function createOnboardingRoutes(db: Pool, credentialManager: CredentialMa
 
       const state = jwt.sign(stateClaims, jwtPrivateKey, { algorithm: 'ES256', expiresIn: '10m' });
 
-      const authUrl = buildShopifyAuthUrl(shop, state, shopifyClientId);
+      let authUrl: string;
+      try {
+        authUrl = buildShopifyAuthUrl(shop, state, shopifyClientId);
+      } catch (err: any) {
+        console.error('[shopify-oauth] shopify/start: failed to build auth URL', { shop, orgId: row.org_id, error: err.message });
+        throw err;
+      }
+
+      console.log('[shopify-oauth] shopify/start: redirecting to Shopify', { shop, orgId: row.org_id, appMode });
       res.json({ authUrl });
     } catch (error: any) {
-      console.error('Onboard shopify/start error:', error);
+      console.error('[shopify-oauth] shopify/start error:', error);
       res.status(500).json({ error: 'Internal server error' });
     }
   });

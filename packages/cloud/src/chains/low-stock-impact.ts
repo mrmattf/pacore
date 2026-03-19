@@ -10,6 +10,7 @@ import { SkillTemplateRegistry } from '../skills/skill-template-registry';
 import { renderLowStockTemplate, renderLowStockTemplatePlainText, renderLowStockSubject } from '../skills/low-stock-templates';
 import { applyTemplateFieldOverrides } from '../skills/template-utils';
 import { executeEscalation } from '../skills/execute-escalation';
+import { stepTimer, resolveSlotCredential } from './chain-utils';
 
 export interface LowStockChainDeps {
   credentialManager: CredentialManager;
@@ -73,13 +74,6 @@ function evaluateLowStockPolicy(
   return policy.defaultActions as Action[];
 }
 
-function stepTimer(steps: ExecutionStep[], name: string) {
-  const start = Date.now();
-  return (status: ExecutionStep['status'], summary: string, detail?: unknown) => {
-    steps.push({ name, status, summary, detail, duration_ms: Date.now() - start });
-  };
-}
-
 // ---- Webhook payload extraction ----
 
 export interface InventoryUpdatePayload {
@@ -138,20 +132,7 @@ export async function runLowStockImpactChain(
   }
 
   // ---- Resolve Shopify credentials ----
-  const shopifyConnectionId = userSkillConfig.slotConnections['shopify'];
-  if (!shopifyConnectionId) {
-    throw new Error('No Shopify connection configured for this skill');
-  }
-
-  const shopifyCreds = await credentialManager.getCredentials(
-    { type: 'org', orgId },
-    shopifyConnectionId
-  );
-  if (!shopifyCreds) {
-    throw new Error(`No credentials found for Shopify connection: ${shopifyConnectionId}`);
-  }
-
-  const shopifyCredsMap = shopifyCreds as unknown as Record<string, unknown>;
+  const shopifyCredsMap = await resolveSlotCredential('shopify', userSkillConfig.slotConnections, orgId, credentialManager);
   const shopifyAdapter = new ShopifyOrderAdapter();
 
   // ---- Check threshold ----
@@ -332,18 +313,7 @@ export async function runLowStockImpactChain(
           throw new Error(`No slot '${invokeAction.targetSlot}' defined in template '${template.id}'`);
         }
 
-        const slotConnectionId = userSkillConfig.slotConnections[invokeAction.targetSlot];
-        if (!slotConnectionId) {
-          throw new Error(`No connection configured for slot '${invokeAction.targetSlot}'`);
-        }
-
-        const slotCreds = await credentialManager.getCredentials(
-          { type: 'org', orgId },
-          slotConnectionId
-        );
-        if (!slotCreds) {
-          throw new Error(`No credentials for ${slot.integrationKey} connection: ${slotConnectionId}`);
-        }
+        const slotCreds = await resolveSlotCredential(invokeAction.targetSlot, userSkillConfig.slotConnections, orgId, credentialManager);
 
         let invokeParams: Record<string, unknown> = {
           orderId:       String(ctx.orderId),

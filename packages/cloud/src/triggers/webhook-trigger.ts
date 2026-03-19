@@ -66,13 +66,25 @@ export class WebhookTriggerHandler {
       if (scopeRow.rows.length > 0) {
         const { org_id } = scopeRow.rows[0];
         if (org_id) {
-          const scope: BillingScope = { type: 'org', orgId: org_id };
-          const plan = await this.billingManager.getEffectivePlan(scope);
-          sandboxMode = isSandboxPlan(plan);
-          if (!sandboxMode) {
-            const overLimit = await this.billingManager.isOverLimit(scope, 'skillExecutionsPerMonth');
-            if (overLimit) {
-              return { status: 429, body: 'Monthly execution limit reached. Upgrade your plan.' };
+          // Operator-managed customer orgs don't have their own billing_subscriptions row —
+          // they run under the operator relationship, not the self-serve free plan.
+          // Skipping the plan-based sandbox check for these orgs prevents them from always
+          // being forced into dry-run mode.
+          const operatorRow = await this.db!.query<{ count: string }>(
+            'SELECT COUNT(*) AS count FROM operator_customers WHERE org_id = $1',
+            [org_id]
+          );
+          const isOperatorManaged = parseInt(operatorRow.rows[0]?.count ?? '0', 10) > 0;
+
+          if (!isOperatorManaged) {
+            const scope: BillingScope = { type: 'org', orgId: org_id };
+            const plan = await this.billingManager.getEffectivePlan(scope);
+            sandboxMode = isSandboxPlan(plan);
+            if (!sandboxMode) {
+              const overLimit = await this.billingManager.isOverLimit(scope, 'skillExecutionsPerMonth');
+              if (overLimit) {
+                return { status: 429, body: 'Monthly execution limit reached. Upgrade your plan.' };
+              }
             }
           }
         }

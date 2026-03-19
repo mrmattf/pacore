@@ -13,7 +13,7 @@ import {
   renderDeliveryExceptionSubject,
 } from '../skills/delivery-exception-templates';
 import { applyTemplateFieldOverrides } from '../skills/template-utils';
-import { executeEscalation } from '../skills/execute-escalation';
+import { stepTimer, resolveSlotCredential, dispatchActions } from './chain-utils';
 
 export interface DeliveryExceptionChainDeps {
   credentialManager: CredentialManager;
@@ -35,13 +35,6 @@ export interface DeliveryExceptionChainResult {
   skipReason?: string;
   dryRun?: {
     wouldNotify: Array<{ slot: string; capability: string; subject: string; message: string }>;
-  };
-}
-
-function stepTimer(steps: ExecutionStep[], name: string) {
-  const start = Date.now();
-  return (status: ExecutionStep['status'], summary: string, detail?: unknown) => {
-    steps.push({ name, status, summary, detail, duration_ms: Date.now() - start });
   };
 }
 
@@ -177,20 +170,7 @@ export async function runDeliveryExceptionChain(
   }
 
   // ---- Resolve Shopify credentials ----
-  const shopifyConnectionId = userSkillConfig.slotConnections['shopify'];
-  if (!shopifyConnectionId) {
-    throw new Error('No Shopify connection configured for this skill');
-  }
-
-  const shopifyCreds = await credentialManager.getCredentials(
-    { type: 'org', orgId },
-    shopifyConnectionId
-  );
-  if (!shopifyCreds) {
-    throw new Error(`No credentials found for Shopify connection: ${shopifyConnectionId}`);
-  }
-
-  const shopifyCredsMap = shopifyCreds as unknown as Record<string, unknown>;
+  const shopifyCredsMap = await resolveSlotCredential('shopify', userSkillConfig.slotConnections, orgId, credentialManager);
   const shopifyAdapter = new ShopifyOrderAdapter();
 
   // ---- Look up Shopify order ----
@@ -282,78 +262,39 @@ export async function runDeliveryExceptionChain(
   }
 
   // ---- Live dispatch ----
-  for (const action of actions) {
-    if (action.type === 'skip') {
-      result.actions.push('skip');
-      break;
-    }
-
-    if (action.type === 'escalate') {
-      await executeEscalation(action, ctx, userSkillConfig, template, orgId, { credentialManager, adapterRegistry });
-      result.actions.push('escalate');
-      continue;
-    }
-
-    if (action.type === 'invoke') {
-      const invokeAction = action as AdapterAction;
-
-      const slot = template.slots.find(s => s.key === invokeAction.targetSlot);
-      if (!slot) {
-        throw new Error(`No slot '${invokeAction.targetSlot}' defined in template '${template.id}'`);
-      }
-
-      const slotConnectionId = userSkillConfig.slotConnections[invokeAction.targetSlot];
-      if (!slotConnectionId) {
-        throw new Error(`No connection configured for slot '${invokeAction.targetSlot}'`);
-      }
-
-      const slotCreds = await credentialManager.getCredentials(
-        { type: 'org', orgId },
-        slotConnectionId
-      );
-      if (!slotCreds) {
-        throw new Error(`No credentials for ${slot.integrationKey} connection: ${slotConnectionId}`);
-      }
-
-      let invokeParams: Record<string, unknown> = {
+  await dispatchActions(
+    actions,
+    template,
+    userSkillConfig,
+    orgId,
+    credentialManager,
+    adapterRegistry,
+    steps,
+    ctx,
+    async (invokeAction) => {
+      let params: Record<string, unknown> = {
         orderId:       String(ctx.orderId),
         customerEmail: ctx.customerEmail,
         customerName:  ctx.customerName,
         tags:          ['delivery-exception', 'automated'],
         ...invokeAction.params,
       };
-
       if (invokeAction.templateKey) {
         const namedTemplates = userSkillConfig.namedTemplates ?? template.defaultTemplates;
         const raw = namedTemplates[invokeAction.templateKey];
-        if (!raw) {
-          throw new Error(`Message template not found: ${invokeAction.templateKey}`);
-        }
-
-        const msgTemplate      = applyTemplateFieldOverrides(raw, invokeAction.templateKey, userSkillConfig.fieldOverrides ?? {});
-        const subject          = renderDeliveryExceptionSubject(msgTemplate.subject, ctx);
-        const message          = renderDeliveryExceptionTemplate(msgTemplate, ctx);
-        const messagePlainText = renderDeliveryExceptionTemplatePlainText(msgTemplate, ctx);
-        invokeParams = { ...invokeParams, subject, message, messagePlainText };
+        if (!raw) throw new Error(`Message template not found: ${invokeAction.templateKey}`);
+        const msgTemplate = applyTemplateFieldOverrides(raw, invokeAction.templateKey, userSkillConfig.fieldOverrides ?? {});
+        params = {
+          ...params,
+          subject:          renderDeliveryExceptionSubject(msgTemplate.subject, ctx),
+          message:          renderDeliveryExceptionTemplate(msgTemplate, ctx),
+          messagePlainText: renderDeliveryExceptionTemplatePlainText(msgTemplate, ctx),
+        };
       }
-
-      const doneAction = stepTimer(steps, `Dispatch Action: ${invokeAction.capability}`);
-      try {
-        const invokeResult = await adapterRegistry.invokeCapability(
-          slot.integrationKey,
-          invokeAction.capability,
-          invokeParams,
-          slotCreds as unknown as Record<string, unknown>
-        );
-        doneAction('ok', `Dispatched ${slot.integrationKey}:${invokeAction.capability} for order #${order.orderNumber}`, { orderId: order.id });
-        result.actions.push(`${slot.integrationKey}:${invokeAction.capability}`);
-        result.invokeResults.push(invokeResult);
-      } catch (err) {
-        doneAction('error', `Failed to dispatch ${slot.integrationKey}:${invokeAction.capability}`, { error: String(err) });
-        throw err;
-      }
-    }
-  }
+      return params;
+    },
+    result,
+  );
 
   return result;
 }

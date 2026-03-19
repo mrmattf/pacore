@@ -307,7 +307,7 @@ export class ShopifyOrderAdapter implements EcommerceOrderAdapter, SlotAdapter, 
 
     if (futureDates.length === 0) return 'soon';
 
-    return futureDates[0].toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+    return futureDates[0].toISOString().slice(0, 10);
   }
 
   /**

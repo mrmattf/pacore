@@ -134,7 +134,16 @@ function substituteVarsPlain(text: string, vars: Record<string, string>): string
 /** Coerces an eta value (string or API response object) to a display string. */
 function etaToString(eta: unknown): string {
   if (!eta) return '';
-  if (typeof eta === 'string') return eta;
+  if (typeof eta === 'string') {
+    // ISO date (e.g. "2026-03-28") → locale-formatted display string
+    if (/^\d{4}-\d{2}-\d{2}$/.test(eta)) {
+      const d = new Date(eta + 'T00:00:00');
+      if (!isNaN(d.getTime())) {
+        return d.toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+      }
+    }
+    return eta;
+  }
   if (typeof eta === 'object') {
     const obj = eta as Record<string, unknown>;
     // Try common property names first

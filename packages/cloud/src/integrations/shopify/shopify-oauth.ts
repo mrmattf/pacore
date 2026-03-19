@@ -39,8 +39,16 @@ export async function exchangeCodeForToken(
   const resolvedClientId = clientId ?? process.env.SHOPIFY_APP_CLIENT_ID;
   const resolvedClientSecret = clientSecret ?? process.env.SHOPIFY_APP_CLIENT_SECRET;
   if (!resolvedClientId || !resolvedClientSecret) {
+    console.error('[shopify-oauth] exchangeCodeForToken: missing client credentials', {
+      shop,
+      hasCustomClientId: !!clientId,
+      hasEnvClientId: !!process.env.SHOPIFY_APP_CLIENT_ID,
+    });
     throw new Error('SHOPIFY_APP_CLIENT_ID and SHOPIFY_APP_CLIENT_SECRET env vars are required');
   }
+
+  const appMode = clientId ? 'custom' : 'platform';
+  console.log('[shopify-oauth] exchangeCodeForToken: calling Shopify token endpoint', { shop, appMode, clientId: resolvedClientId });
 
   const response = await fetch(`https://${shop}/admin/oauth/access_token`, {
     method: 'POST',
@@ -50,10 +58,14 @@ export async function exchangeCodeForToken(
 
   if (!response.ok) {
     const body = await response.text();
+    console.error('[shopify-oauth] exchangeCodeForToken: Shopify rejected token exchange', {
+      shop, appMode, status: response.status, body,
+    });
     throw new Error(`Shopify token exchange failed (${response.status}): ${body}`);
   }
 
   const data = await response.json() as { access_token: string };
+  console.log('[shopify-oauth] exchangeCodeForToken: token received', { shop, appMode });
   return data.access_token;
 }
 
@@ -85,12 +97,14 @@ export async function storeShopifyConnection(
   let connectionId: string;
   if (existing.rows.length > 0) {
     connectionId = existing.rows[0].id;
+    console.log('[shopify-oauth] storeShopifyConnection: reconnecting existing connection', { shop, orgId, connectionId });
     await db.query(
       `UPDATE integration_connections SET status = 'active', last_tested_at = NOW() WHERE id = $1`,
       [connectionId]
     );
   } else {
     connectionId = randomUUID();
+    console.log('[shopify-oauth] storeShopifyConnection: creating new connection', { shop, orgId, connectionId });
     await db.query(
       `INSERT INTO integration_connections (id, org_id, integration_key, display_name, status, last_tested_at)
        VALUES ($1, $2, 'shopify', $3, 'active', NOW())`,
@@ -103,6 +117,7 @@ export async function storeShopifyConnection(
   if (clientSecret) creds.clientSecret = clientSecret;
 
   await credentialManager.storeCredentials(scope, connectionId, creds);
+  console.log('[shopify-oauth] storeShopifyConnection: credentials stored', { shop, orgId, connectionId, hasCustomCreds: !!clientId });
 
   return connectionId;
 }
