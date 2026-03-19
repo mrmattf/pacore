@@ -138,7 +138,8 @@ export async function runBackorderDetectionV2(
       };
     });
 
-  const availableItems: BackorderedItemContext[] = order.lineItems
+  // Fully available line items (inventory stayed above threshold)
+  const fullyAvailableItems: BackorderedItemContext[] = order.lineItems
     .filter(li => {
       const available = inventoryMap.get(li.variantId) ?? 0;
       return available > threshold;
@@ -154,6 +155,21 @@ export async function runBackorderDetectionV2(
         variantId:      li.variantId,
       };
     });
+
+  // Partially-backordered items also contribute available units to the "ready to ship" list.
+  // orderedQty is set to availableQty so the Qty column in the email shows the correct number.
+  const partiallyAvailableItems: BackorderedItemContext[] = backorderedItems
+    .filter(item => item.availableQty > 0)
+    .map(item => ({
+      title:          item.title,
+      sku:            item.sku,
+      orderedQty:     item.availableQty,
+      availableQty:   item.availableQty,
+      backorderedQty: 0,
+      variantId:      item.variantId,
+    }));
+
+  const availableItems: BackorderedItemContext[] = [...fullyAvailableItems, ...partiallyAvailableItems];
 
   const result: BackorderChainResult = {
     orderId:          order.id,
@@ -181,6 +197,10 @@ export async function runBackorderDetectionV2(
     ? [order.customer.firstName, order.customer.lastName].filter(Boolean).join(' ') || 'Valued Customer'
     : 'Valued Customer';
 
+  // allItemsBackordered is true only when every unit across every line item is backordered
+  // (no available qty anywhere). A partial backorder — some units available, some not — is "partial".
+  const allItemsBackordered = availableItems.length === 0 && backorderedItems.every(i => i.availableQty === 0);
+
   // ---- Build evaluation context ----
   let ctx: BackorderPolicyEvalContext = {
     orderId:              order.id,
@@ -190,7 +210,7 @@ export async function runBackorderDetectionV2(
     orderTotal:           parseFloat(order.totalPrice) || 0,
     backorderedItems,
     availableItems,
-    allItemsBackordered:  backorderedItems.length === order.lineItems.length,
+    allItemsBackordered,
     someItemsBackordered: backorderedItems.length > 0,
     threshold,
   };

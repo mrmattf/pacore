@@ -180,14 +180,14 @@ function buildBackorderedItemsHtml(ctx: PolicyEvalContext): string {
   const backorderedRows = ctx.backorderedItems.map(item => {
     const etaStr = etaToString(item.eta);
     const status = etaStr === 'soon'
-      ? `${item.backorderedQty} backordered — Back in stock soon`
+      ? 'Back in stock soon'
       : etaStr
-        ? `${item.backorderedQty} backordered — Est. ${escapeHtml(etaStr)}`
-        : `${item.backorderedQty} backordered`;
+        ? `Est. ${escapeHtml(etaStr)}`
+        : 'Backordered';
     return `
     <tr>
       <td style="padding: 4px 8px;">${escapeHtml(item.title)}</td>
-      <td style="padding: 4px 8px;">${item.orderedQty}</td>
+      <td style="padding: 4px 8px;">${item.backorderedQty}</td>
       <td style="padding: 4px 8px;">${status}</td>
     </tr>`;
   }).join('');
@@ -215,11 +215,11 @@ function buildBackorderedItemsText(ctx: PolicyEvalContext): string {
   const backorderedRows = ctx.backorderedItems.map(item => {
     const eta = etaToString(item.eta);
     const status = eta === 'soon'
-      ? `${item.backorderedQty} backordered — Back in stock soon`
+      ? 'Back in stock soon'
       : eta
-        ? `${item.backorderedQty} backordered — Est. ${eta}`
-        : `${item.backorderedQty} backordered`;
-    return `${item.title}  |  ${item.sku || '—'}  |  ${status}`;
+        ? `Est. ${eta}`
+        : 'Backordered';
+    return `${item.title}  |  ${item.sku || '—'}  |  Qty: ${item.backorderedQty}  |  ${status}`;
   });
 
   const parts = [
