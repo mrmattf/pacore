@@ -431,6 +431,26 @@ No per-customer engineering team required.
 
 ---
 
+---
+
+## Positioning Notes
+
+Resolved decisions from product and architecture sessions that marketing copy must not contradict.
+
+**2026-03-21: Domain-agnostic platform model (ADR-024)**
+The platform pipeline has no vertical concept. E-commerce is the launch beachhead and the correct GTM focus (ADR-013), but the platform works for any adapter set. "Built for your stack" is the customer-facing expression. Platform-level copy (about pages, architecture descriptions, positioning statements) must not say "for e-commerce." Catalog copy and skill descriptions can and should use e-commerce language — that's where we're deepest today.
+
+**2026-03-21: Capability-based tier upgrade narrative (ADR-024)**
+Starter → catalog configuration only. Professional → adds BYOM custom skill authoring and Tier 2 MCP analysis tools. Scale → adds platform-assisted Intent-to-Draft authoring. Upgrade copy leads with capability jumps, not volume increases.
+
+**2026-03-21: Execution history as competitive moat (ADR-024)**
+Clarissi tracks live attribution — deflection rates, baseline comparisons, 90-day attribution windows — that single-system incumbents and cross-system competitors cannot replicate without Clarissi's execution layer. Customer-facing copy frames this as auditability and operator confidence ("your history is yours, auditable, baselined"), not as an AI feature. Do not call this an "AI analytics" feature.
+
+**2026-03-21: Assessment is a separate invoiced engagement (ADR-015)**
+The Assessment ($1,500–2,500) must never be described as a "free audit," a "feature," or part of Concierge onboarding. Its value is operator expertise + cross-system topology analysis (Tier 3 tools) + narrative deliverable. Raw MCP data access ≠ Assessment value.
+
+---
+
 ## AI Agent Guidelines
 
 When updating this documentation:

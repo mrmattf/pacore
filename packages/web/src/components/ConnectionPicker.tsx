@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
-import { CheckCircle, Plus, ChevronDown, ChevronUp, Trash2, Loader2, AlertCircle } from 'lucide-react';
+import { CheckCircle, Plus, ChevronDown, ChevronUp, Trash2, Loader2, AlertCircle, Pencil } from 'lucide-react';
 
 export interface Connection {
   id: string;
@@ -52,6 +52,14 @@ export function ConnectionPicker({
   const [savedName, setSavedName] = useState<string | null>(null);
   const [deletingId, setDeletingId] = useState<string | null>(null);
   const saveInFlight = useRef(false);
+
+  // Edit connection state
+  const [editingConnection, setEditingConnection] = useState<Connection | null>(null);
+  const [editCreds, setEditCreds] = useState<Record<string, string>>({});
+  const [editDisplayName, setEditDisplayName] = useState('');
+  const [editLoading, setEditLoading] = useState(false);
+  const [editSaving, setEditSaving] = useState(false);
+  const [editError, setEditError] = useState<string | null>(null);
 
   // Shopify OAuth state
   const [shopifyShop, setShopifyShop] = useState('');
@@ -161,6 +169,49 @@ export function ConnectionPicker({
     }
   }
 
+  async function handleEditOpen(conn: Connection) {
+    setEditingConnection(conn);
+    setEditDisplayName(conn.displayName);
+    setEditCreds({});
+    setEditError(null);
+    setEditLoading(true);
+    try {
+      const res = await fetch(`/v1/organizations/${orgId}/connections/${conn.id}/fields`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setEditCreds(data.nonSecretFields ?? {});
+      }
+    } catch {}
+    setEditLoading(false);
+  }
+
+  async function handleEditSave() {
+    setEditSaving(true);
+    setEditError(null);
+    try {
+      const body: Record<string, unknown> = { credentials: editCreds };
+      if (editDisplayName !== editingConnection!.displayName) body.displayName = editDisplayName;
+      const res = await fetch(`/v1/organizations/${orgId}/connections/${editingConnection!.id}`, {
+        method: 'PATCH',
+        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setEditError(data.error ?? 'Update failed');
+        return;
+      }
+      setEditingConnection(null);
+      await loadConnections();
+    } catch (err: any) {
+      setEditError(err.message);
+    } finally {
+      setEditSaving(false);
+    }
+  }
+
   return (
     <div className="space-y-3">
       <label className="block text-sm font-medium text-gray-700">{slotLabel}</label>
@@ -197,6 +248,15 @@ export function ConnectionPicker({
                 {conn.id === selectedConnectionId && (
                   <span className="text-xs text-green-600 font-medium">Selected</span>
                 )}
+                {!isShopify && (
+                  <button
+                    onClick={() => handleEditOpen(conn)}
+                    className="p-1 text-gray-300 hover:text-blue-500"
+                    title="Edit connection"
+                  >
+                    <Pencil size={14} />
+                  </button>
+                )}
                 <button
                   onClick={() => handleDelete(conn.id)}
                   disabled={deletingId === conn.id}
@@ -212,6 +272,71 @@ export function ConnectionPicker({
       ) : (
         <div className="border rounded-lg p-4 text-sm text-gray-500 bg-gray-50">
           No {integrationKey} connections yet — connect one below.
+        </div>
+      )}
+
+      {/* Edit connection */}
+      {editingConnection && (
+        <div className="border rounded-lg p-4 bg-white space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium">Edit connection</span>
+          </div>
+
+          {editLoading ? (
+            <div className="flex items-center gap-2 text-sm text-gray-400">
+              <Loader2 size={12} className="animate-spin" />
+              Loading fields…
+            </div>
+          ) : (
+            <>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">
+                  Display Name
+                </label>
+                <input
+                  type="text"
+                  value={editDisplayName}
+                  onChange={e => setEditDisplayName(e.target.value)}
+                  className="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                />
+              </div>
+
+              {integrationMeta?.credentialFields.map(field => (
+                <div key={field.key}>
+                  <label className="block text-xs font-medium text-gray-600 mb-1">{field.label}</label>
+                  <input
+                    type={field.type}
+                    value={editCreds[field.key] ?? ''}
+                    onChange={e => setEditCreds(prev => ({ ...prev, [field.key]: e.target.value }))}
+                    placeholder={field.type === 'password' ? 'Leave blank to keep existing' : (field.placeholder ?? '')}
+                    autoComplete={field.type === 'password' ? 'new-password' : 'off'}
+                    className="w-full border rounded px-3 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  {field.hint && <p className="text-xs text-gray-400 mt-0.5">{field.hint}</p>}
+                </div>
+              ))}
+
+              {editError && (
+                <div className="text-xs text-red-600 bg-red-50 rounded p-2">{editError}</div>
+              )}
+
+              <div className="flex gap-2">
+                <button
+                  onClick={handleEditSave}
+                  disabled={editSaving}
+                  className="px-4 py-1.5 text-sm bg-blue-600 text-white rounded hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {editSaving ? 'Saving…' : 'Save & Test'}
+                </button>
+                <button
+                  onClick={() => { setEditingConnection(null); setEditError(null); }}
+                  className="px-4 py-1.5 text-sm text-gray-600 border rounded hover:bg-gray-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            </>
+          )}
         </div>
       )}
 

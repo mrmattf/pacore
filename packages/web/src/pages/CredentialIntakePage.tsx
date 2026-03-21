@@ -52,6 +52,7 @@ export function CredentialIntakePage() {
   const [gorgiasDomain, setGorgiasDomain] = useState('');
   const [gorgiasEmail, setGorgiasEmail] = useState('');
   const [gorgiasApiKey, setGorgiasApiKey] = useState('');
+  const [gorgeasSupportEmail, setGorgiasSupportEmail] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [successData, setSuccessData] = useState<Record<string, { domain: string }> | null>(null);
@@ -174,6 +175,7 @@ export function CredentialIntakePage() {
             domain: gorgiasDomain.trim(),
             email: gorgiasEmail.trim(),
             apiKey: gorgiasApiKey.trim(),
+            supportEmail: gorgeasSupportEmail.trim(),
           },
           cfTurnstileToken,
         }),
@@ -365,6 +367,21 @@ export function CredentialIntakePage() {
                 className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-400"
                 required
               />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-1">
+                Support Email <span className="text-gray-400 font-normal">(optional)</span>
+              </label>
+              <input
+                type="email"
+                value={gorgeasSupportEmail}
+                onChange={(e) => setGorgiasSupportEmail(e.target.value)}
+                placeholder="support@yourstore.com"
+                className="w-full px-3 py-2 border border-gray-200 rounded-lg text-sm focus:outline-none focus:border-blue-400"
+              />
+              <p className="text-xs text-gray-400 mt-1">
+                The outbound email address of your Gorgias email integration. Leave blank to use your login email.
+              </p>
             </div>
 
             <Accordion title="Where do I find these? (step-by-step)">

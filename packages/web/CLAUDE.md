@@ -16,6 +16,17 @@ Vite + React 18 + TypeScript + TailwindCSS. Entry point: `src/main.tsx`.
 | `src/services/` | API client functions (one file per domain) |
 | `src/store/` | Global state (auth, etc.) |
 
+## UX Decision Records
+
+Design decisions for the platform UI live in [`docs/ux/`](docs/ux/README.md). Check these before implementing tier gates, skill creation surfaces, or any pattern that recurs across multiple pages.
+
+| UXR | Topic |
+|-----|-------|
+| [UXR-001](docs/ux/001-tier-gate-ux-patterns.md) | Plan badges, upgrade modals, gated catalog patterns |
+| [UXR-002](docs/ux/002-skill-creation-flows.md) | BYOM discovery block, Intent-to-Draft, connect-first banner |
+
+**Pre-loaded brand gap:** `tailwind.config.js` has no brand tokens — vanilla Tailwind only. Closing this (~30 min) is a prerequisite before shipping tier gate UX at brand quality. See UXR-001.
+
 ## Patterns
 
 - Use `apiFetch()` from `src/services/` for all API calls — it handles JWT expiry and refresh automatically

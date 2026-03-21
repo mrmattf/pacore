@@ -555,6 +555,85 @@ export function createSkillRoutes(
     }
   });
 
+  router.get('/v1/organizations/:orgId/connections/:id/fields', async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.id;
+      const { orgId, id } = req.params;
+      await orgManager.assertAdmin(orgId, userId);
+      const result = await db.query(
+        'SELECT integration_key FROM integration_connections WHERE id = $1 AND org_id = $2',
+        [id, orgId]
+      );
+      if (result.rows.length === 0) return res.status(404).json({ error: 'Connection not found' });
+      const integrationKey = result.rows[0].integration_key;
+      const creds = await credentialManager.getCredentials({ type: 'org', orgId }, id);
+      const fields = adapterRegistry?.getAdapter(integrationKey)?.credentialFields ?? [];
+      const nonSecretFields: Record<string, string> = {};
+      for (const field of fields) {
+        if (field.type !== 'password') {
+          nonSecretFields[field.key] = (creds as any)?.[field.key] ?? '';
+        }
+      }
+      res.json({ integrationKey, nonSecretFields });
+    } catch (error: any) {
+      res.status(500).json({ error: error.message });
+    }
+  });
+
+  router.patch('/v1/organizations/:orgId/connections/:id', async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const userId = req.user!.id;
+      const { orgId, id } = req.params;
+      await orgManager.assertAdmin(orgId, userId);
+      const { credentials, displayName } = req.body as {
+        credentials: Record<string, string>;
+        displayName?: string;
+      };
+      if (!credentials) return res.status(400).json({ error: 'credentials are required' });
+
+      const result = await db.query(
+        'SELECT integration_key FROM integration_connections WHERE id = $1 AND org_id = $2',
+        [id, orgId]
+      );
+      if (result.rows.length === 0) return res.status(404).json({ error: 'Connection not found' });
+      const integrationKey = result.rows[0].integration_key;
+
+      const existingCreds = (await credentialManager.getCredentials({ type: 'org', orgId }, id)) ?? {};
+      const fields = adapterRegistry?.getAdapter(integrationKey)?.credentialFields ?? [];
+
+      const mergedCreds: Record<string, unknown> = { ...existingCreds };
+      for (const field of fields) {
+        if (field.type === 'password') {
+          if (credentials[field.key] && credentials[field.key].trim() !== '') {
+            mergedCreds[field.key] = credentials[field.key].trim();
+          }
+          // else keep existing value
+        } else {
+          mergedCreds[field.key] = credentials[field.key] ?? '';
+        }
+      }
+
+      await testIntegrationCredentials(integrationKey, mergedCreds, adapterRegistry);
+      await credentialManager.storeCredentials({ type: 'org', orgId }, id, mergedCreds as any);
+
+      const updateParts = ['last_tested_at = NOW()', 'status = $3'];
+      const updateParams: unknown[] = [id, orgId, 'active'];
+      if (displayName) {
+        updateParts.push(`display_name = $${updateParams.length + 1}`);
+        updateParams.push(displayName);
+      }
+      await db.query(
+        `UPDATE integration_connections SET ${updateParts.join(', ')} WHERE id = $1 AND org_id = $2`,
+        updateParams
+      );
+
+      res.json({ success: true, lastTestedAt: new Date().toISOString() });
+    } catch (error: any) {
+      console.error('Update org connection error:', error);
+      res.status(400).json({ error: error.message });
+    }
+  });
+
   // ---- Skill Pause / Resume (org — admin only) ----
 
   router.put('/v1/organizations/:orgId/skills/:userSkillId/pause', async (req: AuthenticatedRequest, res: Response) => {

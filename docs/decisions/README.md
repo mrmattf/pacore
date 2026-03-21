@@ -33,6 +33,7 @@ An ADR documents a significant architectural decision made in the project, inclu
 | [021](021-fulfilio-erp-integration.md) | Fulfil.io as ERP Data Source — MCP Enrichment + Webhook Trigger Adapter | Proposed | 2026-03 |
 | [022](022-scheduled-delayed-execution.md) | Scheduled and Delayed Skill Execution — BullMQ Timer Queue | Proposed — deferred until customer selects Tier D skill | 2026-03 |
 | [023](023-agent-mcp-gateway-scaling.md) | Agent MCP Gateway — Scaling, Session Architecture, and Value-Add Positioning | Proposed | 2026-03-20 |
+| [024](024-platform-access-tiers-and-domain-agnostic-model.md) | Platform Access Tiers, Skill Creation Gates, and Domain-Agnostic Model | Proposed | 2026-03-20 |
 
 ## Template
 

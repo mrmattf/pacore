@@ -255,7 +255,8 @@ export function createOnboardingRoutes(db: Pool, credentialManager: CredentialMa
         subdomain: gorgias.domain,
         email: gorgias.email,
         apiKey: gorgias.apiKey,
-      });
+        supportEmail: gorgias.supportEmail ?? '',
+      } as any);
       storedConnectionIds.push(connectionId);
       received.gorgias = { domain: maskDomain(gorgias.domain) };
 

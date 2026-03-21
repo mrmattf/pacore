@@ -91,9 +91,15 @@ Tag variant normalization uses a two-tier dictionary:
 
 Core dictionary is authoritative; customer dict wins on conflict for that account only.
 
-### Vertical-Agnostic Tool Design
+**Important:** The normalization vocabulary is derived from the customer's connected adapters
+and actual data patterns — it is not declared by the operator as a "vertical." A customer with
+Shopify + Gorgias gets commerce vocabulary; a customer with QuickBooks + Zendesk gets financial
+vocabulary. The core dictionary examples are illustrative of current e-commerce deployments and
+will expand as new domain adapters are added. No `vertical` parameter is needed or used.
 
-All discovery tools must be designed for vertical-agnostic reuse. The Shopify/Gorgias implementation is first; the interface must generalize.
+### Domain-Agnostic Tool Design
+
+All discovery tools must be designed for domain-agnostic reuse. The Shopify/Gorgias implementation is first; the interface must generalize. The platform has no "vertical" concept — domain expansion is handled at the adapter and catalog layer only. See ADR-024 for the full domain-agnostic platform model.
 
 **Naming convention:** `{integration}__{action}` (double underscore separates integration from action).
 
@@ -318,4 +324,5 @@ Consistent with ADR-012 line 216 (platform intelligence anonymization requiremen
 - [ADR-013: GTM / SEAN Concierge Model](013-sean-concierge-gtm.md) — Assessment is the primary top-of-funnel motion
 - [ADR-015: Assessment-First Sales](015-assessment-first-sales.md) — business context for why Assessment produces a paid deliverable
 - [ADR-023: Agent MCP Gateway Scaling](023-agent-mcp-gateway-scaling.md) — infrastructure for agent-driven Assessment sessions; `pacore__get_integration_topology` billing and rate limiting
+- [ADR-024: Platform Access Tiers and Domain-Agnostic Model](024-platform-access-tiers-and-domain-agnostic-model.md) — MCP tool tier classification; normalization vocabulary derived from connected adapters
 - [Assessment Prompt Template](../assessment-prompt-template.md) — operator system prompt for Claude Desktop

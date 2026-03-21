@@ -9,6 +9,16 @@ Accepted — Updated March 2026
 
 Customer-facing skill creation is a **planned future capability**, not a current offering. It will be opened to customers when: (a) the tooling produces reliably good skill drafts without operator oversight, and (b) customer onboarding can guide people through what a good skill definition looks like without a concierge.
 
+**Self-serve skill creation tier gates (ADR-024):**
+When customer-facing skill creation ships, access is plan-gated:
+- **Starter:** Catalog template activation + configuration only. No custom skill authoring.
+- **Professional:** BYOM custom skill authoring via external AI client. Zero Clarissi LLM cost.
+- **Scale:** BYOM + platform-assisted Intent-to-Draft (Clarissi LLM, absorbed in plan margin).
+- Rollout: operator tooling first → Professional BYOM → Scale platform-assisted.
+
+**Adapter scaffolding (domain expansion, ADR-024):**
+The BYOM pattern extends to adapter creation: `pacore__scaffold_adapter(openapi_spec_url, domain_tag)` — an operator points an AI agent at an OpenAPI spec to generate a draft SlotAdapter, MCP tool definitions, and skill template stubs. This is the domain expansion path — new domains (financial, manufacturing, marketing) are added by operators via AI-scaffolded adapters, not by engineering sprints. Adapter scaffolding ships after skill creation tooling matures (Phase 3+).
+
 This updates the original framing below, which described BYOM as the "primary customer path." That direction is deferred, not abandoned — the underlying architecture is unchanged. What changes is who uses it: operators, not customers, at initial release.
 
 ## Context
@@ -626,6 +636,7 @@ Benchmark Dashboard:
 - [ADR-010: Durable Webhook Ingestion](010-durable-webhook-ingestion.md) - Execution reliability
 - [ADR-011: Skill Pricing Model](011-skill-pricing-model.md) - Per-operation pricing and BYOM billing
 - [ADR-012: Platform Intelligence Layer](012-platform-intelligence-layer.md) - Internal AI alongside BYOM; execution-informed recommendations and alerts
+- [ADR-024: Platform Access Tiers and Domain-Agnostic Model](024-platform-access-tiers-and-domain-agnostic-model.md) — Self-serve skill creation tier gates; `pacore__scaffold_adapter` adapter scaffolding tool
 - [ADR-008: Tool Chain Architecture](../../packages/shopify-backorder/docs/decisions/008-tool-chain-architecture.md) - Deterministic execution
 - [Shopify Backorder Solution](../../packages/shopify-backorder/CLAUDE.md) - Reference implementation
 
