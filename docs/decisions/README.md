@@ -28,7 +28,11 @@ An ADR documents a significant architectural decision made in the project, inclu
 | [016](016-three-tier-customer-journey.md) | Three-Tier Customer Journey — Self-Serve, Assessment, Concierge | Accepted | 2026-03 |
 | [017](017-operator-skill-discovery.md) | Operator Skill Discovery — Two-Pass Assessment, Gap Aggregation, Vertical-Agnostic Tool Design | Accepted | 2026-03 |
 | [018](018-operator-platform-identity-and-onboarding.md) | Operator Platform — Identity Model, Credential Intake, and Management Mode Lifecycle | Accepted | 2026-03 |
-| [019](019-gorgias-webhook-source.md) | Gorgias as WebhookSourceAdapter — Enabling Gorgias-Triggered Skills | Proposed | 2026-03 |
+| [019](019-gorgias-webhook-source.md) | Gorgias as WebhookSourceAdapter — Enabling Gorgias-Triggered Skills | Accepted — pending implementation | 2026-03 |
+| [020](020-test-webhook-detection.md) | Generic Test Webhook Detection via Adapter-Declared Header | Proposed — deferred pending ADR-010 | 2026-03 |
+| [021](021-fulfilio-erp-integration.md) | Fulfil.io as ERP Data Source — MCP Enrichment + Webhook Trigger Adapter | Proposed | 2026-03 |
+| [022](022-scheduled-delayed-execution.md) | Scheduled and Delayed Skill Execution — BullMQ Timer Queue | Proposed — deferred until customer selects Tier D skill | 2026-03 |
+| [023](023-agent-mcp-gateway-scaling.md) | Agent MCP Gateway — Scaling, Session Architecture, and Value-Add Positioning | Proposed | 2026-03-20 |
 
 ## Template
 

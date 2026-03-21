@@ -100,6 +100,9 @@ User Message → API Gateway → Orchestrator → LLM Provider → Response
 - [ ] Agent layer for Tier 2 skills (LLM-driven decision-making on top of tool chains)
 - [ ] Chat channel integrations (WhatsApp, Telegram, Slack)
 - [ ] Public signup for self-serve customer acquisition
+- [ ] Agent MCP gateway scaling: Redis-backed SSE sessions, per-customer rate limiting, per-tool-call agent billing (ADR-023)
+- [ ] Configuration Topology Discovery: `pacore__get_integration_topology`, adapter `configurationTools[]`, Assessment Pass 3 (ADR-017 Phase 2 Extension)
+- [ ] Platform Intelligence Role 5: agent session telemetry → skill gap detection (ADR-012)
 
 ## Key Files
 

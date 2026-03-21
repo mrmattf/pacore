@@ -123,6 +123,29 @@ After skills are active, the internal AI continuously analyzes execution data an
 
 These alerts require cross-account data and execution history — they are impossible for the BYOM path to generate.
 
+### Role 5: Agent Session Intelligence
+
+As Clarissi evolves from operator-only BYOM into an agent-facing MCP platform (see ADR-023), agent sessions become a new data source for the intelligence layer. When autonomous agents connect to Clarissi's MCP endpoint and issue tool calls, those sessions reveal what operators and customers are trying to understand — and what gaps exist in the current skill catalog to answer those questions.
+
+**Signal sources:**
+- Which data tools agents call most (e.g., `gorgias__list_recent_tickets` repeatedly)
+- Which topology paths show up as uncovered in `pacore__get_integration_topology` responses
+- Which agent sessions end without an activated skill (intent not fulfilled)
+- Configuration audit findings (Pass 3) that are consistently flagged across multiple customers
+
+**What Role 5 does with those signals:**
+
+| Signal | Response |
+|--------|----------|
+| Agent repeatedly queries backorder-related data but no backorder skill is active | "Agents exploring your account are finding backorder patterns — activate the Backorder Notification skill to automate this" |
+| `pacore__get_integration_topology` returns the same uncovered path for 5+ accounts | New skill candidate surfaced to operator dashboard (equivalent of a Phase 2 gap candidate, but derived from topology data not ticket data) |
+| Agent session calls `gorgias__list_automation_rules` and finds a rule doing what a Clarissi skill does | "A Gorgias automation rule duplicates Clarissi's High-Risk Order Response skill — you can simplify by removing it" |
+| Agent session ends with no skill activation after exploring multiple skill templates | "This agent was looking for automation in your account — here are the 3 closest matching skill templates" |
+
+**Why only Clarissi can do this:** BYOM sessions happen in external AI clients (Claude Desktop, Cursor). Those clients have no data pipeline back to the Clarissi intelligence layer. Role 5 requires that the agent sessions themselves flow through Clarissi's MCPGateway — the only path where session telemetry is capturable.
+
+**Implementation gate:** Role 5 requires ADR-023 Phase 3 (per-tool-call op billing with `agent_session` context tag) to be in place, so session tool call patterns are logged with enough structure to mine for signals. Data gate: 10+ agent sessions with 5+ tool calls each before pattern detection produces reliable signal.
+
 ### Architecture
 
 ```
@@ -242,6 +265,28 @@ For Concierge customers (see [ADR-013](013-sean-concierge-gtm.md)), the four int
 
 The underlying data pipeline and pattern detection are identical — the delivery channel differs. As Concierge customers eventually graduate to self-serve, they gain access to the product UI versions of these features without any data migration.
 
+### Why The Intelligence Layer Is Clarissi's Irreducible Moat
+
+As the MCP ecosystem matures and native MCP servers become available for every major SaaS platform, agents will face a routing choice: connect directly to individual systems, or connect through Clarissi. The Platform Intelligence Layer is the architectural answer to why Clarissi wins that choice — and it compounds over time.
+
+**What agents get through Clarissi that they cannot get anywhere else:**
+
+| Capability | Why Direct-to-System Can't Match |
+|---|---|
+| Validation corrections (Role 2) | Requires seeing thousands of valid SkillDefinitions across all customers — impossible from a single-tenant system |
+| Improvement alerts (Role 4) | Requires cross-account execution patterns — structurally impossible from per-customer API access |
+| Configuration topology (ADR-017 Pass 3) | Requires credentials to ALL connected systems simultaneously — no individual system's MCP server has cross-system view |
+| Agent session intelligence (Role 5) | Requires agent session telemetry to flow through Clarissi — BYOM sessions in Claude Desktop leave no signal |
+| Skill recommendations based on similar stacks | Requires anonymized cross-account activation data — no individual customer has this |
+
+**The flywheel, explicitly stated for the agent ecosystem:**
+
+Each agent that routes through Clarissi (for an Assessment, for a skill activation, for a topology query) adds a data point to the intelligence layer. The intelligence layer improves recommendations, corrections, and alerts for all subsequent agents. Better intelligence → more agents route through Clarissi → more data → better intelligence.
+
+An agent that connects directly to Shopify MCP gets static Shopify data. The same agent connecting through Clarissi gets Shopify data + Gorgias data + topology analysis + pattern-matched corrections from 50 other merchants with the same stack. The gap between these widens with every customer.
+
+This is the compounding moat. Commodity automation platforms (Zapier, n8n) cannot replicate it without the same concentrated execution data. Individual SaaS MCP servers cannot replicate it because they only see one system.
+
 ## Related
 
 - [ADR-005: Builder Agent](005-builder-agent.md) — BYOM as primary creation path; this ADR defines the complementary internal layer
@@ -249,4 +294,6 @@ The underlying data pipeline and pattern detection are identical — the deliver
 - [ADR-010: Durable Webhook Ingestion](010-durable-webhook-ingestion.md) — Execution data source for the intelligence layer
 - [ADR-011: Skill Pricing Model](011-skill-pricing-model.md) — Intelligence layer roles are included in platform margin, not separately billed
 - [ADR-013: SEAN Concierge GTM](013-sean-concierge-gtm.md) — Concierge delivery model where operator surfaces intelligence instead of product UI
+- [ADR-017: Operator Skill Discovery](017-operator-skill-discovery.md) — Configuration Topology (Pass 3) produces the cross-system data that feeds Roles 4 and 5
+- [ADR-023: Agent MCP Gateway Scaling](023-agent-mcp-gateway-scaling.md) — Infrastructure for agent-driven sessions; Role 5 session telemetry requires ADR-023 Phase 3
 - [specs/agent-codegen.md](specs/agent-codegen.md) — Declarative skill format the internal AI generates for Intent-to-Draft

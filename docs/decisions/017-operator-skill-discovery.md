@@ -142,11 +142,124 @@ Phase transitions are gated by data, not just engineering readiness:
 - Category normalization dictionary
 - `assessments` DB table — stores report JSON, gap candidates, status
 
+**Phase 2 Extension — Configuration Topology Discovery (see below)**
+
 **Phase 3 additions:**
 - `assessment_gap_candidates` table — anonymized cross-customer gap patterns
 - Recommendation engine SQL
 - Execution signal gap detection (requires ADR-014 P0 deflection counting)
 - Automated Assessment runner ("Run Assessment" button → draft PDF in 5–10 min)
+
+### Phase 2 Extension: Configuration Topology Discovery
+
+#### The Gap in Current Architecture
+
+The two-pass Assessment reads **data patterns** (ticket volume, order events) to identify automation *opportunities*. It does not read **system configuration** to identify automation *inefficiencies*. These are distinct and equally valuable.
+
+What an agent currently sees via `pacore__list_connections`:
+- "You have Shopify, Gorgias, and AfterShip connected"
+
+What an agent does NOT currently see:
+- How Shopify is configured internally (Flows, automation rules, metafield usage)
+- How Gorgias automation rules are set up (what fires automatically, what manual handlers exist)
+- How AfterShip notification rules are configured (what events send customer-facing messages)
+- Where these configurations overlap, conflict, or leave gaps
+
+This matters because **Clarissi is uniquely positioned to perform cross-system configuration analysis** — it holds credentials to all connected systems simultaneously. No individual system's MCP server can produce this view. A Shopify MCP can only see Shopify. A Gorgias MCP can only see Gorgias. Only Clarissi can answer:
+
+- "Your Shopify Flow + Gorgias automation + AfterShip are all sending notifications for the same order — customers receive 3 messages for one event."
+- "Your Shopify tags orders `out-of-stock`; your Gorgias automation fires on `backorder`. Same concept, fragmented tagging — manual reconciliation overhead."
+- "AfterShip fires `delivery_exception` events. No Gorgias automation and no Clarissi skill handles them. Failed deliveries get no response."
+- "You have a Gorgias view called 'VIP Complaints' but nothing in Shopify or any active skill defines what makes a customer VIP. The signal isn't flowing through."
+
+#### Third Assessment Pass: Configuration Audit (Pass 3)
+
+The Assessment architecture expands from two passes to three:
+
+**Pass 1 — Scripted (unchanged):** ticket data → automation gap report (four-section deliverable)
+
+**Pass 2 — Agentic exploration (unchanged):** data exploration → unexpected skill candidates
+
+**Pass 3 — Configuration Audit (new):** configuration topology → operational efficiency findings
+
+Pass 3 runs after Pass 2. The operator uses `pacore__get_integration_topology` (new tool, see below) plus per-adapter configuration tools to produce an **Operational Efficiency Report** — a separate section in the Assessment deliverable.
+
+**Pass 3 output structure:**
+
+| Finding Type | Description | Example |
+|---|---|---|
+| **Redundancy** | Multiple systems sending notifications for the same event | Shopify Flow + Gorgias automation both message the customer on order creation |
+| **Fragmentation** | Same concept using different labels/tags across systems | `out-of-stock` (Shopify) vs. `backorder` (Gorgias) for the same workflow |
+| **Coverage gap** | Events firing in connected systems with no automation handling (neither Clarissi skill nor native) | AfterShip delivery exceptions with no handler |
+| **Efficiency opportunity** | Where a Clarissi skill could replace a manual Gorgias rule (more observable, cross-system, auditable) | Gorgias automation manually doing what `high-risk-order-response` skill does deterministically |
+
+#### New Tool Category: Configuration Discovery Tools
+
+Each adapter adds a `configurationTools[]` array alongside `agentTools[]`. These tools read system configuration, not data:
+
+| Tool | What It Returns |
+|------|----------------|
+| `shopify__list_flows` | Active Shopify Flow automations with trigger conditions and action types |
+| `gorgias__list_automation_rules` | Gorgias automation rules: conditions, actions, enabled status |
+| `aftership__list_notification_settings` | AfterShip notification rules per tracking event type |
+| `zendesk__list_triggers` | Zendesk trigger rules and conditions |
+
+These are read-only API calls using the same credentials the adapters already hold. They are exposed via MCPGateway alongside the existing `agentTools[]`.
+
+**Naming and interface:** Same double-underscore namespacing as data tools. Consistent with the vertical-agnostic design principle — the abstract pattern is `{integration}__list_automations()` regardless of what the underlying system calls its automation rules.
+
+**Implementation note:** Configuration tools follow the same `agentTools[]` registration pattern in each adapter — add to the array, MCPGateway surfaces them automatically. No gateway changes required (consistent with the pattern noted in the Operator Skill Discovery initiative: adding tools to an adapter only requires updating the adapter file).
+
+#### New Platform Meta-Tool: `pacore__get_integration_topology`
+
+A Clarissi-level tool (added to MCPGateway's `buildPacoreTools()`) that computes the connected graph from active skill configurations and connection metadata:
+
+```json
+{
+  "connectedSystems": ["shopify", "gorgias", "aftership"],
+  "activeSkills": [
+    {
+      "skillType": "backorder-notification",
+      "sourceSystem": "shopify",
+      "destinationSystem": "gorgias",
+      "triggerEvent": "orders/updated",
+      "actionType": "create_ticket"
+    }
+  ],
+  "coveredEventPaths": [
+    "shopify:orders/updated → gorgias:create_ticket"
+  ],
+  "uncoveredEventPaths": [
+    "shopify:orders/cancelled → (no Clarissi skill)",
+    "aftership:delivery_exception → (no Clarissi skill)",
+    "shopify:orders/fulfilled → (no Clarissi skill)"
+  ]
+}
+```
+
+The `uncoveredEventPaths` list is derived from: all webhook topics that could be registered for connected adapters (from `WebhookSourceAdapter.webhookTopics`) minus the event paths already covered by active user skills. This is purely a database query — no LLM required.
+
+**Why only Clarissi can produce this:** The topology requires knowing (a) which systems are connected, (b) what events those systems can emit, and (c) which events have active handling. Only Clarissi holds all three simultaneously. Going directly to Shopify MCP gives (b) for Shopify only. Going directly to Gorgias MCP gives (b) for Gorgias only. Neither knows what the other's events look like or whether any automation covers them.
+
+#### Data Gate
+
+Configuration topology tools (Pass 3) are available in Phase 2 once at least **5 connected customer accounts** exist. Below this threshold:
+- The tools themselves work (they read individual customer configs)
+- Cross-customer pattern analysis (e.g., "other merchants with Shopify + Gorgias commonly have redundant order notifications") is deferred to Phase 3 (15+ customers required, consistent with anonymization requirements above)
+
+#### Assessment Deliverable Update
+
+With Pass 3, the Automation Readiness Report gains a fifth section:
+
+| Section | Content | Pass |
+|---|---|---|
+| 1. Ticket Category Analysis | Volume, coverage, automation readiness per category | Pass 1 |
+| 2. Activation Gaps | Which existing skill templates can be activated today | Pass 1 |
+| 3. Skill Candidates | New skill ideas from agentic exploration | Pass 2 |
+| 4. Priority Recommendations | Ranked P1/P2/P3 actions | Pass 1 + 2 |
+| **5. Operational Efficiency Findings** | Redundancy, fragmentation, coverage gaps, replacement opportunities | **Pass 3** |
+
+Section 5 is often the highest-value finding in the deliverable: it addresses existing problems in the customer's automation stack, not just future opportunities. This changes the Assessment from "what should you add" to "here's what you have, here's what's inefficient, and here's what to add" — a more complete and more defensible deliverable.
 
 ### Continuous Discovery for Active Concierge Customers (Phase 3)
 
@@ -190,10 +303,19 @@ Consistent with ADR-012 line 216 (platform intelligence anonymization requiremen
 | Build Assessment UI first | Claude Desktop + MCP is sufficient for Phase 1–2; Assessment UI is Phase 5+ overhead |
 | Per-vertical discovery architecture | The architecture layer is universal; only adapters and dictionaries differ (see plan vertical scaling analysis) |
 
+**Rejected alternatives for Configuration Topology:**
+
+| Alternative | Why rejected |
+|---|---|
+| Read configuration via raw API calls in agent (no dedicated tools) | Inconsistent UX; agents must discover API structure themselves; no caching |
+| Cross-system correlation only at Phase 3 (data gate) | Configuration tools work per-account immediately; only cross-customer patterns need the data gate |
+| Separate `configurationTools[]` array on adapters | Accepted — `agentTools[]` is for data tools; `configurationTools[]` makes the distinction clear and allows MCPGateway to control surfacing separately |
+
 ## Related
 
 - [ADR-005: Builder Agent](005-builder-agent.md) — operator-only skill creation tooling; skill draft generation routes through Builder Agent after gap candidate is identified
-- [ADR-012: Platform Intelligence Layer](012-platform-intelligence-layer.md) — Intent-to-Draft (Role 3) receives gap candidates from Assessment agentic pass
+- [ADR-012: Platform Intelligence Layer](012-platform-intelligence-layer.md) — Intent-to-Draft (Role 3) receives gap candidates from Assessment agentic pass; Role 5 (Agent Session Intelligence) feeds on topology tool usage patterns
 - [ADR-013: GTM / SEAN Concierge Model](013-sean-concierge-gtm.md) — Assessment is the primary top-of-funnel motion
 - [ADR-015: Assessment-First Sales](015-assessment-first-sales.md) — business context for why Assessment produces a paid deliverable
+- [ADR-023: Agent MCP Gateway Scaling](023-agent-mcp-gateway-scaling.md) — infrastructure for agent-driven Assessment sessions; `pacore__get_integration_topology` billing and rate limiting
 - [Assessment Prompt Template](../assessment-prompt-template.md) — operator system prompt for Claude Desktop
