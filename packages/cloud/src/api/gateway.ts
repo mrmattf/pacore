@@ -6,7 +6,7 @@ import { WebSocketServer, WebSocket } from 'ws';
 import jwt from 'jsonwebtoken';
 import { Pool } from 'pg';
 import { Orchestrator } from '../orchestration';
-import { createHash, createHmac, timingSafeEqual } from 'crypto';
+import { createHash } from 'crypto';
 import { createAuthRoutes } from './auth-routes';
 import { createOAuthRoutes } from './oauth-routes';
 import { createMcpCredentialRoutes } from './mcp-credential-routes';
@@ -19,6 +19,7 @@ import { createWorkflowRoutes } from './workflow-routes';
 import { createOrgRoutes } from './org-routes';
 import { createSkillRoutes } from './skill-routes';
 import { buildShopifyAuthUrl, exchangeCodeForToken, storeShopifyConnection, verifyShopifyCallbackHmac, registerAppUninstalledWebhook } from '../integrations/shopify/shopify-oauth';
+import { createShopifyLifecycleRoutes } from './shopify-lifecycle-routes';
 import { MCPRegistry, CredentialManager, CredentialScope } from '../mcp';
 import { WorkflowManager, WorkflowExecutor, WorkflowBuilder } from '../workflow';
 import { OrgManager } from '../organizations/org-manager';
@@ -263,71 +264,16 @@ export class APIGateway {
 
     // -------------------------------------------------------------------------
     // Shopify lifecycle webhooks — public, HMAC-verified, raw body
+    // Handlers live in shopify-lifecycle-routes.ts; mounted here so the raw-body
+    // middleware registered above (/v1/webhooks/shopify) applies automatically.
     // -------------------------------------------------------------------------
-
-    // POST /v1/webhooks/shopify/app-uninstalled
-    // Shopify calls this when a merchant removes the app.
-    // Marks the integration_connections row inactive and deletes the access token.
-    // Shopify Partner Agreement requires credential cleanup within 48h of uninstall.
-    this.app.post('/v1/webhooks/shopify/app-uninstalled', async (req: Request, res: Response) => {
-      try {
-        const shopDomain = req.headers['x-shopify-shop-domain'] as string | undefined;
-        const rawBody = req.body as Buffer;
-        if (!shopDomain) return res.status(400).send('Missing X-Shopify-Shop-Domain header');
-
-        // Fetch all active connections for this shop domain in one query
-        const connRows = await this.config.db.query<{ id: string; org_id: string }>(
-          `SELECT id, org_id FROM integration_connections
-           WHERE integration_key = 'shopify' AND display_name = $1 AND status = 'active'`,
-          [`${shopDomain} (Shopify)`]
-        );
-
-        // Resolve HMAC secret: per-connection custom app secret → platform env var
-        let hmacSecret = process.env.SHOPIFY_APP_CLIENT_SECRET ?? '';
-        if (connRows.rows.length > 0) {
-          const { id, org_id } = connRows.rows[0];
-          const creds = await this.config.credentialManager.getCredentials(
-            { type: 'org', orgId: org_id }, id
-          ) as Record<string, unknown> | null;
-          if (creds?.clientSecret) hmacSecret = creds.clientSecret as string;
-        }
-
-        // Verify HMAC before taking any action
-        // X-Shopify-Hmac-Sha256 = base64(HMAC-SHA256(rawBody, secret))
-        const shopifyHmac = req.headers['x-shopify-hmac-sha256'] as string | undefined;
-        if (!shopifyHmac) return res.status(401).send('Missing HMAC header');
-        const expected = createHmac('sha256', hmacSecret).update(rawBody).digest('base64');
-        try {
-          if (!timingSafeEqual(Buffer.from(expected), Buffer.from(shopifyHmac))) {
-            console.warn('[shopify-uninstall] HMAC verification failed', { shopDomain });
-            return res.status(401).send('HMAC verification failed');
-          }
-        } catch {
-          return res.status(401).send('HMAC verification failed');
-        }
-
-        // Delete credentials — token is revoked immediately on uninstall
-        for (const row of connRows.rows) {
-          await this.config.credentialManager.deleteCredentials(
-            { type: 'org', orgId: row.org_id }, row.id
-          );
-        }
-
-        // Mark connection inactive; keep row so UI can prompt reconnect
-        const updateResult = await this.config.db.query(
-          `UPDATE integration_connections
-           SET status = 'inactive', uninstalled_at = NOW()
-           WHERE integration_key = 'shopify' AND display_name = $1 AND status = 'active'`,
-          [`${shopDomain} (Shopify)`]
-        );
-        console.log('[shopify-uninstall] marked inactive + deleted credentials', { shopDomain, rowsUpdated: updateResult.rowCount });
-
-        res.status(200).send('OK');
-      } catch (error: any) {
-        console.error('[shopify-uninstall] error', { error: error.message });
-        res.status(500).send('Internal error');
-      }
-    });
+    this.app.use(
+      '/v1/webhooks/shopify',
+      createShopifyLifecycleRoutes({
+        db: this.config.db,
+        credentialManager: this.config.credentialManager,
+      }),
+    );
 
     // -------------------------------------------------------------------------
     // Complete endpoint with SSE streaming support
@@ -513,7 +459,13 @@ export class APIGateway {
     this.app.get('/v1/integrations/shopify/callback', async (req: Request, res: Response) => {
       const frontendUrl = process.env.FRONTEND_URL?.replace(/\/$/, '') ?? '';
       try {
-        const { code, shop: callbackShop, state, error: shopifyError, error_description } = req.query as Record<string, string>;
+        // Normalize: only keep scalar string values. Express parses repeated params as arrays;
+        // passing arrays to verifyShopifyCallbackHmac would produce a non-matching message string.
+        const queryStrings: Record<string, string> = {};
+        for (const [k, v] of Object.entries(req.query)) {
+          if (typeof v === 'string') queryStrings[k] = v;
+        }
+        const { code, shop: callbackShop, state, error: shopifyError, error_description } = queryStrings;
 
         // Shopify may send error params if the merchant denies the app or something goes wrong
         if (shopifyError) {
@@ -554,9 +506,14 @@ export class APIGateway {
         }
 
         // Verify Shopify's HMAC signature on the callback query params.
-        // Resolves: per-connection custom app secret → platform env var.
-        const resolvedClientSecret = payload.shopifyClientSecret ?? process.env.SHOPIFY_APP_CLIENT_SECRET ?? '';
-        if (!verifyShopifyCallbackHmac(req.query as Record<string, string>, resolvedClientSecret)) {
+        // Resolves: custom app secret from state JWT → platform env var.
+        // Hard-fail if neither is available — never accept an HMAC computed with an empty key.
+        const resolvedClientSecret = payload.shopifyClientSecret ?? process.env.SHOPIFY_APP_CLIENT_SECRET;
+        if (!resolvedClientSecret) {
+          console.warn('[shopify-oauth] callback: no client secret available for HMAC verification', { shop: callbackShop, orgId: payload.orgId });
+          return res.status(400).send('Shopify app not configured — missing client secret');
+        }
+        if (!verifyShopifyCallbackHmac(queryStrings, resolvedClientSecret)) {
           console.warn('[shopify-oauth] callback: Shopify HMAC verification failed', { shop: callbackShop, orgId: payload.orgId });
           return res.status(400).send('Invalid Shopify HMAC — authorization request may have been tampered with');
         }

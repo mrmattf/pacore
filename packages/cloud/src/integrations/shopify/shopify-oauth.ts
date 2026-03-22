@@ -100,16 +100,18 @@ export async function storeShopifyConnection(
     connectionId = existing.rows[0].id;
     console.log('[shopify-oauth] storeShopifyConnection: reconnecting existing connection', { shop, orgId, connectionId });
     await db.query(
-      `UPDATE integration_connections SET status = 'active', last_tested_at = NOW() WHERE id = $1`,
-      [connectionId]
+      `UPDATE integration_connections
+       SET status = 'active', last_tested_at = NOW(), shopify_client_id = $2
+       WHERE id = $1`,
+      [connectionId, clientId ?? null]
     );
   } else {
     connectionId = randomUUID();
     console.log('[shopify-oauth] storeShopifyConnection: creating new connection', { shop, orgId, connectionId });
     await db.query(
-      `INSERT INTO integration_connections (id, org_id, integration_key, display_name, status, last_tested_at)
-       VALUES ($1, $2, 'shopify', $3, 'active', NOW())`,
-      [connectionId, orgId, `${shop} (Shopify)`]
+      `INSERT INTO integration_connections (id, org_id, integration_key, display_name, status, last_tested_at, shopify_client_id)
+       VALUES ($1, $2, 'shopify', $3, 'active', NOW(), $4)`,
+      [connectionId, orgId, `${shop} (Shopify)`, clientId ?? null]
     );
   }
 
