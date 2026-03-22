@@ -106,8 +106,13 @@ export interface WebhookSourceAdapter {
    * Each provider resolves this however is appropriate — app-level env var,
    * per-connection secret, etc. Gateway calls this method; it never hard-codes
    * provider-specific env var names.
+   *
+   * @param creds Optional per-connection credentials. Adapters may use these
+   *   to return a connection-specific secret (e.g. custom app client secret)
+   *   instead of a platform-level env var. Callers should always pass creds
+   *   when available so adapters can apply per-connection resolution.
    */
-  getWebhookHmacSecret(): string;
+  getWebhookHmacSecret(creds?: Record<string, unknown>): string;
 }
 
 /** Type guard — returns true if the adapter also implements WebhookSourceAdapter. */

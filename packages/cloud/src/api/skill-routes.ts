@@ -100,15 +100,10 @@ async function autoRegisterWebhook(
       await skillRegistry.setTriggerExternalWebhookId(trigger.id, externalWebhookId);
 
       let hmacSecret: string | undefined;
-      const perConnectionSecret = (creds as Record<string, unknown>).clientSecret as string | undefined;
-      if (perConnectionSecret) {
-        hmacSecret = perConnectionSecret;
-      } else {
-        try {
-          hmacSecret = adapter.getWebhookHmacSecret();
-        } catch {
-          // Secret not available — skip HMAC configuration
-        }
+      try {
+        hmacSecret = adapter.getWebhookHmacSecret(creds as Record<string, unknown>);
+      } catch {
+        // Secret not available — skip HMAC configuration
       }
       if (hmacSecret) {
         const verification: WebhookVerification = {

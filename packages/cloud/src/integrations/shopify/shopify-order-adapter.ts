@@ -160,7 +160,8 @@ export class ShopifyOrderAdapter implements EcommerceOrderAdapter, SlotAdapter, 
     await client.deleteWebhook(externalWebhookId);
   }
 
-  getWebhookHmacSecret(): string {
+  getWebhookHmacSecret(creds?: Record<string, unknown>): string {
+    if (creds?.clientSecret) return creds.clientSecret as string;
     const secret = process.env.SHOPIFY_APP_CLIENT_SECRET;
     if (!secret) throw new Error('SHOPIFY_APP_CLIENT_SECRET env var is not set');
     return secret;

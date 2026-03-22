@@ -1,6 +1,7 @@
-import { randomUUID } from 'crypto';
+import { randomUUID, createHmac, timingSafeEqual } from 'crypto';
 import { Pool } from 'pg';
 import { CredentialManager } from '../../mcp/credential-manager';
+import { ShopifyApiClient } from './shopify-api-client';
 
 const SHOPIFY_SCOPES = 'read_orders,read_all_orders,read_inventory,read_products,read_customers';
 
@@ -120,6 +121,42 @@ export async function storeShopifyConnection(
   console.log('[shopify-oauth] storeShopifyConnection: credentials stored', { shop, orgId, connectionId, hasCustomCreds: !!clientId });
 
   return connectionId;
+}
+
+/**
+ * Verifies the HMAC signature Shopify appends to the OAuth callback query string.
+ * Algorithm: sort all params except `hmac`, join as key=value&..., HMAC-SHA256 with the app's client secret.
+ * Returns true if valid.
+ */
+export function verifyShopifyCallbackHmac(
+  query: Record<string, string>,
+  clientSecret: string
+): boolean {
+  const { hmac, ...rest } = query;
+  if (!hmac) return false;
+  const message = Object.keys(rest).sort().map(k => `${k}=${rest[k]}`).join('&');
+  const digest = createHmac('sha256', clientSecret).update(message).digest('hex');
+  try {
+    return timingSafeEqual(Buffer.from(digest), Buffer.from(hmac));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Registers the `app/uninstalled` system webhook for a shop immediately after OAuth.
+ * This is a lifecycle webhook (not a skill webhook) — registered once per shop,
+ * no corresponding skill_trigger row.
+ */
+export async function registerAppUninstalledWebhook(
+  shop: string,
+  accessToken: string,
+  webhookUrl: string
+): Promise<void> {
+  // ShopifyApiClient.registerWebhook() handles duplicate cleanup automatically
+  // (deleteWebhooksForTopicAndHost) before registering the new subscription.
+  const client = new ShopifyApiClient(shop, accessToken);
+  await client.registerWebhook('app/uninstalled', webhookUrl);
 }
 
 function getRedirectUri(): string {
